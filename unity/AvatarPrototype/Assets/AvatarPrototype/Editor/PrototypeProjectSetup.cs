@@ -122,6 +122,34 @@ namespace PersonalAssistant.Avatar.Editor
             Debug.Log("PROTOTYPE_VALIDATION_PASSED: scene, URP, camera, runtime components, and JSON command contract are valid.");
         }
 
+        public static void CapturePrototypeFrame()
+        {
+            EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            ProceduralAvatarController avatar = Object.FindFirstObjectByType<ProceduralAvatarController>();
+            Camera camera = Camera.main;
+            if (avatar == null || camera == null) throw new BuildFailedException("Prototype scene is incomplete.");
+
+            avatar.BuildForPreview();
+            const int width = 1080;
+            const int height = 1920;
+            RenderTexture renderTexture = new(width, height, 24, RenderTextureFormat.ARGB32);
+            Texture2D frame = new(width, height, TextureFormat.RGB24, false);
+            RenderTexture previous = RenderTexture.active;
+            camera.targetTexture = renderTexture;
+            camera.Render();
+            RenderTexture.active = renderTexture;
+            frame.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+            frame.Apply();
+
+            string outputPath = Path.GetFullPath(Path.Combine(Application.dataPath, "../../../design/prototype-frame-v1.png"));
+            File.WriteAllBytes(outputPath, frame.EncodeToPNG());
+            camera.targetTexture = null;
+            RenderTexture.active = previous;
+            Object.DestroyImmediate(frame);
+            Object.DestroyImmediate(renderTexture);
+            Debug.Log($"PROTOTYPE_FRAME_CAPTURED: {outputPath}");
+        }
+
         private static void ConfigureRenderPipeline()
         {
             Directory.CreateDirectory(SettingsFolder);

@@ -43,6 +43,7 @@ namespace PersonalAssistant.Avatar
         private float nextBlinkAt;
         private float stateChangedAt;
         private float speechStartedAt;
+        private Color statusColor = new(0.20f, 0.80f, 0.75f);
         private Vector2 gaze;
         private Vector2 gazeTarget;
         private float nextGazeAt;
@@ -63,15 +64,27 @@ namespace PersonalAssistant.Avatar
 
         private void Awake()
         {
+            EnsureBuilt();
+            nextBlinkAt = Time.time + 1.4f;
+            nextGazeAt = Time.time + 0.8f;
+            ApplyCommand(AvatarMode.Idle, AvatarEmotion.Warm, 0.45f);
+        }
+
+        public void BuildForPreview()
+        {
+            EnsureBuilt();
+            ApplyCommand(AvatarMode.Idle, AvatarEmotion.Warm, 0.45f);
+        }
+
+        private void EnsureBuilt()
+        {
+            if (avatarRoot != null) return;
             BuildAvatar();
             bodyBasePosition = body.localPosition;
             headBasePosition = head.localPosition;
             headBaseRotation = head.localRotation;
             leftArmBaseRotation = leftArm.localRotation;
             rightArmBaseRotation = rightArm.localRotation;
-            nextBlinkAt = Time.time + 1.4f;
-            nextGazeAt = Time.time + 0.8f;
-            ApplyCommand(AvatarMode.Idle, AvatarEmotion.Warm, 0.45f);
         }
 
         private void Update()
@@ -262,8 +275,8 @@ namespace PersonalAssistant.Avatar
             }
 
             gaze = Vector2.Lerp(gaze, gazeTarget, Time.deltaTime * 5f);
-            leftPupil.localPosition = new Vector3(gaze.x, gaze.y, -0.195f);
-            rightPupil.localPosition = new Vector3(gaze.x, gaze.y, -0.195f);
+            leftPupil.localPosition = new Vector3(gaze.x, gaze.y, -0.53f);
+            rightPupil.localPosition = new Vector3(gaze.x, gaze.y, -0.53f);
         }
 
         private void UpdateStatusOrb(float t)
@@ -278,8 +291,13 @@ namespace PersonalAssistant.Avatar
                 _ => new Color(0.22f, 0.65f, 0.72f)
             };
 
-            Material material = statusOrb.GetComponent<Renderer>().material;
-            material.color = Color.Lerp(material.color, target, Time.deltaTime * 6f);
+            statusColor = Color.Lerp(statusColor, target, Time.deltaTime * 6f);
+            Renderer renderer = statusOrb.GetComponent<Renderer>();
+            MaterialPropertyBlock block = new();
+            renderer.GetPropertyBlock(block);
+            block.SetColor("_BaseColor", statusColor);
+            block.SetColor("_Color", statusColor);
+            renderer.SetPropertyBlock(block);
             float pulse = 1f + Mathf.Sin(t * (Mode == AvatarMode.Thinking ? 4.5f : 2.2f)) * 0.08f;
             statusOrb.localScale = Vector3.one * 0.11f * pulse;
         }
@@ -321,10 +339,10 @@ namespace PersonalAssistant.Avatar
 
             leftEye = Create(PrimitiveType.Sphere, "LeftEye", head, new Vector3(-0.31f, 0.13f, -0.51f), new Vector3(0.41f, 0.50f, 0.20f), "white");
             rightEye = Create(PrimitiveType.Sphere, "RightEye", head, new Vector3(0.31f, 0.13f, -0.51f), new Vector3(0.41f, 0.50f, 0.20f), "white");
-            leftPupil = Create(PrimitiveType.Sphere, "LeftPupil", leftEye, new Vector3(0f, 0f, -0.195f), new Vector3(0.45f, 0.43f, 0.22f), "brown");
-            rightPupil = Create(PrimitiveType.Sphere, "RightPupil", rightEye, new Vector3(0f, 0f, -0.195f), new Vector3(0.45f, 0.43f, 0.22f), "brown");
-            Create(PrimitiveType.Sphere, "LeftEyeGlint", leftPupil, new Vector3(-0.12f, 0.15f, -0.22f), new Vector3(0.24f, 0.24f, 0.22f), "white");
-            Create(PrimitiveType.Sphere, "RightEyeGlint", rightPupil, new Vector3(-0.12f, 0.15f, -0.22f), new Vector3(0.24f, 0.24f, 0.22f), "white");
+            leftPupil = Create(PrimitiveType.Sphere, "LeftPupil", leftEye, new Vector3(0f, 0f, -0.53f), new Vector3(0.45f, 0.43f, 0.22f), "brown");
+            rightPupil = Create(PrimitiveType.Sphere, "RightPupil", rightEye, new Vector3(0f, 0f, -0.53f), new Vector3(0.45f, 0.43f, 0.22f), "brown");
+            Create(PrimitiveType.Sphere, "LeftEyeGlint", leftPupil, new Vector3(-0.12f, 0.15f, -0.55f), new Vector3(0.24f, 0.24f, 0.22f), "white");
+            Create(PrimitiveType.Sphere, "RightEyeGlint", rightPupil, new Vector3(-0.12f, 0.15f, -0.55f), new Vector3(0.24f, 0.24f, 0.22f), "white");
             leftLid = Create(PrimitiveType.Sphere, "LeftLid", head, new Vector3(-0.31f, 0.18f, -0.61f), new Vector3(0.42f, 0.025f, 0.20f), "skin");
             rightLid = Create(PrimitiveType.Sphere, "RightLid", head, new Vector3(0.31f, 0.18f, -0.61f), new Vector3(0.42f, 0.025f, 0.20f), "skin");
             leftBrow = Create(PrimitiveType.Cube, "LeftBrow", head, new Vector3(-0.31f, 0.40f, -0.60f), new Vector3(0.39f, 0.075f, 0.07f), "hair");
@@ -359,8 +377,19 @@ namespace PersonalAssistant.Avatar
             item.transform.localPosition = position;
             item.transform.localScale = scale;
             Collider collider = item.GetComponent<Collider>();
-            if (collider != null) Destroy(collider);
-            item.GetComponent<Renderer>().sharedMaterial = GetMaterial(materialKey);
+            if (collider != null)
+            {
+                if (Application.isPlaying) Destroy(collider);
+                else DestroyImmediate(collider);
+            }
+            Renderer renderer = item.GetComponent<Renderer>();
+            Material material = GetMaterial(materialKey);
+            renderer.sharedMaterial = material;
+            Color color = material.HasProperty("_BaseColor") ? material.GetColor("_BaseColor") : material.color;
+            MaterialPropertyBlock block = new();
+            block.SetColor("_BaseColor", color);
+            block.SetColor("_Color", color);
+            renderer.SetPropertyBlock(block);
             return item.transform;
         }
 
@@ -369,7 +398,7 @@ namespace PersonalAssistant.Avatar
             if (materials.TryGetValue(key, out Material existing)) return existing;
             Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
             Material material = new(shader) { name = $"Runtime_{key}" };
-            material.color = key switch
+            Color color = key switch
             {
                 "skin" => new Color(1.00f, 0.64f, 0.43f),
                 "skinRose" => new Color(1.00f, 0.50f, 0.38f),
@@ -383,6 +412,8 @@ namespace PersonalAssistant.Avatar
                 "shadow" => new Color(0.08f, 0.12f, 0.14f),
                 _ => new Color(0.20f, 0.80f, 0.75f)
             };
+            material.color = color;
+            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
             material.SetFloat("_Smoothness", key is "hair" or "brown" ? 0.62f : 0.28f);
             materials[key] = material;
             return material;
