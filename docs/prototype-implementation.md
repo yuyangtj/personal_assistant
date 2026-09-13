@@ -1,0 +1,66 @@
+# Unity Prototype Implementation
+
+## Baseline
+
+- Unity Editor: `6000.3.24f1`
+- Render pipeline: Universal Render Pipeline `17.3.0`
+- Android ABI: ARM64
+- Scripting backend: IL2CPP
+- Minimum Android API: 26
+- Requested frame rate: 60 FPS
+- Application ID: `com.personalassistant.avatar.prototype`
+
+## Implemented visual behavior
+
+The current scene uses generated Unity primitives as a temporary art stand-in.
+It exercises the interface the final rig must support:
+
+- Modes: idle, listening, thinking, speaking, success, and error.
+- Emotions: neutral, warm, curious, excited, and concerned.
+- Procedural breathing, blinking, gaze saccades, head movement, and gestures.
+- Smooth state transitions without resetting the whole avatar.
+- A deterministic 4.12-second viseme timeline while speaking.
+- A touch-friendly mode selector, captions, and automatic demo loop.
+- A colored state indicator for quick mode recognition.
+
+The generated geometry is not evidence that the final character-art quality gate
+has passed. The approved rigged character remains the required replacement.
+
+## Native command boundary
+
+The future Kotlin host sends one high-level JSON command to Unity:
+
+```text
+UnitySendMessage(
+    "AvatarRuntime",
+    "ApplyCommandJson",
+    "{\"mode\":\"Speaking\",\"emotion\":\"Warm\",\"intensity\":0.8}"
+)
+```
+
+Unity owns all animation curves, gaze, blink timing, gesture choice, and viseme
+application. Native Android never manipulates bones or facial controls directly.
+
+## Verification
+
+The editor validation checks the build scene, main camera, URP asset, runtime
+components, and JSON command parsing. Run it with:
+
+```shell
+/Applications/Unity/Hub/Editor/6000.3.24f1/Unity.app/Contents/MacOS/Unity \
+  -batchmode -nographics -quit \
+  -projectPath /Users/yangyu/personal_assistant/android-assistant/unity/AvatarPrototype \
+  -executeMethod PersonalAssistant.Avatar.Editor.PrototypeProjectSetup.ValidatePrototype
+```
+
+The Android development APK is generated at:
+
+```text
+unity/AvatarPrototype/Builds/Android/avatar-prototype.apk
+```
+
+Install it on a connected ARM64 Android phone with:
+
+```shell
+adb install -r unity/AvatarPrototype/Builds/Android/avatar-prototype.apk
+```
