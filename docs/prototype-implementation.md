@@ -19,7 +19,9 @@ It exercises the interface the final rig must support:
 - Emotions: neutral, warm, curious, excited, and concerned.
 - Procedural breathing, blinking, gaze saccades, head movement, and gestures.
 - Smooth state transitions without resetting the whole avatar.
-- A deterministic 4.12-second viseme timeline while speaking.
+- Android on-device English TTS with range-anchored viseme animation when the
+  Speaking control is selected; the deterministic timeline remains available
+  for the automatic visual demo.
 - A touch-friendly mode selector, captions, and automatic demo loop.
 - A colored state indicator for quick mode recognition.
 
@@ -80,10 +82,23 @@ UnitySendMessage(
 Unity owns all animation curves, gaze, blink timing, gesture choice, and viseme
 application. Native Android never manipulates bones or facial controls directly.
 
+## English TTS lip sync
+
+The manual Speaking control now calls `SpeakEnglish` with a real line of text.
+The runtime builds a lightweight English viseme plan, asks Android's on-device
+`TextToSpeech` service to speak it, and uses `onStart`, `onRangeStart`, and
+`onDone` callbacks to keep the mouth timeline aligned with the audible phrase.
+The Android query declaration is isolated in a small `.androidlib` so Unity can
+continue generating the main GameActivity manifest.
+
+See `docs/english-lip-sync.md` for the data flow, accuracy boundary, and the
+upgrade path to exact phoneme timestamps.
+
 ## Verification
 
 The editor validation checks the build scene, main camera, URP asset, runtime
-components, and JSON command parsing. Run it with:
+components, JSON command parsing, and representative English viseme output. Run
+it with:
 
 ```shell
 /Applications/Unity/Hub/Editor/6000.3.24f1/Unity.app/Contents/MacOS/Unity \
@@ -116,6 +131,10 @@ Validated on a Google Pixel 10 Pro XL running Android 17 (API 37):
 - SurfaceFlinger reported a `16,666,666 ns` refresh/presentation interval,
   corresponding to the requested 60 Hz cadence.
 - The final focused log contained no Unity or Android runtime errors.
+- Android TTS completed three device utterances; each produced a start event,
+  nine range events with audio frame positions, and a done event.
+- A synchronized capture was saved locally as
+  `captures/pixel-10-pro-xl-english-tts-sync.png`.
 
 The device pass also produced two Android-specific hardening changes: the URP
 Lit shader is kept in Always Included Shaders, and `link.xml` preserves collider

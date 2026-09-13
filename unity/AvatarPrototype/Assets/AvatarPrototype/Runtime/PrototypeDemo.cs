@@ -52,7 +52,10 @@ namespace PersonalAssistant.Avatar
         public void SelectMode(AvatarMode mode, AvatarEmotion emotion)
         {
             autoDemo = false;
-            avatar.ApplyCommand(mode, emotion, 0.65f);
+            if (mode == AvatarMode.Speaking)
+                avatar.SpeakEnglish("Hello! I'm Milo. How can I help you today?");
+            else
+                avatar.ApplyCommand(mode, emotion, 0.65f);
         }
     }
 }

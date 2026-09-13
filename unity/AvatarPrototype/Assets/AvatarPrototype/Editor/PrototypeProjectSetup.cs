@@ -128,12 +128,18 @@ namespace PersonalAssistant.Avatar.Editor
             if (avatar.Mode != AvatarMode.Speaking || avatar.Emotion != AvatarEmotion.Excited || Mathf.Abs(avatar.Intensity - 0.8f) > 0.001f)
                 throw new BuildFailedException("Avatar JSON command contract failed validation.");
 
+            var speechCues = EnglishVisemePlanner.Build("Milo thought five cheerful people would listen.", out float speechDuration);
+            string[] expectedSpeechVisemes = { "PP", "TH", "FF", "CH", "RR", "LL" };
+            foreach (string viseme in expectedSpeechVisemes)
+                if (!speechCues.Any(cue => cue.Name == viseme)) throw new BuildFailedException($"English viseme planner did not produce {viseme}.");
+            if (speechDuration <= 1f) throw new BuildFailedException("English viseme planner produced an invalid timeline.");
+
             if (GraphicsSettings.defaultRenderPipeline is not UniversalRenderPipelineAsset)
                 throw new BuildFailedException("URP is not configured as the default render pipeline.");
             if (EditorBuildSettings.scenes.Length != 1 || EditorBuildSettings.scenes[0].path != ScenePath)
                 throw new BuildFailedException("Prototype scene is not configured as the only build scene.");
 
-            Debug.Log("PROTOTYPE_VALIDATION_PASSED: scene, URP, camera, runtime components, and JSON command contract are valid.");
+            Debug.Log($"PROTOTYPE_VALIDATION_PASSED: scene, URP, runtime command contract, and English viseme planner ({speechCues.Count} cues, {speechDuration:F2}s) are valid.");
         }
 
         public static void ValidateRiggedAsset()

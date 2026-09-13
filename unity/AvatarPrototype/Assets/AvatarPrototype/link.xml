@@ -5,4 +5,7 @@
     <type fullname="UnityEngine.CapsuleCollider" preserve="all" />
     <type fullname="UnityEngine.SphereCollider" preserve="all" />
   </assembly>
+  <assembly fullname="Assembly-CSharp">
+    <type fullname="PersonalAssistant.Avatar.ProceduralAvatarController" preserve="all" />
+  </assembly>
 </linker>

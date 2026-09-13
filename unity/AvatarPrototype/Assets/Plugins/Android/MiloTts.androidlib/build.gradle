@@ -1,0 +1,16 @@
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'com.personalassistant.avatar.ttsmanifest'
+    compileSdk 36
+
+    defaultConfig {
+        minSdk 26
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+        }
+    }
+}

@@ -75,6 +75,7 @@ namespace PersonalAssistant.Avatar
             {
                 AvatarMode.Listening => "I’m listening…",
                 AvatarMode.Thinking => "Let me think about that.",
+                AvatarMode.Speaking when !string.IsNullOrEmpty(avatar.ActiveSpeechText) => avatar.ActiveSpeechText,
                 AvatarMode.Speaking => "Hello! I’m ready to help you.",
                 AvatarMode.Success => "Done — everything worked.",
                 AvatarMode.Error => "I hit a problem. Let’s try again.",
@@ -100,7 +101,8 @@ namespace PersonalAssistant.Avatar
             {
                 GUIStyle viseme = LabelStyle(13, FontStyle.Bold, new Color(0.56f, 0.94f, 0.82f));
                 viseme.alignment = TextAnchor.MiddleRight;
-                GUI.Label(new Rect(width - 220f, safeTop + 68f, 190f, 24f), $"VISEME  {avatar.ActiveViseme}", viseme);
+                string syncLabel = avatar.IsEnglishSpeechActive ? "TTS SYNC" : "DEMO";
+                GUI.Label(new Rect(width - 260f, safeTop + 68f, 230f, 24f), $"{syncLabel}  ·  {avatar.ActiveViseme}", viseme);
             }
 
             GUI.color = previousColor;

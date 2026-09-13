@@ -16,6 +16,8 @@ namespace PersonalAssistant.Avatar
         public AvatarEmotion Emotion { get; private set; } = AvatarEmotion.Neutral;
         public float Intensity { get; private set; } = 0.5f;
         public string ActiveViseme { get; private set; } = "sil";
+        public string ActiveSpeechText { get; private set; } = string.Empty;
+        public bool IsEnglishSpeechActive => ttsTimelineActive;
 
         private readonly Dictionary<string, Material> materials = new();
         private Transform avatarRoot;
@@ -63,6 +65,11 @@ namespace PersonalAssistant.Avatar
         private float nextBlinkAt;
         private float stateChangedAt;
         private float speechStartedAt;
+        private float speechTimelineDuration;
+        private float speechDeadlineAt;
+        private bool ttsTimelineActive;
+        private string activeUtteranceId;
+        private List<EnglishVisemeCue> englishSpeechCues = new();
         private Color statusColor = new(0.20f, 0.80f, 0.75f);
         private Vector2 gaze;
         private Vector2 gazeTarget;
@@ -117,10 +124,19 @@ namespace PersonalAssistant.Avatar
             UpdateBody(t);
             UpdateFace(t);
             UpdateStatusOrb(t);
+            if (ttsTimelineActive && t >= speechDeadlineAt) FinishEnglishSpeech("timeout");
         }
 
         public void ApplyCommand(AvatarMode mode, AvatarEmotion emotion, float intensity = 0.5f)
         {
+            if (mode != AvatarMode.Speaking && ttsTimelineActive)
+            {
+                ttsTimelineActive = false;
+                activeUtteranceId = null;
+                ActiveSpeechText = string.Empty;
+                AndroidTextToSpeech.Stop();
+            }
+
             if (Mode != mode)
             {
                 stateChangedAt = Time.time;
@@ -133,6 +149,55 @@ namespace PersonalAssistant.Avatar
             Mode = mode;
             Emotion = emotion;
             Intensity = Mathf.Clamp01(intensity);
+        }
+
+        public void SpeakEnglish(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return;
+            englishSpeechCues = EnglishVisemePlanner.Build(text, out speechTimelineDuration);
+            ActiveSpeechText = text.Trim();
+            activeUtteranceId = null;
+            ttsTimelineActive = true;
+            speechStartedAt = Time.time;
+            speechDeadlineAt = Time.time + speechTimelineDuration + 2f;
+            ApplyCommand(AvatarMode.Speaking, AvatarEmotion.Excited, 0.72f);
+
+            bool nativeSpeechRequested = AndroidTextToSpeech.Speak(gameObject, ActiveSpeechText);
+            Debug.Log($"TTS_REQUESTED: chars={ActiveSpeechText.Length}, cues={englishSpeechCues.Count}, estimatedSeconds={speechTimelineDuration:F2}, native={nativeSpeechRequested}");
+        }
+
+        public void OnTtsStarted(string utteranceId)
+        {
+            if (!ttsTimelineActive) return;
+            activeUtteranceId = utteranceId;
+            speechStartedAt = Time.time;
+            speechDeadlineAt = Time.time + speechTimelineDuration + 2f;
+            Debug.Log($"TTS_STARTED: {utteranceId}");
+        }
+
+        public void OnTtsRange(string json)
+        {
+            if (!ttsTimelineActive) return;
+            TtsRangeEvent range = JsonUtility.FromJson<TtsRangeEvent>(json);
+            if (range == null) return;
+            float plannedTime = EnglishVisemePlanner.FindTimeForCharacter(englishSpeechCues, range.start);
+            speechStartedAt = Time.time - plannedTime;
+            speechDeadlineAt = Time.time + Mathf.Max(1f, speechTimelineDuration - plannedTime + 1.2f);
+            Debug.Log($"TTS_RANGE: start={range.start}, end={range.end}, frame={range.frame}, cueTime={plannedTime:F2}");
+        }
+
+        public void OnTtsDone(string utteranceId)
+        {
+            if (!ttsTimelineActive) return;
+            if (!string.IsNullOrEmpty(activeUtteranceId) && utteranceId != activeUtteranceId) return;
+            FinishEnglishSpeech("done");
+        }
+
+        public void OnTtsError(string detail)
+        {
+            if (!ttsTimelineActive) return;
+            Debug.LogWarning($"TTS_ERROR: {detail}");
+            FinishEnglishSpeech("error");
         }
 
         public void ApplyCommandJson(string json)
@@ -234,7 +299,7 @@ namespace PersonalAssistant.Avatar
 
             if (Mode == AvatarMode.Speaking)
             {
-                EvaluateViseme(Mathf.Repeat(t - speechStartedAt, 4.12f), out mouthOpen, out float visemeWidth);
+                EvaluateSpeechViseme(t, out mouthOpen, out float visemeWidth);
                 mouthWidth *= visemeWidth;
             }
             else if (Mode == AvatarMode.Success)
@@ -280,6 +345,27 @@ namespace PersonalAssistant.Avatar
             {
                 if (DemoVisemes[i].Time > time) break;
                 current = DemoVisemes[i];
+            }
+
+            ActiveViseme = current.Name;
+            open = current.Open;
+            width = current.Width;
+        }
+
+        private void EvaluateSpeechViseme(float now, out float open, out float width)
+        {
+            if (!ttsTimelineActive || englishSpeechCues.Count == 0)
+            {
+                EvaluateViseme(Mathf.Repeat(now - speechStartedAt, 4.12f), out open, out width);
+                return;
+            }
+
+            float elapsed = Mathf.Max(0f, now - speechStartedAt);
+            EnglishVisemeCue current = englishSpeechCues[0];
+            for (int i = 1; i < englishSpeechCues.Count; i++)
+            {
+                if (englishSpeechCues[i].Time > elapsed) break;
+                current = englishSpeechCues[i];
             }
 
             ActiveViseme = current.Name;
@@ -335,7 +421,7 @@ namespace PersonalAssistant.Avatar
             float mouthOpen = 0.08f;
             if (Mode == AvatarMode.Speaking)
             {
-                EvaluateViseme(Mathf.Repeat(t - speechStartedAt, 4.12f), out mouthOpen, out _);
+                EvaluateSpeechViseme(t, out mouthOpen, out _);
                 activeShape = ResolveRiggedViseme(ActiveViseme);
                 activeWeight = Mathf.Lerp(68f, 100f, Intensity);
             }
@@ -391,6 +477,22 @@ namespace PersonalAssistant.Avatar
                 "sil" => "viseme_sil",
                 _ => $"viseme_{viseme}"
             };
+        }
+
+        private void FinishEnglishSpeech(string reason)
+        {
+            ttsTimelineActive = false;
+            activeUtteranceId = null;
+            englishSpeechCues.Clear();
+            ActiveSpeechText = string.Empty;
+            ActiveViseme = "sil";
+            ApplyCommand(AvatarMode.Idle, AvatarEmotion.Warm, 0.45f);
+            Debug.Log($"TTS_FINISHED: {reason}");
+        }
+
+        private void OnApplicationQuit()
+        {
+            AndroidTextToSpeech.Shutdown();
         }
 
         private void UpdateBlink(float t)
@@ -733,6 +835,14 @@ namespace PersonalAssistant.Avatar
                 Open = open;
                 Width = width;
             }
+        }
+
+        [Serializable]
+        private sealed class TtsRangeEvent
+        {
+            public int start;
+            public int end;
+            public int frame;
         }
     }
 }
