@@ -22,6 +22,8 @@ for task orchestration; the Android application presents and controls it.
 - A standalone URP prototype now lives in `unity/AvatarPrototype` with a
   generated character stand-in, six assistant modes, five emotions, blinking,
   gaze, layered body motion, and deterministic viseme playback.
+- The stand-in has completed a second visual-polish pass and has been installed
+  and interactively verified on a Pixel 10 Pro XL running Android 17.
 - Android SDK 37 is still deferred until the native AppFunctions phase.
 
 ## Build sequence

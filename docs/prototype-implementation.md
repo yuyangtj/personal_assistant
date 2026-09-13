@@ -23,6 +23,24 @@ It exercises the interface the final rig must support:
 - A touch-friendly mode selector, captions, and automatic demo loop.
 - A colored state indicator for quick mode recognition.
 
+## Procedural polish pass
+
+The second device-tested stand-in improves presentation without pretending to
+replace the final authored model:
+
+- Rebuilt the silhouette with shorter articulated arms, attached hands and
+  cuffs, socks, layered shoes, and more balanced chibi proportions.
+- Split the jacket into panels with a shirt opening, collar, zipper, and a
+  flower-shaped animated status pin.
+- Added layered irises, dark pupils, eye highlights, inner ears, cheeks, and
+  separate mouth corners that combine with viseme motion.
+- Reworked the swept hair silhouette and removed harsh primitive self-shadow
+  artifacts from the face.
+- Added a soft backdrop halo and a custom safe-area-aware HUD with rounded
+  panels, selected-mode feedback, captions, and a live viseme indicator.
+- Confirmed direct touch selection of Speaking mode on the Pixel and verified
+  that the final focused runtime error log remained empty.
+
 The generated geometry is not evidence that the final character-art quality gate
 has passed. The approved rigged character remains the required replacement.
 
