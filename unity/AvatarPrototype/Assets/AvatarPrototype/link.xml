@@ -7,5 +7,6 @@
   </assembly>
   <assembly fullname="Assembly-CSharp">
     <type fullname="PersonalAssistant.Avatar.ProceduralAvatarController" preserve="all" />
+    <type fullname="PersonalAssistant.Avatar.AssistantResponse" preserve="all" />
   </assembly>
 </linker>

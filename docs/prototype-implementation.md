@@ -133,6 +133,9 @@ Validated on a Google Pixel 10 Pro XL running Android 17 (API 37):
 - The final focused log contained no Unity or Android runtime errors.
 - Android TTS completed three device utterances; each produced a start event,
   nine range events with audio frame positions, and a done event.
+- The provider-neutral mock response completed the full Android bridge path:
+  Java delivery, Unity envelope validation, TTS request, nine range callbacks,
+  and clean speech completion.
 - A synchronized capture was saved locally as
   `captures/pixel-10-pro-xl-english-tts-sync.png`.
 

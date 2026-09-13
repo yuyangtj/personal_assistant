@@ -8,6 +8,7 @@ namespace PersonalAssistant.Avatar
         [SerializeField] private bool autoDemo = true;
         private float startedAt;
         private int lastStage = -1;
+        private int mockResponseSequence;
 
         public bool AutoDemo => autoDemo;
 
@@ -53,9 +54,23 @@ namespace PersonalAssistant.Avatar
         {
             autoDemo = false;
             if (mode == AvatarMode.Speaking)
-                avatar.SpeakEnglish("Hello! I'm Milo. How can I help you today?");
+                DeliverMockAssistantResponse();
             else
                 avatar.ApplyCommand(mode, emotion, 0.65f);
+        }
+
+        private void DeliverMockAssistantResponse()
+        {
+            AssistantResponse response = new()
+            {
+                responseId = $"prototype-{++mockResponseSequence}",
+                text = "Hello! I'm Milo. How can I help you today?",
+                emotion = AvatarEmotion.Excited.ToString(),
+                intensity = 0.72f
+            };
+            string json = JsonUtility.ToJson(response);
+            if (!AndroidAssistantResponseBridge.Deliver(avatar.gameObject, json))
+                avatar.ApplyAssistantResponseJson(json);
         }
     }
 }

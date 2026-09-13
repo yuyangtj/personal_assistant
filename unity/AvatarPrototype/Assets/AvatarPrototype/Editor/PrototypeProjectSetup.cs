@@ -134,12 +134,20 @@ namespace PersonalAssistant.Avatar.Editor
                 if (!speechCues.Any(cue => cue.Name == viseme)) throw new BuildFailedException($"English viseme planner did not produce {viseme}.");
             if (speechDuration <= 1f) throw new BuildFailedException("English viseme planner produced an invalid timeline.");
 
+            const string responseJson = "{\"responseId\":\"validation-1\",\"text\":\"The response bridge is ready.\",\"emotion\":\"Warm\",\"intensity\":0.7}";
+            avatar.ApplyAssistantResponseJson(responseJson);
+            if (avatar.Mode != AvatarMode.Speaking || avatar.ActiveSpeechText != "The response bridge is ready." || avatar.LastAssistantResponseId != "validation-1")
+                throw new BuildFailedException("Assistant response contract failed validation.");
+            avatar.ApplyAssistantResponseJson("{\"responseId\":\"validation-1\",\"text\":\"Duplicate must not replace this.\"}");
+            if (avatar.ActiveSpeechText != "The response bridge is ready.")
+                throw new BuildFailedException("Assistant response duplicate protection failed validation.");
+
             if (GraphicsSettings.defaultRenderPipeline is not UniversalRenderPipelineAsset)
                 throw new BuildFailedException("URP is not configured as the default render pipeline.");
             if (EditorBuildSettings.scenes.Length != 1 || EditorBuildSettings.scenes[0].path != ScenePath)
                 throw new BuildFailedException("Prototype scene is not configured as the only build scene.");
 
-            Debug.Log($"PROTOTYPE_VALIDATION_PASSED: scene, URP, runtime command contract, and English viseme planner ({speechCues.Count} cues, {speechDuration:F2}s) are valid.");
+            Debug.Log($"PROTOTYPE_VALIDATION_PASSED: scene, URP, command and assistant-response contracts, duplicate protection, and English viseme planner ({speechCues.Count} cues, {speechDuration:F2}s) are valid.");
         }
 
         public static void ValidateRiggedAsset()

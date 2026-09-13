@@ -41,11 +41,12 @@ accent-specific sounds can differ from their spelling.
 
 ## Production upgrade path
 
-Keep `SpeakEnglish(text)` as the public avatar boundary, but replace the local
+Keep `SpeakEnglish(text)` as the internal speech boundary, but replace the local
 planner input with phoneme or viseme timestamps returned alongside generated
 audio. That will make every consonant and vowel use the synthesizer's actual
-pronunciation. Kimi can supply assistant response text later; it does not need
-to own speech timing or know about Unity blendshapes.
+pronunciation. Kimi or another provider supplies text through the implemented
+`AssistantResponse` envelope; it does not own speech timing or know about Unity
+blendshapes.
 
 Android API references:
 

@@ -30,4 +30,17 @@ namespace PersonalAssistant.Avatar
         [Range(0f, 1f)] public float intensity = 0.5f;
         public string speechCue;
     }
+
+    /// <summary>
+    /// Provider-neutral reply contract delivered by the Android host. A stable
+    /// response ID prevents event polling from speaking the same reply twice.
+    /// </summary>
+    [Serializable]
+    public sealed class AssistantResponse
+    {
+        public string responseId;
+        public string text;
+        public string emotion = "Warm";
+        [Range(0f, 1f)] public float intensity = 0.65f;
+    }
 }

@@ -17,7 +17,7 @@
 │              │ Assistant state store  │                                             │
 │              │ StateFlow<UiState>     │                                             │
 │              └────────────┬───────────┘                                             │
-│                           │ typed AvatarCommand                                      │
+│                           │ AvatarCommand / AssistantResponse                        │
 │                           ▼                                                          │
 │              ┌────────────────────────┐                                             │
 │              │ Unity avatar module    │                                             │
@@ -88,3 +88,31 @@ The assistant or language model may choose `mode`, `emotion`, and bounded
 - AppFunctions call native repositories and never communicate with Unity
   directly.
 
+## Implemented assistant-response ingress
+
+The provider boundary now stops before Unity:
+
+```text
+Kimi / another model / deterministic mock
+                    |
+                    v
+         Android assistant client
+                    | AssistantResponse JSON
+                    v
+          MiloAssistantBridge
+                    | UnitySendMessage
+                    v
+     ApplyAssistantResponseJson
+                    |
+          validate + deduplicate
+                    v
+       SpeakEnglish -> Android TTS
+                    |
+                    v
+          range-aligned visemes
+```
+
+Unity does not know which provider generated the reply. The response ID is used
+to prevent polling or delivery retries from speaking the same response twice.
+The in-memory check protects the current Unity process; durable event cursors
+remain the future Kotlin client's responsibility.

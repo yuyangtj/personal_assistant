@@ -18,6 +18,7 @@ namespace PersonalAssistant.Avatar
         public string ActiveViseme { get; private set; } = "sil";
         public string ActiveSpeechText { get; private set; } = string.Empty;
         public bool IsEnglishSpeechActive => ttsTimelineActive;
+        public string LastAssistantResponseId { get; private set; } = string.Empty;
 
         private readonly Dictionary<string, Material> materials = new();
         private Transform avatarRoot;
@@ -70,6 +71,8 @@ namespace PersonalAssistant.Avatar
         private bool ttsTimelineActive;
         private string activeUtteranceId;
         private List<EnglishVisemeCue> englishSpeechCues = new();
+        private readonly HashSet<string> handledAssistantResponseIds = new();
+        private readonly Queue<string> handledAssistantResponseOrder = new();
         private Color statusColor = new(0.20f, 0.80f, 0.75f);
         private Vector2 gaze;
         private Vector2 gazeTarget;
@@ -153,6 +156,11 @@ namespace PersonalAssistant.Avatar
 
         public void SpeakEnglish(string text)
         {
+            SpeakEnglish(text, AvatarEmotion.Excited, 0.72f);
+        }
+
+        private void SpeakEnglish(string text, AvatarEmotion emotion, float intensity)
+        {
             if (string.IsNullOrWhiteSpace(text)) return;
             englishSpeechCues = EnglishVisemePlanner.Build(text, out speechTimelineDuration);
             ActiveSpeechText = text.Trim();
@@ -160,10 +168,67 @@ namespace PersonalAssistant.Avatar
             ttsTimelineActive = true;
             speechStartedAt = Time.time;
             speechDeadlineAt = Time.time + speechTimelineDuration + 2f;
-            ApplyCommand(AvatarMode.Speaking, AvatarEmotion.Excited, 0.72f);
+            ApplyCommand(AvatarMode.Speaking, emotion, intensity);
 
             bool nativeSpeechRequested = AndroidTextToSpeech.Speak(gameObject, ActiveSpeechText);
             Debug.Log($"TTS_REQUESTED: chars={ActiveSpeechText.Length}, cues={englishSpeechCues.Count}, estimatedSeconds={speechTimelineDuration:F2}, native={nativeSpeechRequested}");
+        }
+
+        public void ApplyAssistantResponseJson(string json)
+        {
+            AssistantResponse response;
+            try
+            {
+                response = JsonUtility.FromJson<AssistantResponse>(json);
+            }
+            catch (Exception exception)
+            {
+                RejectAssistantResponse($"invalid JSON ({exception.GetType().Name})");
+                return;
+            }
+
+            if (response == null || string.IsNullOrWhiteSpace(response.text))
+            {
+                RejectAssistantResponse("text is required");
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(response.responseId))
+            {
+                RejectAssistantResponse("responseId is required");
+                return;
+            }
+            if (response.text.Length > 4000)
+            {
+                RejectAssistantResponse("text exceeds the 4000-character TTS limit");
+                return;
+            }
+            if (handledAssistantResponseIds.Contains(response.responseId))
+            {
+                Debug.Log($"ASSISTANT_RESPONSE_DUPLICATE: {response.responseId}");
+                return;
+            }
+
+            if (!Enum.TryParse(response.emotion, true, out AvatarEmotion emotion)) emotion = AvatarEmotion.Warm;
+            float intensity = float.IsNaN(response.intensity) || float.IsInfinity(response.intensity) ? 0.65f : Mathf.Clamp01(response.intensity);
+            RememberAssistantResponse(response.responseId);
+            Debug.Log($"ASSISTANT_RESPONSE_ACCEPTED: id={LastAssistantResponseId}, chars={response.text.Length}, emotion={emotion}");
+            SpeakEnglish(response.text, emotion, intensity);
+        }
+
+        private void RememberAssistantResponse(string responseId)
+        {
+            const int historyLimit = 128;
+            LastAssistantResponseId = responseId;
+            handledAssistantResponseIds.Add(responseId);
+            handledAssistantResponseOrder.Enqueue(responseId);
+            while (handledAssistantResponseOrder.Count > historyLimit)
+                handledAssistantResponseIds.Remove(handledAssistantResponseOrder.Dequeue());
+        }
+
+        private void RejectAssistantResponse(string reason)
+        {
+            Debug.LogWarning($"ASSISTANT_RESPONSE_REJECTED: {reason}");
+            ApplyCommand(AvatarMode.Error, AvatarEmotion.Concerned, 0.65f);
         }
 
         public void OnTtsStarted(string utteranceId)
