@@ -244,7 +244,7 @@ namespace PersonalAssistant.Avatar
         private void UpdateBlink(float t)
         {
             float target = 0f;
-            if (t >= nextBlinkAt && blinkVelocity <= 0f)
+            if (t >= nextBlinkAt && Mathf.Approximately(blinkVelocity, 0f))
             {
                 blinkVelocity = 1f;
             }

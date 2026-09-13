@@ -79,6 +79,8 @@ namespace PersonalAssistant.Avatar.Editor
         public static void BuildAndroid()
         {
             if (!File.Exists(ScenePath)) CreatePrototypeScene();
+            ConfigureRenderPipeline();
+            ConfigurePlayer();
             Directory.CreateDirectory("Builds/Android");
             EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
             BuildPlayerOptions options = new()
@@ -176,6 +178,30 @@ namespace PersonalAssistant.Avatar.Editor
 
             GraphicsSettings.defaultRenderPipeline = pipeline;
             QualitySettings.renderPipeline = pipeline;
+            PreserveRuntimeShader();
+        }
+
+        private static void PreserveRuntimeShader()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null) throw new BuildFailedException("URP Lit shader is unavailable.");
+
+            Object[] settingsAssets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");
+            if (settingsAssets.Length == 0) throw new BuildFailedException("Graphics settings asset is unavailable.");
+            SerializedObject settings = new(settingsAssets[0]);
+            SerializedProperty shaders = settings.FindProperty("m_AlwaysIncludedShaders");
+            if (shaders == null) throw new BuildFailedException("Always Included Shaders setting is unavailable.");
+
+            for (int i = 0; i < shaders.arraySize; i++)
+            {
+                if (shaders.GetArrayElementAtIndex(i).objectReferenceValue == shader) return;
+            }
+
+            int index = shaders.arraySize;
+            shaders.InsertArrayElementAtIndex(index);
+            shaders.GetArrayElementAtIndex(index).objectReferenceValue = shader;
+            settings.ApplyModifiedPropertiesWithoutUndo();
+            AssetDatabase.SaveAssets();
         }
 
         private static void ConfigurePlayer()
@@ -187,6 +213,7 @@ namespace PersonalAssistant.Avatar.Editor
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
             PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
+            PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.Android, ManagedStrippingLevel.Low);
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             PlayerSettings.colorSpace = ColorSpace.Linear;
             Application.targetFrameRate = 60;

@@ -64,3 +64,20 @@ Install it on a connected ARM64 Android phone with:
 ```shell
 adb install -r unity/AvatarPrototype/Builds/Android/avatar-prototype.apk
 ```
+
+## Pixel validation
+
+Validated on a Google Pixel 10 Pro XL running Android 17 (API 37):
+
+- Cold launch completed and the Unity activity reached the foreground.
+- URP materials, camera, lighting, captions, and touch controls rendered at
+  the native `1080 × 2404` surface size.
+- The automatic loop visibly transitioned across assistant modes.
+- Eye reopening was verified after correcting the procedural blink state.
+- SurfaceFlinger reported a `16,666,666 ns` refresh/presentation interval,
+  corresponding to the requested 60 Hz cadence.
+- The final focused log contained no Unity or Android runtime errors.
+
+The device pass also produced two Android-specific hardening changes: the URP
+Lit shader is kept in Always Included Shaders, and `link.xml` preserves collider
+classes resolved dynamically by `GameObject.CreatePrimitive` under IL2CPP.
