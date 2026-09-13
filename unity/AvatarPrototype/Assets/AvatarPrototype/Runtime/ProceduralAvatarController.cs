@@ -37,12 +37,27 @@ namespace PersonalAssistant.Avatar
         private Transform leftArm;
         private Transform rightArm;
         private Transform statusOrb;
+        private bool usingRiggedAsset;
+        private SkinnedMeshRenderer riggedMouthRenderer;
+        private Transform riggedTeeth;
+        private Transform riggedTongue;
+        private Vector3 leftPupilBasePosition;
+        private Vector3 rightPupilBasePosition;
+        private Vector3 leftLidBasePosition;
+        private Vector3 rightLidBasePosition;
+        private Vector3 leftLidBaseScale;
+        private Vector3 rightLidBaseScale;
+        private Vector3 leftBrowBasePosition;
+        private Vector3 rightBrowBasePosition;
+        private Quaternion leftBrowBaseRotation;
+        private Quaternion rightBrowBaseRotation;
 
         private Vector3 bodyBasePosition;
         private Vector3 headBasePosition;
         private Quaternion headBaseRotation;
         private Quaternion leftArmBaseRotation;
         private Quaternion rightArmBaseRotation;
+        private Vector3 statusOrbBaseScale;
         private float blinkAmount;
         private float blinkVelocity;
         private float nextBlinkAt;
@@ -90,6 +105,8 @@ namespace PersonalAssistant.Avatar
             headBaseRotation = head.localRotation;
             leftArmBaseRotation = leftArm.localRotation;
             rightArmBaseRotation = rightArm.localRotation;
+            statusOrbBaseScale = statusOrb.localScale;
+            if (usingRiggedAsset) CaptureRiggedDefaults();
         }
 
         private void Update()
@@ -160,17 +177,17 @@ namespace PersonalAssistant.Avatar
                     break;
                 case AvatarMode.Thinking:
                     headTarget *= Quaternion.Euler(-2f, -10f, -4f);
-                    rightArmTarget *= Quaternion.Euler(-24f, 0f, -20f);
+                    rightArmTarget *= Quaternion.Euler(-18f, 0f, -58f);
                     break;
                 case AvatarMode.Speaking:
                     headTarget *= Quaternion.Euler(Mathf.Sin(t * 2.1f) * 2.5f, Mathf.Sin(t * 1.1f) * 3f, 0f);
-                    leftArmTarget *= Quaternion.Euler(0f, 0f, Mathf.Sin(t * 2.4f) * 8f);
-                    rightArmTarget *= Quaternion.Euler(0f, 0f, -Mathf.Sin(t * 2.0f + 0.6f) * 9f);
+                    leftArmTarget *= Quaternion.Euler(0f, 0f, Mathf.Sin(t * 2.4f) * 15f);
+                    rightArmTarget *= Quaternion.Euler(0f, 0f, -Mathf.Sin(t * 2.0f + 0.6f) * 17f);
                     break;
                 case AvatarMode.Success:
                     targetPosition += Vector3.up * Mathf.Abs(Mathf.Sin(stateTime * 5f)) * 0.09f * Mathf.Exp(-stateTime * 1.4f);
-                    leftArmTarget *= Quaternion.Euler(0f, 0f, -28f);
-                    rightArmTarget *= Quaternion.Euler(0f, 0f, 28f);
+                    leftArmTarget *= Quaternion.Euler(0f, 0f, -145f);
+                    rightArmTarget *= Quaternion.Euler(0f, 0f, 145f);
                     break;
                 case AvatarMode.Error:
                     headTarget *= Quaternion.Euler(4f, 0f, Mathf.Sin(stateTime * 8f) * 2f * Mathf.Exp(-stateTime));
@@ -186,6 +203,12 @@ namespace PersonalAssistant.Avatar
 
         private void UpdateFace(float t)
         {
+            if (usingRiggedAsset)
+            {
+                UpdateRiggedFace(t);
+                return;
+            }
+
             float mouthOpen = 0.045f;
             float mouthWidth = 0.72f;
             float smile = 0f;
@@ -214,6 +237,11 @@ namespace PersonalAssistant.Avatar
                 EvaluateViseme(Mathf.Repeat(t - speechStartedAt, 4.12f), out mouthOpen, out float visemeWidth);
                 mouthWidth *= visemeWidth;
             }
+            else if (Mode == AvatarMode.Success)
+            {
+                mouthOpen = 0.16f;
+                mouthWidth *= 1.08f;
+            }
             else
             {
                 ActiveViseme = "sil";
@@ -232,17 +260,17 @@ namespace PersonalAssistant.Avatar
             leftCheek.localScale = Vector3.Lerp(leftCheek.localScale, new Vector3(0.20f, 0.085f, 0.045f) * cheekScale, Time.deltaTime * 7f);
             rightCheek.localScale = Vector3.Lerp(rightCheek.localScale, new Vector3(0.20f, 0.085f, 0.045f) * cheekScale, Time.deltaTime * 7f);
 
-            leftBrow.localPosition = Vector3.Lerp(leftBrow.localPosition, new Vector3(-0.30f, 0.405f + browHeight, -0.585f), Time.deltaTime * 7f);
-            rightBrow.localPosition = Vector3.Lerp(rightBrow.localPosition, new Vector3(0.30f, 0.405f + browHeight, -0.585f), Time.deltaTime * 7f);
+            leftBrow.localPosition = Vector3.Lerp(leftBrow.localPosition, new Vector3(-0.29f, 0.44f + browHeight, -0.615f), Time.deltaTime * 7f);
+            rightBrow.localPosition = Vector3.Lerp(rightBrow.localPosition, new Vector3(0.29f, 0.44f + browHeight, -0.615f), Time.deltaTime * 7f);
             leftBrow.localRotation = Quaternion.Slerp(leftBrow.localRotation, Quaternion.Euler(0f, 0f, 90f - browTilt), Time.deltaTime * 7f);
             rightBrow.localRotation = Quaternion.Slerp(rightBrow.localRotation, Quaternion.Euler(0f, 0f, 90f + browTilt), Time.deltaTime * 7f);
 
-            float lidScale = Mathf.Lerp(0.002f, 0.39f, blinkAmount);
-            float lidY = Mathf.Lerp(0.345f, 0.12f, blinkAmount);
+            float lidScale = Mathf.Lerp(0.002f, 0.29f, blinkAmount);
+            float lidY = Mathf.Lerp(0.325f, 0.12f, blinkAmount);
             leftLid.localPosition = new Vector3(-0.30f, lidY, -0.605f);
             rightLid.localPosition = new Vector3(0.30f, lidY, -0.605f);
-            leftLid.localScale = new Vector3(0.39f, lidScale, 0.17f);
-            rightLid.localScale = new Vector3(0.39f, lidScale, 0.17f);
+            leftLid.localScale = new Vector3(0.29f, lidScale, 0.15f);
+            rightLid.localScale = new Vector3(0.29f, lidScale, 0.15f);
         }
 
         private void EvaluateViseme(float time, out float open, out float width)
@@ -257,6 +285,112 @@ namespace PersonalAssistant.Avatar
             ActiveViseme = current.Name;
             open = current.Open;
             width = current.Width;
+        }
+
+        private void CaptureRiggedDefaults()
+        {
+            leftPupilBasePosition = leftPupil.localPosition;
+            rightPupilBasePosition = rightPupil.localPosition;
+            leftLidBasePosition = leftLid.localPosition;
+            rightLidBasePosition = rightLid.localPosition;
+            leftLidBaseScale = leftLid.localScale;
+            rightLidBaseScale = rightLid.localScale;
+            leftBrowBasePosition = leftBrow.localPosition;
+            rightBrowBasePosition = rightBrow.localPosition;
+            leftBrowBaseRotation = leftBrow.localRotation;
+            rightBrowBaseRotation = rightBrow.localRotation;
+        }
+
+        private void UpdateRiggedFace(float t)
+        {
+            float browTilt = 0f;
+            float browHeight = 0f;
+            string activeShape = "viseme_sil";
+            float activeWeight = 88f;
+
+            switch (Emotion)
+            {
+                case AvatarEmotion.Warm:
+                    activeShape = "expression_smile";
+                    activeWeight = 72f;
+                    browHeight = 0.018f;
+                    break;
+                case AvatarEmotion.Curious:
+                    browTilt = 10f;
+                    browHeight = 0.035f;
+                    break;
+                case AvatarEmotion.Excited:
+                    activeShape = "expression_smile";
+                    activeWeight = 100f;
+                    browHeight = 0.055f;
+                    break;
+                case AvatarEmotion.Concerned:
+                    activeShape = "expression_concerned";
+                    activeWeight = 90f;
+                    browTilt = -12f;
+                    browHeight = 0.020f;
+                    break;
+            }
+
+            float mouthOpen = 0.08f;
+            if (Mode == AvatarMode.Speaking)
+            {
+                EvaluateViseme(Mathf.Repeat(t - speechStartedAt, 4.12f), out mouthOpen, out _);
+                activeShape = ResolveRiggedViseme(ActiveViseme);
+                activeWeight = Mathf.Lerp(68f, 100f, Intensity);
+            }
+            else if (Mode == AvatarMode.Success)
+            {
+                activeShape = "viseme_aa";
+                activeWeight = 72f;
+                mouthOpen = 0.45f;
+            }
+            else
+            {
+                ActiveViseme = "sil";
+            }
+
+            if (riggedMouthRenderer != null && riggedMouthRenderer.sharedMesh != null)
+            {
+                Mesh mesh = riggedMouthRenderer.sharedMesh;
+                for (int i = 0; i < mesh.blendShapeCount; i++)
+                {
+                    float target = mesh.GetBlendShapeName(i) == activeShape ? activeWeight : 0f;
+                    float current = riggedMouthRenderer.GetBlendShapeWeight(i);
+                    riggedMouthRenderer.SetBlendShapeWeight(i, Mathf.Lerp(current, target, Time.deltaTime * 14f));
+                }
+            }
+
+            if (riggedTongue != null)
+                riggedTongue.gameObject.SetActive(Mode == AvatarMode.Speaking || Mode == AvatarMode.Success);
+            if (riggedTeeth != null)
+                riggedTeeth.localScale = Vector3.Lerp(riggedTeeth.localScale, new Vector3(1f, Mathf.Lerp(0.45f, 1f, mouthOpen), 1f), Time.deltaTime * 12f);
+
+            leftBrow.localPosition = Vector3.Lerp(leftBrow.localPosition, leftBrowBasePosition + Vector3.up * browHeight, Time.deltaTime * 8f);
+            rightBrow.localPosition = Vector3.Lerp(rightBrow.localPosition, rightBrowBasePosition + Vector3.up * browHeight, Time.deltaTime * 8f);
+            leftBrow.localRotation = Quaternion.Slerp(leftBrow.localRotation, leftBrowBaseRotation * Quaternion.Euler(0f, 0f, -browTilt), Time.deltaTime * 8f);
+            rightBrow.localRotation = Quaternion.Slerp(rightBrow.localRotation, rightBrowBaseRotation * Quaternion.Euler(0f, 0f, browTilt), Time.deltaTime * 8f);
+
+            float lidStretch = Mathf.Lerp(1f, 18f, blinkAmount);
+            float lidDrop = Mathf.Lerp(0f, 0.19f, blinkAmount);
+            bool lidsVisible = blinkAmount > 0.012f;
+            leftLid.gameObject.SetActive(lidsVisible);
+            rightLid.gameObject.SetActive(lidsVisible);
+            leftLid.localPosition = leftLidBasePosition + Vector3.down * lidDrop;
+            rightLid.localPosition = rightLidBasePosition + Vector3.down * lidDrop;
+            leftLid.localScale = new Vector3(leftLidBaseScale.x, leftLidBaseScale.y * lidStretch, leftLidBaseScale.z);
+            rightLid.localScale = new Vector3(rightLidBaseScale.x, rightLidBaseScale.y * lidStretch, rightLidBaseScale.z);
+        }
+
+        private static string ResolveRiggedViseme(string viseme)
+        {
+            return viseme switch
+            {
+                "HH" => "viseme_aa",
+                "LL" => "viseme_nn",
+                "sil" => "viseme_sil",
+                _ => $"viseme_{viseme}"
+            };
         }
 
         private void UpdateBlink(float t)
@@ -293,8 +427,16 @@ namespace PersonalAssistant.Avatar
             }
 
             gaze = Vector2.Lerp(gaze, gazeTarget, Time.deltaTime * 5f);
-            leftPupil.localPosition = new Vector3(gaze.x, gaze.y, -0.53f);
-            rightPupil.localPosition = new Vector3(gaze.x, gaze.y, -0.53f);
+            if (usingRiggedAsset)
+            {
+                leftPupil.localPosition = leftPupilBasePosition + new Vector3(gaze.x, gaze.y, 0f);
+                rightPupil.localPosition = rightPupilBasePosition + new Vector3(gaze.x, gaze.y, 0f);
+            }
+            else
+            {
+                leftPupil.localPosition = new Vector3(gaze.x, gaze.y, -0.53f);
+                rightPupil.localPosition = new Vector3(gaze.x, gaze.y, -0.53f);
+            }
         }
 
         private void UpdateStatusOrb(float t)
@@ -317,7 +459,7 @@ namespace PersonalAssistant.Avatar
             block.SetColor("_Color", statusColor);
             renderer.SetPropertyBlock(block);
             float pulse = 1f + Mathf.Sin(t * (Mode == AvatarMode.Thinking ? 4.5f : 2.2f)) * 0.08f;
-            statusOrb.localScale = Vector3.one * 0.075f * pulse;
+            statusOrb.localScale = statusOrbBaseScale * pulse;
         }
 
         private void BuildAvatar()
@@ -330,53 +472,43 @@ namespace PersonalAssistant.Avatar
             Create(PrimitiveType.Cylinder, "GroundShadow", avatarRoot, new Vector3(0f, 0.045f, 0.08f), new Vector3(0.82f, 0.018f, 0.47f), "shadow");
             body = new GameObject("BodyMotion").transform;
             body.SetParent(avatarRoot, false);
+            if (TryBuildRiggedAvatar()) return;
 
-            Create(PrimitiveType.Capsule, "LeftLeg", body, new Vector3(-0.23f, 0.66f, 0f), new Vector3(0.23f, 0.50f, 0.25f), "skin");
-            Create(PrimitiveType.Capsule, "RightLeg", body, new Vector3(0.23f, 0.66f, 0f), new Vector3(0.23f, 0.50f, 0.25f), "skin");
-            Create(PrimitiveType.Sphere, "LeftSock", body, new Vector3(-0.23f, 0.28f, -0.02f), new Vector3(0.28f, 0.19f, 0.30f), "white");
-            Create(PrimitiveType.Sphere, "RightSock", body, new Vector3(0.23f, 0.28f, -0.02f), new Vector3(0.28f, 0.19f, 0.30f), "white");
-            Create(PrimitiveType.Sphere, "LeftShoe", body, new Vector3(-0.24f, 0.17f, -0.14f), new Vector3(0.36f, 0.17f, 0.52f), "white");
-            Create(PrimitiveType.Sphere, "RightShoe", body, new Vector3(0.24f, 0.17f, -0.14f), new Vector3(0.36f, 0.17f, 0.52f), "white");
-            Create(PrimitiveType.Sphere, "LeftShoeAccent", body, new Vector3(-0.24f, 0.15f, -0.39f), new Vector3(0.29f, 0.095f, 0.16f), "tealLight");
-            Create(PrimitiveType.Sphere, "RightShoeAccent", body, new Vector3(0.24f, 0.15f, -0.39f), new Vector3(0.29f, 0.095f, 0.16f), "tealLight");
-            Create(PrimitiveType.Sphere, "Shorts", body, new Vector3(0f, 1.10f, 0.01f), new Vector3(0.78f, 0.48f, 0.47f), "charcoal");
-            Create(PrimitiveType.Sphere, "Shirt", body, new Vector3(0f, 1.68f, -0.08f), new Vector3(0.66f, 0.72f, 0.40f), "cream");
-            Create(PrimitiveType.Sphere, "LeftJacketPanel", body, new Vector3(-0.24f, 1.73f, -0.01f), new Vector3(0.48f, 0.74f, 0.46f), "teal");
-            Create(PrimitiveType.Sphere, "RightJacketPanel", body, new Vector3(0.24f, 1.73f, -0.01f), new Vector3(0.48f, 0.74f, 0.46f), "teal");
-            Create(PrimitiveType.Cube, "ShirtOpening", body, new Vector3(0f, 1.70f, -0.47f), new Vector3(0.22f, 0.62f, 0.025f), "cream");
-            Create(PrimitiveType.Cube, "Zipper", body, new Vector3(0f, 1.70f, -0.495f), new Vector3(0.018f, 0.61f, 0.012f), "silver");
-            Transform leftCollar = Create(PrimitiveType.Cube, "LeftCollar", body, new Vector3(-0.15f, 2.00f, -0.45f), new Vector3(0.25f, 0.10f, 0.05f), "tealLight");
-            leftCollar.localRotation = Quaternion.Euler(0f, 0f, -18f);
-            Transform rightCollar = Create(PrimitiveType.Cube, "RightCollar", body, new Vector3(0.15f, 2.00f, -0.45f), new Vector3(0.25f, 0.10f, 0.05f), "tealLight");
-            rightCollar.localRotation = Quaternion.Euler(0f, 0f, 18f);
+            Create(PrimitiveType.Capsule, "LeftLeg", body, new Vector3(-0.23f, 0.46f, 0f), new Vector3(0.22f, 0.23f, 0.24f), "skin");
+            Create(PrimitiveType.Capsule, "RightLeg", body, new Vector3(0.23f, 0.46f, 0f), new Vector3(0.22f, 0.23f, 0.24f), "skin");
+            Create(PrimitiveType.Sphere, "LeftSock", body, new Vector3(-0.23f, 0.25f, -0.02f), new Vector3(0.25f, 0.13f, 0.27f), "white");
+            Create(PrimitiveType.Sphere, "RightSock", body, new Vector3(0.23f, 0.25f, -0.02f), new Vector3(0.25f, 0.13f, 0.27f), "white");
+            Create(PrimitiveType.Sphere, "LeftShoe", body, new Vector3(-0.24f, 0.14f, -0.16f), new Vector3(0.36f, 0.14f, 0.50f), "shoeYellow");
+            Create(PrimitiveType.Sphere, "RightShoe", body, new Vector3(0.24f, 0.14f, -0.16f), new Vector3(0.36f, 0.14f, 0.50f), "shoeYellow");
+            Create(PrimitiveType.Sphere, "Shorts", body, new Vector3(0f, 1.00f, 0.01f), new Vector3(0.76f, 0.43f, 0.47f), "shortsBlue");
+            Create(PrimitiveType.Sphere, "Sweatshirt", body, new Vector3(0f, 1.54f, -0.03f), new Vector3(0.72f, 0.58f, 0.46f), "shirtRed");
 
-            leftArm = BuildArm("Left", body, new Vector3(-0.62f, 1.73f, 0f), 9f);
-            rightArm = BuildArm("Right", body, new Vector3(0.62f, 1.73f, 0f), -9f);
-            Create(PrimitiveType.Capsule, "Neck", body, new Vector3(0f, 2.18f, 0f), new Vector3(0.23f, 0.20f, 0.24f), "skin");
+            leftArm = BuildArm("Left", body, new Vector3(-0.66f, 1.67f, 0f), 8f);
+            rightArm = BuildArm("Right", body, new Vector3(0.66f, 1.67f, 0f), -8f);
 
             head = new GameObject("HeadMotion").transform;
             head.SetParent(body, false);
-            head.localPosition = new Vector3(0f, 2.78f, 0f);
-            Create(PrimitiveType.Sphere, "Head", head, Vector3.zero, new Vector3(1.18f, 1.06f, 0.98f), "skin");
-            Create(PrimitiveType.Sphere, "LeftEar", head, new Vector3(-0.62f, -0.01f, -0.01f), new Vector3(0.27f, 0.34f, 0.22f), "skin");
-            Create(PrimitiveType.Sphere, "RightEar", head, new Vector3(0.62f, -0.01f, -0.01f), new Vector3(0.27f, 0.34f, 0.22f), "skin");
+            head.localPosition = new Vector3(0f, 2.53f, 0f);
+            Create(PrimitiveType.Sphere, "Head", head, Vector3.zero, new Vector3(1.25f, 1.06f, 0.98f), "skin");
+            Create(PrimitiveType.Sphere, "LeftEar", head, new Vector3(-0.66f, -0.01f, -0.01f), new Vector3(0.29f, 0.34f, 0.22f), "skin");
+            Create(PrimitiveType.Sphere, "RightEar", head, new Vector3(0.66f, -0.01f, -0.01f), new Vector3(0.29f, 0.34f, 0.22f), "skin");
             Create(PrimitiveType.Sphere, "LeftEarInner", head, new Vector3(-0.635f, -0.015f, -0.125f), new Vector3(0.12f, 0.18f, 0.055f), "skinRoseSoft");
             Create(PrimitiveType.Sphere, "RightEarInner", head, new Vector3(0.635f, -0.015f, -0.125f), new Vector3(0.12f, 0.18f, 0.055f), "skinRoseSoft");
-            Create(PrimitiveType.Sphere, "Nose", head, new Vector3(0f, -0.025f, -0.545f), new Vector3(0.13f, 0.105f, 0.10f), "skinRose");
+            Create(PrimitiveType.Sphere, "Nose", head, new Vector3(0f, -0.035f, -0.555f), new Vector3(0.085f, 0.070f, 0.065f), "skinRose");
 
-            leftEye = Create(PrimitiveType.Sphere, "LeftEye", head, new Vector3(-0.30f, 0.12f, -0.49f), new Vector3(0.38f, 0.45f, 0.18f), "white");
-            rightEye = Create(PrimitiveType.Sphere, "RightEye", head, new Vector3(0.30f, 0.12f, -0.49f), new Vector3(0.38f, 0.45f, 0.18f), "white");
+            leftEye = Create(PrimitiveType.Sphere, "LeftEye", head, new Vector3(-0.30f, 0.12f, -0.52f), new Vector3(0.28f, 0.33f, 0.16f), "white");
+            rightEye = Create(PrimitiveType.Sphere, "RightEye", head, new Vector3(0.30f, 0.12f, -0.52f), new Vector3(0.28f, 0.33f, 0.16f), "white");
             leftPupil = Create(PrimitiveType.Sphere, "LeftIris", leftEye, new Vector3(0f, 0f, -0.53f), new Vector3(0.40f, 0.37f, 0.20f), "iris");
             rightPupil = Create(PrimitiveType.Sphere, "RightIris", rightEye, new Vector3(0f, 0f, -0.53f), new Vector3(0.40f, 0.37f, 0.20f), "iris");
             Transform leftBlackPupil = Create(PrimitiveType.Sphere, "LeftPupil", leftPupil, new Vector3(0f, -0.02f, -0.53f), new Vector3(0.54f, 0.57f, 0.24f), "pupil");
             Transform rightBlackPupil = Create(PrimitiveType.Sphere, "RightPupil", rightPupil, new Vector3(0f, -0.02f, -0.53f), new Vector3(0.54f, 0.57f, 0.24f), "pupil");
             Create(PrimitiveType.Sphere, "LeftEyeGlint", leftBlackPupil, new Vector3(-0.17f, 0.20f, -0.55f), new Vector3(0.26f, 0.26f, 0.22f), "white");
             Create(PrimitiveType.Sphere, "RightEyeGlint", rightBlackPupil, new Vector3(-0.17f, 0.20f, -0.55f), new Vector3(0.26f, 0.26f, 0.22f), "white");
-            leftLid = Create(PrimitiveType.Sphere, "LeftLid", head, new Vector3(-0.30f, 0.345f, -0.605f), new Vector3(0.39f, 0.002f, 0.17f), "skin");
-            rightLid = Create(PrimitiveType.Sphere, "RightLid", head, new Vector3(0.30f, 0.345f, -0.605f), new Vector3(0.39f, 0.002f, 0.17f), "skin");
-            leftBrow = Create(PrimitiveType.Capsule, "LeftBrow", head, new Vector3(-0.30f, 0.405f, -0.585f), new Vector3(0.055f, 0.20f, 0.052f), "hair");
+            leftLid = Create(PrimitiveType.Sphere, "LeftLid", head, new Vector3(-0.30f, 0.325f, -0.605f), new Vector3(0.29f, 0.002f, 0.15f), "skin");
+            rightLid = Create(PrimitiveType.Sphere, "RightLid", head, new Vector3(0.30f, 0.325f, -0.605f), new Vector3(0.29f, 0.002f, 0.15f), "skin");
+            leftBrow = Create(PrimitiveType.Capsule, "LeftBrow", head, new Vector3(-0.29f, 0.44f, -0.615f), new Vector3(0.085f, 0.24f, 0.070f), "hair");
             leftBrow.localRotation = Quaternion.Euler(0f, 0f, 90f);
-            rightBrow = Create(PrimitiveType.Capsule, "RightBrow", head, new Vector3(0.30f, 0.405f, -0.585f), new Vector3(0.055f, 0.20f, 0.052f), "hair");
+            rightBrow = Create(PrimitiveType.Capsule, "RightBrow", head, new Vector3(0.29f, 0.44f, -0.615f), new Vector3(0.085f, 0.24f, 0.070f), "hair");
             rightBrow.localRotation = Quaternion.Euler(0f, 0f, 90f);
             leftCheek = Create(PrimitiveType.Sphere, "LeftCheek", head, new Vector3(-0.43f, -0.17f, -0.515f), new Vector3(0.16f, 0.065f, 0.04f), "blush");
             rightCheek = Create(PrimitiveType.Sphere, "RightCheek", head, new Vector3(0.43f, -0.17f, -0.515f), new Vector3(0.16f, 0.065f, 0.04f), "blush");
@@ -390,46 +522,130 @@ namespace PersonalAssistant.Avatar
             BuildStatusPin();
         }
 
+        private bool TryBuildRiggedAvatar()
+        {
+            GameObject prefab = Resources.Load<GameObject>("Character/MiloRig");
+            if (prefab == null) return false;
+
+            GameObject instance = Instantiate(prefab, body);
+            instance.name = "MiloRiggedCharacter";
+            instance.transform.localPosition = Vector3.zero;
+            instance.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+            instance.transform.localScale = Vector3.one;
+
+            head = FindDescendant(instance.transform, "Head");
+            leftEye = FindDescendant(instance.transform, "White_Eye.L");
+            rightEye = FindDescendant(instance.transform, "White_Eye.R");
+            leftPupil = FindDescendant(instance.transform, "Iris_Eye.L");
+            rightPupil = FindDescendant(instance.transform, "Iris_Eye.R");
+            leftLid = FindDescendant(instance.transform, "Lid_Eye.L");
+            rightLid = FindDescendant(instance.transform, "Lid_Eye.R");
+            leftBrow = FindDescendant(instance.transform, "Brow.L");
+            rightBrow = FindDescendant(instance.transform, "Brow.R");
+            mouth = FindDescendant(instance.transform, "Mouth_Interior");
+            leftMouthCorner = FindDescendant(instance.transform, "MouthCorner.L");
+            rightMouthCorner = FindDescendant(instance.transform, "MouthCorner.R");
+            leftCheek = FindDescendant(instance.transform, "Blush.L");
+            rightCheek = FindDescendant(instance.transform, "Blush.R");
+            leftArm = FindDescendant(instance.transform, "UpperArm.L");
+            rightArm = FindDescendant(instance.transform, "UpperArm.R");
+            statusOrb = FindDescendant(instance.transform, "Status_Orb");
+            riggedTeeth = FindDescendant(instance.transform, "Mouth_Teeth");
+            riggedTongue = FindDescendant(instance.transform, "Mouth_Tongue");
+
+            Transform[] required = { head, leftEye, rightEye, leftPupil, rightPupil, leftLid, rightLid, leftBrow, rightBrow, mouth, leftArm, rightArm, statusOrb };
+            for (int i = 0; i < required.Length; i++)
+            {
+                if (required[i] != null) continue;
+                Debug.LogWarning("Rigged avatar is incomplete; using procedural fallback.");
+                if (Application.isPlaying) Destroy(instance);
+                else DestroyImmediate(instance);
+                return false;
+            }
+
+            riggedMouthRenderer = mouth.GetComponent<SkinnedMeshRenderer>();
+            ApplyRiggedMaterials(instance);
+            usingRiggedAsset = true;
+            Debug.Log($"RIGGED_AVATAR_ACTIVE: renderers={instance.GetComponentsInChildren<Renderer>(true).Length}, mouthBlendShapes={(riggedMouthRenderer == null ? 0 : riggedMouthRenderer.sharedMesh.blendShapeCount)}");
+            return true;
+        }
+
+        private void ApplyRiggedMaterials(GameObject instance)
+        {
+            foreach (Renderer renderer in instance.GetComponentsInChildren<Renderer>(true))
+            {
+                string objectName = renderer.gameObject.name;
+                string key = objectName switch
+                {
+                    _ when objectName.StartsWith("Skin_EarInner") => "skinRoseSoft",
+                    _ when objectName.StartsWith("Skin_") => "skin",
+                    _ when objectName.StartsWith("Hair_") || objectName.StartsWith("Brow") => "hair",
+                    _ when objectName.StartsWith("Shirt_") && (objectName.Contains("Rib") || objectName.Contains("Hem") || objectName.Contains("Cuff")) => "shirtRedDark",
+                    _ when objectName.StartsWith("Shirt_") => "shirtRed",
+                    _ when objectName.StartsWith("Shorts_") => "shortsBlue",
+                    _ when objectName.StartsWith("Shoe_Sole") => "shoeSole",
+                    _ when objectName.StartsWith("Shoe_") => "shoeYellow",
+                    _ when objectName.StartsWith("Sock_") || objectName.StartsWith("White_") || objectName.StartsWith("Glint_") || objectName.StartsWith("Status_Petal") || objectName == "Mouth_Teeth" => "white",
+                    _ when objectName.StartsWith("Iris_") => "iris",
+                    _ when objectName.StartsWith("Pupil_") => "pupil",
+                    _ when objectName.StartsWith("Blush") => "blush",
+                    _ when objectName == "Mouth_Tongue" => "tongue",
+                    _ when objectName.StartsWith("Mouth") => "mouth",
+                    _ when objectName == "Status_Orb" => "status",
+                    _ => null
+                };
+                if (key == null) continue;
+                Material material = GetMaterial(key);
+                renderer.sharedMaterial = material;
+                Color color = material.HasProperty("_BaseColor") ? material.GetColor("_BaseColor") : material.color;
+                MaterialPropertyBlock block = new();
+                renderer.GetPropertyBlock(block);
+                block.SetColor("_BaseColor", color);
+                block.SetColor("_Color", color);
+                renderer.SetPropertyBlock(block);
+                bool facialOverlay = objectName.StartsWith("Brow") || objectName.StartsWith("Lid_") ||
+                                     objectName.StartsWith("White_Eye") || objectName.StartsWith("Iris_") ||
+                                     objectName.StartsWith("Pupil_") || objectName.StartsWith("Glint_") ||
+                                     objectName.StartsWith("Blush") || objectName.StartsWith("Mouth") ||
+                                     objectName == "Skin_Nose";
+                renderer.shadowCastingMode = facialOverlay ? ShadowCastingMode.Off : ShadowCastingMode.On;
+                renderer.receiveShadows = !facialOverlay;
+            }
+        }
+
+        private static Transform FindDescendant(Transform root, string objectName)
+        {
+            foreach (Transform item in root.GetComponentsInChildren<Transform>(true))
+                if (item.name == objectName) return item;
+            return null;
+        }
+
         private Transform BuildArm(string side, Transform parent, Vector3 position, float zRotation)
         {
             Transform root = new GameObject($"{side}ArmMotion").transform;
             root.SetParent(parent, false);
             root.localPosition = position;
             root.localRotation = Quaternion.Euler(0f, 0f, zRotation);
-            Create(PrimitiveType.Capsule, $"{side}Sleeve", root, new Vector3(0f, 0.02f, 0f), new Vector3(0.22f, 0.50f, 0.24f), "teal");
-            Create(PrimitiveType.Sphere, $"{side}Cuff", root, new Vector3(0f, -0.39f, -0.01f), new Vector3(0.25f, 0.15f, 0.25f), "tealLight");
-            Create(PrimitiveType.Sphere, $"{side}Hand", root, new Vector3(0f, -0.53f, -0.02f), new Vector3(0.22f, 0.25f, 0.21f), "skin");
+            Create(PrimitiveType.Capsule, $"{side}Sleeve", root, new Vector3(0f, 0.02f, 0f), new Vector3(0.23f, 0.34f, 0.25f), "shirtRed");
+            Create(PrimitiveType.Sphere, $"{side}Cuff", root, new Vector3(0f, -0.27f, -0.01f), new Vector3(0.24f, 0.12f, 0.24f), "shirtRedDark");
+            Create(PrimitiveType.Sphere, $"{side}Hand", root, new Vector3(0f, -0.41f, -0.02f), new Vector3(0.23f, 0.24f, 0.22f), "skin");
             return root;
         }
 
         private void BuildStatusPin()
         {
-            Vector3 center = new(0.35f, 1.78f, -0.49f);
-            Create(PrimitiveType.Sphere, "PinPetalTop", body, center + new Vector3(0f, 0.075f, 0f), new Vector3(0.075f, 0.10f, 0.035f), "white");
-            Create(PrimitiveType.Sphere, "PinPetalLeft", body, center + new Vector3(-0.07f, -0.025f, 0f), new Vector3(0.10f, 0.075f, 0.035f), "white");
-            Create(PrimitiveType.Sphere, "PinPetalRight", body, center + new Vector3(0.07f, -0.025f, 0f), new Vector3(0.10f, 0.075f, 0.035f), "white");
-            statusOrb = Create(PrimitiveType.Sphere, "StateIndicator", body, center + new Vector3(0f, 0f, -0.025f), Vector3.one * 0.075f, "status");
+            Vector3 center = new(0.35f, 1.64f, -0.49f);
+            Create(PrimitiveType.Sphere, "PinPetalTop", body, center + new Vector3(0f, 0.060f, 0f), new Vector3(0.060f, 0.082f, 0.030f), "white");
+            Create(PrimitiveType.Sphere, "PinPetalLeft", body, center + new Vector3(-0.055f, -0.020f, 0f), new Vector3(0.082f, 0.060f, 0.030f), "white");
+            Create(PrimitiveType.Sphere, "PinPetalRight", body, center + new Vector3(0.055f, -0.020f, 0f), new Vector3(0.082f, 0.060f, 0.030f), "white");
+            statusOrb = Create(PrimitiveType.Sphere, "StateIndicator", body, center + new Vector3(0f, 0f, -0.025f), Vector3.one * 0.062f, "status");
         }
 
         private void BuildHair()
         {
-            Create(PrimitiveType.Sphere, "HairCap", head, new Vector3(0f, 0.42f, 0.07f), new Vector3(1.10f, 0.62f, 0.94f), "hair");
-            Vector3[] locks =
-            {
-                new(-0.43f, 0.61f, -0.27f), new(-0.20f, 0.74f, -0.39f), new(0.05f, 0.76f, -0.43f),
-                new(0.30f, 0.67f, -0.36f), new(0.47f, 0.54f, -0.19f), new(-0.02f, 0.56f, -0.54f)
-            };
-            float[] rotations = { -38f, -24f, -5f, 24f, 42f, 20f };
-            Vector3[] scales =
-            {
-                new(0.22f, 0.31f, 0.20f), new(0.24f, 0.37f, 0.22f), new(0.25f, 0.40f, 0.22f),
-                new(0.24f, 0.36f, 0.21f), new(0.21f, 0.29f, 0.19f), new(0.20f, 0.30f, 0.18f)
-            };
-            for (int i = 0; i < locks.Length; i++)
-            {
-                Transform hair = Create(PrimitiveType.Capsule, $"HairLock{i + 1}", head, locks[i], scales[i], "hair");
-                hair.localRotation = Quaternion.Euler(0f, 0f, rotations[i]);
-            }
+            Create(PrimitiveType.Sphere, "HairCap", head, new Vector3(0f, 0.46f, 0.08f), new Vector3(1.18f, 0.56f, 0.95f), "hair");
+            Transform signatureLock = Create(PrimitiveType.Capsule, "SignatureForeheadLock", head, new Vector3(0.25f, 0.64f, -0.49f), new Vector3(0.085f, 0.19f, 0.075f), "hair");
+            signatureLock.localRotation = Quaternion.Euler(0f, 0f, 48f);
         }
 
         private Transform Create(PrimitiveType type, string objectName, Transform parent, Vector3 position, Vector3 scale, string materialKey)
@@ -465,11 +681,16 @@ namespace PersonalAssistant.Avatar
             Material material = new(shader) { name = $"Runtime_{key}" };
             Color color = key switch
             {
-                "skin" => new Color(1.00f, 0.64f, 0.43f),
-                "skinRose" => new Color(1.00f, 0.50f, 0.38f),
-                "skinRoseSoft" => new Color(0.94f, 0.43f, 0.34f),
-                "blush" => new Color(0.96f, 0.42f, 0.36f),
-                "hair" => new Color(0.13f, 0.055f, 0.035f),
+                "skin" => new Color(1.00f, 0.70f, 0.59f),
+                "skinRose" => new Color(1.00f, 0.57f, 0.49f),
+                "skinRoseSoft" => new Color(0.95f, 0.49f, 0.43f),
+                "blush" => new Color(0.98f, 0.55f, 0.55f),
+                "hair" => new Color(0.075f, 0.055f, 0.055f),
+                "shirtRed" => new Color(0.82f, 0.055f, 0.065f),
+                "shirtRedDark" => new Color(0.62f, 0.028f, 0.040f),
+                "shortsBlue" => new Color(0.20f, 0.16f, 0.56f),
+                "shoeYellow" => new Color(0.96f, 0.66f, 0.06f),
+                "shoeSole" => new Color(0.25f, 0.14f, 0.035f),
                 "teal" => new Color(0.04f, 0.38f, 0.43f),
                 "tealLight" => new Color(0.08f, 0.54f, 0.58f),
                 "cream" => new Color(0.96f, 0.91f, 0.82f),
@@ -479,6 +700,7 @@ namespace PersonalAssistant.Avatar
                 "iris" => new Color(0.26f, 0.10f, 0.035f),
                 "pupil" => new Color(0.035f, 0.018f, 0.014f),
                 "mouth" => new Color(0.25f, 0.025f, 0.025f),
+                "tongue" => new Color(0.95f, 0.18f, 0.25f),
                 "mouthLine" => new Color(0.16f, 0.018f, 0.018f),
                 "shadow" => new Color(0.08f, 0.12f, 0.14f),
                 "backdrop" => new Color(0.035f, 0.13f, 0.15f),
@@ -486,7 +708,7 @@ namespace PersonalAssistant.Avatar
             };
             material.color = color;
             if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
-            material.SetFloat("_Smoothness", key is "hair" or "iris" or "pupil" ? 0.55f : 0.22f);
+            material.SetFloat("_Smoothness", key is "hair" or "iris" or "pupil" or "shoeYellow" ? 0.48f : 0.22f);
             materials[key] = material;
             return material;
         }

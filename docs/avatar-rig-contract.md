@@ -1,8 +1,10 @@
 # Avatar Rig Contract
 
-This contract turns `design/character-concept-v1.png` into an animation-ready,
-mobile-friendly 3D character. The neutral front view is the identity reference;
-the other views and expressions define shape and range, not separate variants.
+This contract uses `design/character-reference-v2.jpeg` as the current visual
+direction for an animation-ready, mobile-friendly 3D character. Its compact
+proportions, clear brows, and broad pose language are the primary references;
+the production character should retain its own identity and the assistant's
+flower-shaped state indicator.
 
 ## Deliverables
 
@@ -136,4 +138,3 @@ The asset is accepted only when:
 - Visemes remain readable when combined with all five expressions.
 - Head and eye tracking do not produce eyelid or neck artifacts.
 - The Unity test scene loads with no missing materials or animation bindings.
-

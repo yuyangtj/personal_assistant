@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using PersonalAssistant.Avatar;
 using UnityEditor;
 using UnityEditor.Build;
@@ -78,6 +79,17 @@ namespace PersonalAssistant.Avatar.Editor
         [MenuItem("Personal Assistant/Build Android APK")]
         public static void BuildAndroid()
         {
+            BuildAndroidWithOptions(BuildOptions.Development);
+        }
+
+        [MenuItem("Personal Assistant/Build Android Release APK")]
+        public static void BuildAndroidRelease()
+        {
+            BuildAndroidWithOptions(BuildOptions.None);
+        }
+
+        private static void BuildAndroidWithOptions(BuildOptions buildOptions)
+        {
             if (!File.Exists(ScenePath)) CreatePrototypeScene();
             ConfigureRenderPipeline();
             ConfigurePlayer();
@@ -88,7 +100,7 @@ namespace PersonalAssistant.Avatar.Editor
                 scenes = new[] { ScenePath },
                 locationPathName = "Builds/Android/avatar-prototype.apk",
                 target = BuildTarget.Android,
-                options = BuildOptions.Development
+                options = buildOptions
             };
             BuildReport report = BuildPipeline.BuildPlayer(options);
             if (report.summary.result != BuildResult.Succeeded)
@@ -124,6 +136,35 @@ namespace PersonalAssistant.Avatar.Editor
             Debug.Log("PROTOTYPE_VALIDATION_PASSED: scene, URP, camera, runtime components, and JSON command contract are valid.");
         }
 
+        public static void ValidateRiggedAsset()
+        {
+            const string rigPath = "Assets/AvatarPrototype/Resources/Character/MiloRig.fbx";
+            GameObject rig = AssetDatabase.LoadAssetAtPath<GameObject>(rigPath);
+            if (rig == null) throw new BuildFailedException($"Rigged character is missing at {rigPath}.");
+
+            string[] requiredNodes =
+            {
+                "Root", "Hips", "Chest", "Head", "UpperArm.L", "UpperArm.R",
+                "LowerArm.L", "LowerArm.R", "Hand.L", "Hand.R", "Mouth_Interior",
+                "Iris_Eye.L", "Iris_Eye.R", "Brow.L", "Brow.R", "Status_Orb"
+            };
+            string[] hierarchyNames = rig.GetComponentsInChildren<Transform>(true).Select(item => item.name).ToArray();
+            foreach (string node in requiredNodes)
+                if (!hierarchyNames.Contains(node)) throw new BuildFailedException($"Rigged character node is missing: {node}");
+
+            Mesh mouthMesh = AssetDatabase.LoadAllAssetsAtPath(rigPath)
+                .OfType<Mesh>()
+                .FirstOrDefault(mesh => mesh.name.Contains("Mouth_Interior"));
+            if (mouthMesh == null) throw new BuildFailedException("Rigged character mouth mesh is missing.");
+
+            string[] visemes = { "viseme_PP", "viseme_FF", "viseme_TH", "viseme_DD", "viseme_kk", "viseme_CH", "viseme_SS", "viseme_nn", "viseme_RR", "viseme_aa", "viseme_E", "viseme_ih", "viseme_oh", "viseme_ou" };
+            string[] blendShapes = Enumerable.Range(0, mouthMesh.blendShapeCount).Select(mouthMesh.GetBlendShapeName).ToArray();
+            foreach (string viseme in visemes)
+                if (!blendShapes.Contains(viseme)) throw new BuildFailedException($"Rigged character viseme is missing: {viseme}");
+
+            Debug.Log($"RIGGED_ASSET_VALIDATION_PASSED: {hierarchyNames.Length} nodes, {mouthMesh.blendShapeCount} mouth blendshapes.");
+        }
+
         public static void CapturePrototypeFrame()
         {
             EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
@@ -143,7 +184,7 @@ namespace PersonalAssistant.Avatar.Editor
             frame.ReadPixels(new Rect(0, 0, width, height), 0, 0);
             frame.Apply();
 
-            string outputPath = Path.GetFullPath(Path.Combine(Application.dataPath, "../../../design/prototype-frame-v1.png"));
+            string outputPath = Path.GetFullPath(Path.Combine(Application.dataPath, "../../../design/prototype-frame-v2-rigged.png"));
             File.WriteAllBytes(outputPath, frame.EncodeToPNG());
             camera.targetTexture = null;
             RenderTexture.active = previous;

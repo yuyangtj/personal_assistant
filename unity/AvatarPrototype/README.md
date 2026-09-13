@@ -22,6 +22,10 @@ Use `Personal Assistant > Build Android APK`, or run the editor method
 `PersonalAssistant.Avatar.Editor.PrototypeProjectSetup.CreateAndBuildAndroid`
 in batch mode. The output is `Builds/Android/avatar-prototype.apk`.
 
+For a device build without development instrumentation, use
+`Personal Assistant > Build Android Release APK` or execute
+`PersonalAssistant.Avatar.Editor.PrototypeProjectSetup.BuildAndroidRelease`.
+
 ## Native bridge contract
 
 The future Kotlin host can call Unity's `UnitySendMessage` with:

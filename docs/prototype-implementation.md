@@ -44,6 +44,27 @@ replace the final authored model:
 The generated geometry is not evidence that the final character-art quality gate
 has passed. The approved rigged character remains the required replacement.
 
+## Character direction v2
+
+The device prototype now follows `design/character-reference-v2.jpeg` instead
+of the earlier fashion-oriented character direction:
+
+- A larger rounded head, compact sweatshirt-and-shorts body, shorter limbs,
+  smoother hair cap, smaller eyes, and heavier expression-driving brows.
+- A restrained red, indigo, and warm-yellow outfit palette, with the animated
+  flower pin retained as the assistant-specific state signal.
+- Stronger thinking, speaking, and success gestures, plus an open success mouth
+  pose that makes state changes readable at phone distance.
+- Rebuilt and installed successfully on the Pixel 10 Pro XL after the redesign.
+
+## Rigged character replacement
+
+The procedural character is now a fallback. The primary runtime character is
+the Blender-authored `MiloRig.fbx`, with an editable `.blend` source, humanoid
+bone hierarchy, rigid skin weights, articulated limb segments, modeled fingers,
+layered clothing and shoes, separate facial parts, and 17 mouth blendshapes.
+See `docs/rigged-character-pipeline.md` for regeneration and optimization notes.
+
 ## Native command boundary
 
 The future Kotlin host sends one high-level JSON command to Unity:
