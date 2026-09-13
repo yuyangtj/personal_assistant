@@ -1,0 +1,20 @@
+id: kimi-code
+name: Kimi Code
+kind: agent
+description: Planned local coding-agent integration; intentionally disabled until tested.
+provides:
+  - coding
+  - repository_analysis
+  - shell_execution
+  - testing
+availability:
+  enabled: false
+  concurrency: 1
+execution:
+  adapter: kimi-cli
+  timeout_seconds: 1800
+risk:
+  default_level: 2
+  destructive_actions_require_approval: true
+routing:
+  priority: 50

@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.pytest_cache
+.ruff_cache
+.venv
+**/__pycache__
+*.pyc
+*.db
+*.sqlite3
+artifacts
+hetzner-mcp
+tests

@@ -1,0 +1,17 @@
+id: fake-executor
+name: Deterministic fake executor
+kind: agent
+description: Exercises the orchestration lifecycle without external side effects.
+provides:
+  - task_execution
+availability:
+  enabled: true
+  concurrency: 4
+execution:
+  adapter: fake
+  timeout_seconds: 30
+risk:
+  default_level: 0
+  destructive_actions_require_approval: true
+routing:
+  priority: 10

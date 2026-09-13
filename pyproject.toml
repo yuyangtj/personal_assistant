@@ -1,0 +1,40 @@
+[project]
+name = "personal-assistant-core"
+version = "0.1.0"
+description = "A persistent, capability-driven personal AI orchestration service"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.116.0,<1",
+    "httpx>=0.28.0,<1",
+    "pydantic>=2.9.0,<3",
+    "psycopg[binary]>=3.2.0,<4",
+    "pyyaml>=6.0.0,<7",
+    "sqlalchemy>=2.0.40,<3",
+    "uvicorn[standard]>=0.35.0,<1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0,<10",
+    "ruff>=0.12.0,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["hetzner-mcp"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
