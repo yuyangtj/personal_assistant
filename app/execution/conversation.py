@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from time import monotonic
 from typing import Any, Protocol
 
-from app.execution.actions import validate_action
+from app.execution.actions import alarm_matches_next_occurrence, validate_action
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.integrations.kimi import ChatCompletion, ChatMessage
@@ -28,10 +28,11 @@ a confirmation card and only acts after the user taps Confirm, so never say it i
 say what you will set up and ask them to confirm. Supported actions:
 - {"type": "set_timer", "seconds": <1-86400>, "label": "<short label or empty>"}
 - {"type": "set_alarm", "hour": <0-23>, "minute": <0-59>, "label": "<short label>",
-  "days": [<optional repeat days, 1=Sunday ... 7=Saturday>]}
-  Leave "days" empty for one-time alarms, including "tomorrow" or a specific date: the alarm
-  rings at the next occurrence of that time. Only fill "days" for repeating requests such as
-  "every weekday" or "on Mondays". Use an alarm with a label for "remind me at <time>" requests.
+  "days": [<repeat days, 1=Sunday ... 7=Saturday>], "date": "YYYY-MM-DD or null"}
+  For a one-time alarm, leave "days" empty and always include its local calendar date. The
+  phone Clock can only set the next occurrence of a time, so propose it only when that date is
+  the next occurrence after the local time below. Otherwise explain that limitation and propose
+  no action. For repeating requests, fill "days" and set "date" to null.
 - {"type": "create_event", "title": "<title>", "start": "YYYY-MM-DDTHH:MM",
   "end": "YYYY-MM-DDTHH:MM or null", "location": "<optional>"}
   Times are in the user's local time; resolve words like "tomorrow" from the local date below.
@@ -75,7 +76,7 @@ class ConversationExecutor:
         if is_cancelled():
             raise ExecutionCancelled(f"Task {task_id} was cancelled")
 
-        reply, emotion, action = parse_model_output(completion.text)
+        reply, emotion, action = parse_model_output(completion.text, context=context or {})
         if action is INVALID_ACTION:
             # Never tell the user to confirm a card that will not appear.
             reply, emotion, action = INVALID_ACTION_REPLY, "Concerned", None
@@ -106,6 +107,8 @@ class ConversationExecutor:
         for turn in history:
             messages.append(ChatMessage("user", turn.request))
             messages.append(ChatMessage("assistant", json.dumps({"reply": turn.reply})))
+            if turn.outcome:
+                messages.append(ChatMessage("system", turn.outcome))
         messages.append(ChatMessage("user", request))
         return messages
 
@@ -134,7 +137,11 @@ def parse_reply(text: str) -> tuple[str, str]:
 INVALID_ACTION: dict[str, Any] = {}
 
 
-def parse_model_output(text: str) -> tuple[str, str, dict[str, Any] | None]:
+def parse_model_output(
+    text: str,
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> tuple[str, str, dict[str, Any] | None]:
     """Reply, emotion and a validated phone action from the model's JSON output.
 
     The action is None when the model proposed none, and the INVALID_ACTION sentinel when it
@@ -157,7 +164,9 @@ def parse_model_output(text: str) -> tuple[str, str, dict[str, Any] | None]:
             raw_action = decoded.get("action")
             if raw_action is not None:
                 action = validate_action(raw_action)
-                if action is None:
+                if action is None or not alarm_matches_next_occurrence(
+                    action, (context or {}).get("local_time")
+                ):
                     action = INVALID_ACTION
     reply = _speakable(reply)
     if not reply:

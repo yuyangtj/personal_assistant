@@ -6,6 +6,7 @@ import android.content.Intent
 import android.provider.AlarmClock
 import android.provider.CalendarContract
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.Calendar
 
 /** Runs confirmed actions through the phone's own Clock and Calendar apps via public intents. */
@@ -36,6 +37,14 @@ class PhoneActionRunner(private val activity: Activity) {
                     .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
                     .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, end)
                     .putExtra(CalendarContract.Events.EVENT_LOCATION, action.location)
+            }
+        }
+        if (action is PhoneAction.SetAlarm && action.days.isEmpty()) {
+            val now = ZonedDateTime.now()
+            var next = now.withHour(action.hour).withMinute(action.minute).withSecond(0).withNano(0)
+            if (!next.isAfter(now)) next = next.plusDays(1)
+            if (action.date != next.toLocalDate()) {
+                return "That alarm date is no longer the next occurrence. Please ask me to prepare it again."
             }
         }
         return try {

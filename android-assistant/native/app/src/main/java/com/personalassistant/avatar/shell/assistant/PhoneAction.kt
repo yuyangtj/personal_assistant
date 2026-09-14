@@ -1,5 +1,6 @@
 package com.personalassistant.avatar.shell.assistant
 
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -18,8 +19,14 @@ sealed interface PhoneAction {
         override val doneSpeech get() = "Done. Your ${spokenDuration(seconds)} timer is running."
     }
 
-    data class SetAlarm(val hour: Int, val minute: Int, val label: String, val days: List<Int>) : PhoneAction {
-        override val summary get() = listOf("Alarm", "%02d:%02d".format(hour, minute), repeat(days), label)
+    data class SetAlarm(
+        val hour: Int,
+        val minute: Int,
+        val label: String,
+        val days: List<Int>,
+        val date: LocalDate?,
+    ) : PhoneAction {
+        override val summary get() = listOf("Alarm", date?.format(DateTimeFormatter.ofPattern("EEE d MMM")).orEmpty(), "%02d:%02d".format(hour, minute), repeat(days), label)
             .filter { it.isNotBlank() }.joinToString(" · ")
         override val doneSpeech get() = "Done. Your alarm is set for %d:%02d.".format(hour, minute)
     }
@@ -41,12 +48,25 @@ sealed interface PhoneAction {
             return try {
                 when (json.optString("type")) {
                     "set_timer" -> SetTimer(json.getInt("seconds").coerceIn(1, 86_400), json.optString("label"))
-                    "set_alarm" -> SetAlarm(
-                        json.getInt("hour").coerceIn(0, 23),
-                        json.getInt("minute").coerceIn(0, 59),
-                        json.optString("label"),
-                        json.optJSONArray("days")?.let { days -> List(days.length()) { days.getInt(it) } } ?: emptyList(),
-                    )
+                    "set_alarm" -> {
+                        val days = json.optJSONArray("days")?.let { values ->
+                            List(values.length()) { values.getInt(it) }
+                        } ?: emptyList()
+                        val date = json.optString("date").takeIf {
+                            it.isNotBlank() && it != "null"
+                        }?.let(LocalDate::parse)
+                        if ((days.isEmpty() && date == null) || (days.isNotEmpty() && date != null)) {
+                            null
+                        } else {
+                            SetAlarm(
+                                json.getInt("hour").coerceIn(0, 23),
+                                json.getInt("minute").coerceIn(0, 59),
+                                json.optString("label"),
+                                days,
+                                date,
+                            )
+                        }
+                    }
                     "create_event" -> CreateEvent(
                         json.getString("title"),
                         LocalDateTime.parse(json.getString("start")),

@@ -89,13 +89,16 @@ you tap **Confirm**:
 | Action | Android API | Result |
 | --- | --- | --- |
 | `set_timer` | `AlarmClock.ACTION_SET_TIMER` (skip UI) | Timer starts in the Clock app |
-| `set_alarm` | `AlarmClock.ACTION_SET_ALARM` (skip UI, optional repeat days) | Alarm is set in the Clock app |
+| `set_alarm` | `AlarmClock.ACTION_SET_ALARM` (skip UI, validated date or repeat days) | Alarm is set in the Clock app |
 | `create_event` | `Intent.ACTION_INSERT` on `CalendarContract.Events` | Calendar opens pre-filled; you tap Save |
 
 - **Not now** runs nothing.
 - Either way, the outcome is added to the task as a user message.
 - Requests are sent with the phone's local time and time zone, so "tomorrow at noon"
   resolves correctly.
+- A one-time alarm is accepted only when its requested date is the next occurrence of
+  its clock time; later dated alarms are rejected because the public Clock intent cannot
+  preserve an arbitrary date.
 - Reading calendars, email, or messages is deliberately not supported: it would send
   personal data to the language model provider.
 

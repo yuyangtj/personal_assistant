@@ -56,17 +56,6 @@
       "baseColor": "CoolMan_Teeth_baseColor.png"
     },
     {
-      "name": "CoolMan_MouthCavity",
-      "color": [
-        0.09,
-        0.02,
-        0.025,
-        1.0
-      ],
-      "smoothness": 0.0,
-      "matte": true
-    },
-    {
       "name": "CoolMan_StatusLight",
       "color": [
         0.1,

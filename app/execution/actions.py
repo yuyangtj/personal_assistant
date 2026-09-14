@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date as Date
+from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -49,11 +50,30 @@ class SetAlarmAction(_Action):
     minute: int = Field(ge=0, le=59)
     label: str = Field(default="", max_length=60)
     days: tuple[int, ...] = Field(default=(), max_length=7)
+    date: str | None = Field(
+        default=None,
+        description="Local YYYY-MM-DD for one-time alarms; null for repeating alarms",
+    )
+
+    @field_validator("date", mode="before")
+    @classmethod
+    def normalize_date(cls, value: Any) -> str | None:
+        if value is None or (
+            isinstance(value, str) and value.strip().lower() in {"", "null", "none"}
+        ):
+            return None
+        if not isinstance(value, str):
+            raise ValueError("date must be a string")
+        return Date.fromisoformat(value.strip()).isoformat()
 
     @model_validator(mode="after")
     def days_are_weekdays(self) -> SetAlarmAction:
         if any(day < 1 or day > 7 for day in self.days) or len(set(self.days)) != len(self.days):
             raise ValueError("days must be unique values from 1 (Sunday) to 7 (Saturday)")
+        if self.days and self.date is not None:
+            raise ValueError("repeating alarms must not include a date")
+        if not self.days and self.date is None:
+            raise ValueError("one-time alarms require a date")
         return self
 
 
@@ -103,3 +123,24 @@ def validate_action(raw: Any) -> dict[str, Any] | None:
         return _ADAPTER.validate_python(raw).model_dump(mode="json")
     except (ValidationError, ValueError):
         return None
+
+
+def alarm_matches_next_occurrence(action: dict[str, Any], local_time: Any) -> bool:
+    """One-time Clock intents are safe only when their date is the next occurrence."""
+    if action.get("type") != "set_alarm" or action.get("days"):
+        return True
+    if not isinstance(local_time, str) or not isinstance(action.get("date"), str):
+        return False
+    try:
+        now = datetime.fromisoformat(local_time.strip())
+        candidate = now.replace(
+            hour=int(action["hour"]),
+            minute=int(action["minute"]),
+            second=0,
+            microsecond=0,
+        )
+        if candidate <= now:
+            candidate += timedelta(days=1)
+        return candidate.date().isoformat() == action["date"]
+    except (KeyError, TypeError, ValueError):
+        return False

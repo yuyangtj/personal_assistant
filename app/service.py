@@ -135,13 +135,15 @@ class TaskService:
                 .where(TaskModel.status == TaskStatus.COMPLETED.value)
                 .where(TaskModel.created_at <= task.created_at)
                 .where(TaskModel.id != task.id)
+                .where(
+                    TaskModel.source_context["conversation_id"].as_string()
+                    == str(conversation_id)
+                )
                 .order_by(TaskModel.created_at.desc())
-                .limit(100)
+                .limit(limit)
             ).all()
             turns: list[ConversationTurn] = []
             for previous in recent:
-                if (previous.source_context or {}).get("conversation_id") != conversation_id:
-                    continue
                 reply = session.scalar(
                     select(TaskEventModel.payload)
                     .where(TaskEventModel.task_id == previous.id)
@@ -150,10 +152,43 @@ class TaskService:
                     .limit(1)
                 )
                 if reply and reply.get("text"):
-                    turns.append(ConversationTurn(previous.original_request, reply["text"]))
-                if len(turns) >= limit:
-                    break
+                    action_notes = session.scalars(
+                        select(TaskEventModel.payload)
+                        .where(TaskEventModel.task_id == previous.id)
+                        .where(
+                            TaskEventModel.event_type
+                            == EventType.USER_MESSAGE_RECEIVED.value
+                        )
+                        .order_by(TaskEventModel.sequence.desc())
+                    ).all()
+                    outcome = next(
+                        (
+                            trusted
+                            for note in action_notes
+                            if (trusted := self._trusted_action_outcome(note)) is not None
+                        ),
+                        None,
+                    )
+                    turns.append(
+                        ConversationTurn(
+                            previous.original_request,
+                            reply["text"],
+                            outcome,
+                        )
+                    )
             return list(reversed(turns))
+
+    @staticmethod
+    def _trusted_action_outcome(payload: dict[str, Any] | None) -> str | None:
+        """Maps native action notes to fixed text; raw client messages never become prompts."""
+        message = payload.get("message", "") if payload else ""
+        if message.startswith("Phone action confirmed and started:"):
+            return "The user confirmed and started the previous phone action."
+        if message.startswith("Phone action dismissed:"):
+            return "The user dismissed the previous phone action."
+        if message.startswith("Phone action failed:"):
+            return "The previous phone action could not be started."
+        return None
 
     def claim_next_task(self, *, worker_id: str, lease_seconds: int) -> TaskModel | None:
         with self.database.session() as session, session.begin():

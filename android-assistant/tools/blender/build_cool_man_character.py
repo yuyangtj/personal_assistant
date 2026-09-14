@@ -198,7 +198,6 @@ def export_textures():
     manifest["CoolMan_Skin"]["smoothness"] = 0.22
     manifest["CoolMan_Hair"]["smoothness"] = 0.25
     # Untextured materials created later in this script.
-    manifest["CoolMan_MouthCavity"] = {"name": "CoolMan_MouthCavity", "color": [0.09, 0.02, 0.025, 1.0], "smoothness": 0.0, "matte": True}
     manifest["CoolMan_StatusLight"] = {"name": "CoolMan_StatusLight", "color": [0.1, 0.88, 0.55, 1.0], "emission": True, "smoothness": 0.6}
     # Unity's JsonUtility reads arrays of objects, not dictionaries.
     MANIFEST_PATH.write_text(json.dumps({"materials": list(manifest.values())}, indent=2) + "\n")
@@ -215,59 +214,6 @@ def join(objects, name):
     merged.name = name
     merged.data.name = name
     return merged
-
-
-def add_mouth_backdrop(face):
-    """A dark curved card behind the teeth so gaps at the mouth corners read as mouth interior."""
-    material = bpy.data.materials.new("CoolMan_MouthCavity")
-    material.use_nodes = True
-    material.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (0.09, 0.02, 0.025, 1.0)
-    material.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 0.8
-    face.data.materials.append(material)
-    index = len(face.data.materials) - 1
-
-    inverse = face.matrix_world.inverted()
-    bm = bmesh.new()
-    bm.from_mesh(face.data)
-    columns, rows = 12, 6
-    grid = []
-    for row in range(rows + 1):
-        z = 1.583 + 0.042 * row / rows  # Stays inside the head, clear of the jaw underside.
-        line = []
-        for column in range(columns + 1):
-            u = column / columns * 2 - 1
-            x = u * 0.032
-            y = -0.074 + 0.012 * u * u  # Curves back toward the cheeks.
-            line.append(bm.verts.new(inverse @ Vector((x, y, z))))
-        grid.append(line)
-    for row in range(rows):
-        for column in range(columns):
-            quad = (grid[row][column], grid[row][column + 1], grid[row + 1][column + 1], grid[row + 1][column])
-            new_face = bm.faces.new(quad)
-            new_face.material_index = index
-            new_face.normal_update()
-            if new_face.normal.dot(inverse.to_3x3() @ Vector((0, -1, 0))) < 0:
-                new_face.normal_flip()
-    # The mouth bag is skin-textured; recolour its faces behind the lips so the interior reads dark.
-    skin_index = face.data.materials.find("CoolMan_Skin")
-    world = face.matrix_world
-    interior = 0
-    for poly in bm.faces:
-        if poly.material_index != skin_index:
-            continue
-        center = world @ poly.calc_center_median()
-        normal = (world.to_3x3() @ poly.normal).normalized()
-        # Skip the skin under the jaw, which faces down and out of the head.
-        if abs(center.x) < 0.028 and center.y > -0.092 and 1.556 < center.z < 1.628 and normal.z > -0.35:
-            poly.material_index = index
-            interior += 1
-    bm.to_mesh(face.data)
-    bm.free()
-    log(f"mouth interior faces recoloured={interior}")
-    head = face.vertex_groups.get("Head")
-    cavity_vertices = [v.index for v in face.data.vertices if all(g.group != head.index for g in v.groups) and not v.groups]
-    head.add(cavity_vertices, 1.0, "REPLACE")
-    log(f"mouth backdrop vertices={len(cavity_vertices)}")
 
 
 def merge_meshes(armature):
@@ -372,7 +318,6 @@ class FaceRig:
         skin = mesh.materials.find("CoolMan_Skin")
         teeth = mesh.materials.find("CoolMan_Teeth")
         eye = mesh.materials.find("CoolMan_Eye")
-        self.cavity = mesh.materials.find("CoolMan_MouthCavity")
         self.material = [None] * len(mesh.vertices)
         for poly in mesh.polygons:
             for index in poly.vertices:
@@ -512,15 +457,15 @@ class FaceRig:
 
     # --- fields (return world-space displacement for vertex i) -------------
     def jaw(self, i, p, degrees):
-        if self.material[i] == self.cavity:
-            # The backdrop's lower half opens with the jaw, its upper half stays put.
-            weight = smoothstep(self.mouth_center.z + 0.004, self.mouth_center.z - 0.012, p.z)
-            pivot = Vector((0.0, -0.005, 1.635))
-            rotation = Matrix.Rotation(math.radians(degrees * weight), 3, "X")
-            return (rotation @ (p - pivot) + pivot) - p
         if self.material[i] == self.eye or (self.material[i] == self.teeth and i not in self.lower_teeth):
             return Vector()
         lateral = 1.0 - smoothstep(0.035, 0.085, abs(p.x))
+        # Keep the seam anchored at its endpoints. Use a full-width seam band here rather
+        # than lip_band(): lip_band intentionally fades laterally and left the last corner
+        # triangles partially attached to the rotating jaw.
+        near_seam = math.exp(-(self.line_offset(p) / 0.012) ** 2)
+        corner_anchor = smoothstep(self.corner_x, self.corner_x * 0.68, abs(p.x))
+        lateral *= (1.0 - near_seam) + corner_anchor * near_seam
         throat = smoothstep(-0.02, -0.075, p.y) if p.z < 1.57 else 1.0  # Keep the neck still.
         weight = lateral * self.lower_weight[i] * throat
         if i in self.lower_teeth:
@@ -534,7 +479,8 @@ class FaceRig:
     def apart(self, i, p, amount):
         if self.material[i] != self.skin:
             return Vector()
-        band = self.lip_band(p, 0.010)
+        corner_anchor = smoothstep(self.corner_x, self.corner_x * 0.68, abs(p.x))
+        band = self.lip_band(p, 0.010) * corner_anchor
         direction = 1.0 - 2.0 * self.lower_weight[i]
         return Vector((0.0, 0.0, amount * band * direction))
 
@@ -688,6 +634,12 @@ def build_shape_keys(face):
         lower = [positions[i] for i in rig.lower_lip if abs(rig.base[i].x) < 0.006]
         return (sum(p.z for p in upper) / len(upper)) - (sum(p.z for p in lower) / len(lower))
 
+    def corner_gap(positions):
+        threshold = rig.corner_x * 0.85
+        upper = [positions[i] for i in rig.upper_lip if abs(rig.base[i].x) > threshold]
+        lower = [positions[i] for i in rig.lower_lip if abs(rig.base[i].x) > threshold]
+        return (sum(p.z for p in upper) / len(upper)) - (sum(p.z for p in lower) / len(lower))
+
     def lid_gap(positions, side):
         eye = rig.eyes[side]
         upper = [positions[i].z for i in eye["rim"] if rig.base[i].z >= eye["center_z"] and abs(rig.base[i].x - eye["sign"] * 0.033) < 0.006]
@@ -695,11 +647,14 @@ def build_shape_keys(face):
         return sum(upper) / len(upper) - sum(lower) / len(lower)
 
     base_gap = lip_gap(rig.base)
+    base_corner_gap = corner_gap(rig.base)
     checks = {
         "PP gap change (mm)": ((lip_gap(report["viseme_PP"][0]) - base_gap) * 1000, lambda v: v <= 0.3),
         "aa opening (mm)": ((lip_gap(report["viseme_aa"][0]) - base_gap) * 1000, lambda v: 9.0 < v < 18.0),
         "oh opening (mm)": ((lip_gap(report["viseme_oh"][0]) - base_gap) * 1000, lambda v: 5.0 < v < 14.0),
         "ou opening (mm)": ((lip_gap(report["viseme_ou"][0]) - base_gap) * 1000, lambda v: 1.5 < v < 9.0),
+        "aa corner opening (mm)": ((corner_gap(report["viseme_aa"][0]) - base_corner_gap) * 1000, lambda v: v < 2.0),
+        "jaw corner opening (mm)": ((corner_gap(report["jawOpen"][0]) - base_corner_gap) * 1000, lambda v: v < 2.0),
         "blink L lid gap (mm)": (lid_gap(report["eyeBlink.L"][0], "L") * 1000, lambda v: v < 1.5),
         "blink R lid gap (mm)": (lid_gap(report["eyeBlink.R"][0], "R") * 1000, lambda v: v < 1.5),
         "open L lid gap (mm)": (lid_gap(rig.base, "L") * 1000, lambda v: v > 8.0),
@@ -859,7 +814,6 @@ def main():
     export_textures()
     face, body = merge_meshes(armature)
     add_head_bones(armature, face)
-    add_mouth_backdrop(face)
     rig, failed = build_shape_keys(face)
     if failed:
         raise SystemExit(f"COOLMAN_CHECKS_FAILED: {failed}")

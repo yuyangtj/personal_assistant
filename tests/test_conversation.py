@@ -162,6 +162,7 @@ def test_worker_answers_with_model_and_remembers_the_conversation(service: TaskS
         request="What does today look like?", source_context={"conversation_id": "c1"}
     )
     assert worker.run_once() is True
+    service.add_user_message(first.id, "Phone action dismissed: Alarm · 09:00")
     second = service.create_task(request="And tomorrow?", source_context={"conversation_id": "c1"})
     assert worker.run_once() is True
     other = service.create_task(request="Hi", source_context={"conversation_id": "c2"})
@@ -171,6 +172,10 @@ def test_worker_answers_with_model_and_remembers_the_conversation(service: TaskS
     second_messages = [(message.role, message.content) for message in client.calls[1]]
     assert ("user", "What does today look like?") in second_messages
     assert ("assistant", json.dumps({"reply": "You have a free morning."})) in second_messages
+    assert (
+        "system",
+        "The user dismissed the previous phone action.",
+    ) in second_messages
     assert all(message.role in {"system", "user"} for message in client.calls[2])
 
     reply = service.list_events(second.id)[-2]
@@ -181,6 +186,38 @@ def test_worker_answers_with_model_and_remembers_the_conversation(service: TaskS
     assert service.get_task(other.id).status == TaskStatus.COMPLETED.value
 
 
+def test_conversation_history_is_not_displaced_by_unrelated_tasks(
+    service: TaskService,
+) -> None:
+    replies = ['{"reply":"Remember this.","emotion":"Warm"}']
+    replies.extend(
+        f'{{"reply":"Unrelated {index}.","emotion":"Neutral"}}' for index in range(101)
+    )
+    replies.append('{"reply":"I remember.","emotion":"Warm"}')
+    client = RecordingChatClient(replies)
+    worker = _conversation_worker(service, client)
+
+    remembered = service.create_task(
+        request="My color is amber", source_context={"conversation_id": "remembered"}
+    )
+    assert worker.run_once() is True
+    for index in range(101):
+        service.create_task(
+            request=f"Unrelated {index}",
+            source_context={"conversation_id": f"other-{index}"},
+        )
+        assert worker.run_once() is True
+    follow_up = service.create_task(
+        request="What is my color?", source_context={"conversation_id": "remembered"}
+    )
+    assert worker.run_once() is True
+
+    assert service.get_task(remembered.id).status == TaskStatus.COMPLETED.value
+    assert service.get_task(follow_up.id).status == TaskStatus.COMPLETED.value
+    final_messages = [(message.role, message.content) for message in client.calls[-1]]
+    assert ("user", "My color is amber") in final_messages
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -189,8 +226,22 @@ def test_worker_answers_with_model_and_remembers_the_conversation(service: TaskS
             {"type": "set_timer", "seconds": 600, "label": "Tea"},
         ),
         (
-            {"type": "set_alarm", "hour": 6, "minute": 30, "label": "Run", "days": [2, 3]},
-            {"type": "set_alarm", "hour": 6, "minute": 30, "label": "Run", "days": [2, 3]},
+            {
+                "type": "set_alarm",
+                "hour": 6,
+                "minute": 30,
+                "label": "Run",
+                "days": [2, 3],
+                "date": None,
+            },
+            {
+                "type": "set_alarm",
+                "hour": 6,
+                "minute": 30,
+                "label": "Run",
+                "days": [2, 3],
+                "date": None,
+            },
         ),
         (
             {
@@ -224,6 +275,8 @@ def test_valid_phone_actions_are_normalized(raw: dict, expected: dict) -> None:
         {"type": "set_timer", "seconds": 0},
         {"type": "set_alarm", "hour": 25, "minute": 0},
         {"type": "set_alarm", "hour": 7, "minute": 0, "days": [0]},
+        {"type": "set_alarm", "hour": 7, "minute": 0, "days": [], "date": None},
+        {"type": "set_alarm", "hour": 7, "minute": 0, "days": [2], "date": "2026-09-15"},
         {"type": "create_event", "title": "X", "start": "tomorrow at 3"},
         {
             "type": "create_event",
@@ -261,11 +314,16 @@ def test_worker_publishes_validated_action_in_reply(service: TaskService) -> Non
     client = RecordingChatClient(
         [
             '{"reply": "Alarm for six thirty, tap confirm.", "emotion": "Warm",'
-            ' "action": {"type": "set_alarm", "hour": 6, "minute": 30, "label": "Wake up"}}'
+            ' "action": {"type": "set_alarm", "hour": 6, "minute": 30, "label": "Wake up",'
+            ' "days": [], "date": "2026-09-15"}}'
         ]
     )
     task = service.create_task(
-        request="Wake me at six thirty", source_context={"conversation_id": "c9"}
+        request="Wake me at six thirty",
+        source_context={
+            "conversation_id": "c9",
+            "local_time": "2026-09-14T17:05:00+02:00",
+        },
     )
     assert _conversation_worker(service, client).run_once() is True
 
@@ -276,6 +334,35 @@ def test_worker_publishes_validated_action_in_reply(service: TaskService) -> Non
         "minute": 30,
         "label": "Wake up",
         "days": [],
+        "date": "2026-09-15",
+    }
+
+
+def test_one_time_alarm_must_match_the_next_local_occurrence() -> None:
+    from app.execution.conversation import INVALID_ACTION, parse_model_output
+
+    raw = (
+        '{"reply":"Please confirm.","emotion":"Warm","action":'
+        '{"type":"set_alarm","hour":18,"minute":0,"label":"Dinner","days":[],"date":"2026-09-15"}}'
+    )
+    _, _, action = parse_model_output(
+        raw,
+        context={"local_time": "2026-09-14T17:00:00+02:00"},
+    )
+    assert action is INVALID_ACTION
+
+    raw = raw.replace('"2026-09-15"', '"2026-09-14"')
+    _, _, action = parse_model_output(
+        raw,
+        context={"local_time": "2026-09-14T17:00:00+02:00"},
+    )
+    assert action == {
+        "type": "set_alarm",
+        "hour": 18,
+        "minute": 0,
+        "label": "Dinner",
+        "days": [],
+        "date": "2026-09-14",
     }
 
 

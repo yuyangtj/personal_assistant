@@ -7,10 +7,11 @@ from typing import Any, Protocol
 
 @dataclass(frozen=True, slots=True)
 class ConversationTurn:
-    """A previous request and the reply spoken for it, oldest first."""
+    """A previous request, spoken reply, and optional trusted outcome, oldest first."""
 
     request: str
     reply: str
+    outcome: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

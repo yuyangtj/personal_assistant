@@ -48,11 +48,15 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
 
     private fun begin(preferOnDevice: Boolean) {
         release()
-        usingOnDevice = preferOnDevice && Build.VERSION.SDK_INT >= 31 &&
+        val created = if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            preferOnDevice &&
             SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
-        val created = if (usingOnDevice) {
+        ) {
+            usingOnDevice = true
             SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
         } else {
+            usingOnDevice = false
             SpeechRecognizer.createSpeechRecognizer(context)
         }
         recognizer = created

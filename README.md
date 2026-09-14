@@ -145,6 +145,9 @@ only capabilities whose adapter is installed can be selected
   actions are dropped, and a reply that promised one is replaced with an honest failure
   message. Clients send `local_time` and `timezone` in `source_context` so relative dates
   resolve correctly.
+- One-time alarms carry a local date and are accepted only when that date is the next
+  occurrence of the requested clock time. Arbitrary future dates are rejected rather
+  than silently scheduling the wrong day.
 - Model, latency and token usage are recorded in `EXECUTION_OUTPUT_RECEIVED`. The API key
   is only read from the environment and never logged.
 
