@@ -26,8 +26,10 @@ def test_create_get_list_and_cancel_task(client: TestClient) -> None:
     events = client.get(f"/tasks/{created['id']}/events").json()["events"]
     assert [event["event_type"] for event in events] == [
         "TASK_CREATED",
+        "ASSISTANT_REPLY",
         "TASK_CANCELLED",
     ]
+    assert events[1]["payload"]["text"] == "Okay, I've stopped working on that."
 
 
 def test_external_key_makes_creation_idempotent(client: TestClient) -> None:

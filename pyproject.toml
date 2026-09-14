@@ -34,7 +34,7 @@ addopts = "-q"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-extend-exclude = ["hetzner-mcp"]
+extend-exclude = ["hetzner-mcp", "android-assistant"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

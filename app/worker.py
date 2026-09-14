@@ -76,7 +76,11 @@ class TaskWorker:
                 decision.model_dump(mode="json"),
             )
             if isinstance(decision, FailDecision):
-                self.service.fail_task(task.id, error=decision.reason)
+                self.service.fail_task(
+                    task.id,
+                    error=decision.reason,
+                    reply="Sorry, I can't do that yet. I don't have a tool for it.",
+                )
                 return True
             if not isinstance(decision, DelegateDecision):
                 raise TypeError(f"Unsupported manager decision: {decision.action}")
@@ -107,7 +111,8 @@ class TaskWorker:
                 return True
             if not result.output or not result.output.get("summary"):
                 raise ValueError("Executor produced no summary")
-            self.service.complete_task(task.id, execution_id)
+            reply = result.output.get("reply") or result.output["summary"]
+            self.service.complete_task(task.id, execution_id, reply=str(reply))
         except ExecutionCancelled:
             if execution_id is not None:
                 self.service.finish_cancelled_execution(execution_id)

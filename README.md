@@ -119,6 +119,20 @@ manager-model contract. After its structured-output behavior is verified, Kimi
 can separately be added as a coding-agent adapter inside an isolated Git
 worktree.
 
+## Assistant replies
+
+Every finished task gets an `ASSISTANT_REPLY` event just before its terminal event:
+`{"text", "emotion", "intensity", "outcome"}`. The text is safe to show or speak to the
+user. Completed tasks use the executor's `reply` output (falling back to its `summary`);
+failures and cancellations use fixed messages without internal error details.
+
+Other local services may already use ports 8000 and 5432. The Compose host ports are
+configurable:
+
+```bash
+ASSISTANT_API_PORT=8010 ASSISTANT_POSTGRES_PORT=55433 docker compose up --build -d
+```
+
 ## Android assistant
 
 [`android-assistant/`](android-assistant/README.md) contains the Android client

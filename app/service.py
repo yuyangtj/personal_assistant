@@ -18,6 +18,17 @@ class TaskNotFoundError(LookupError):
     pass
 
 
+MAX_REPLY_CHARACTERS = 4000
+DEFAULT_FAILURE_REPLY = "Sorry, I couldn't finish that request."
+CANCELLED_REPLY = "Okay, I've stopped working on that."
+
+
+def _reply_payload(text: str, *, emotion: str, intensity: float, outcome: str) -> dict[str, Any]:
+    """User-facing speech for clients such as the Android avatar."""
+    normalized = " ".join(text.split())[:MAX_REPLY_CHARACTERS]
+    return {"text": normalized, "emotion": emotion, "intensity": intensity, "outcome": outcome}
+
+
 class ExecutionNotFoundError(LookupError):
     pass
 
@@ -235,7 +246,13 @@ class TaskService:
             )
             return True
 
-    def complete_task(self, task_id: str, execution_id: str) -> TaskModel:
+    def complete_task(
+        self,
+        task_id: str,
+        execution_id: str,
+        *,
+        reply: str | None = None,
+    ) -> TaskModel:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
             execution = self._require_execution(session, execution_id)
@@ -250,6 +267,13 @@ class TaskService:
                 {"execution_id": execution_id},
             )
             ensure_transition(task.status, TaskStatus.COMPLETED)
+            if reply and reply.strip():
+                TaskRepository.append_event(
+                    session,
+                    task,
+                    EventType.ASSISTANT_REPLY,
+                    _reply_payload(reply, emotion="Warm", intensity=0.7, outcome="completed"),
+                )
             task.status = TaskStatus.COMPLETED.value
             task.claimed_by = None
             task.lease_expires_at = None
@@ -269,7 +293,9 @@ class TaskService:
         *,
         error: str,
         execution_id: str | None = None,
+        reply: str = DEFAULT_FAILURE_REPLY,
     ) -> None:
+        """Fail a task. ``error`` is internal; ``reply`` is the user-facing sentence."""
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
             if execution_id:
@@ -280,6 +306,12 @@ class TaskService:
             if TaskStatus(task.status) in TERMINAL_STATUSES:
                 return
             ensure_transition(task.status, TaskStatus.FAILED)
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.ASSISTANT_REPLY,
+                _reply_payload(reply, emotion="Concerned", intensity=0.6, outcome="failed"),
+            )
             task.status = TaskStatus.FAILED.value
             task.claimed_by = None
             task.lease_expires_at = None
@@ -297,6 +329,14 @@ class TaskService:
             if current_status in TERMINAL_STATUSES:
                 return task
             ensure_transition(current_status, TaskStatus.CANCELLED)
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.ASSISTANT_REPLY,
+                _reply_payload(
+                    CANCELLED_REPLY, emotion="Neutral", intensity=0.5, outcome="cancelled"
+                ),
+            )
             task.cancel_requested = True
             task.status = TaskStatus.CANCELLED.value
             task.claimed_by = None

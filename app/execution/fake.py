@@ -37,6 +37,7 @@ class FakeExecutor:
         return ExecutionResult(
             output={
                 "summary": f"Fake executor completed: {request}",
+                "reply": f"All done. I handled your request: {request}",
                 "executor": self.id,
             }
         )

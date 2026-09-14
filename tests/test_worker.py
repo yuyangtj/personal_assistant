@@ -51,8 +51,16 @@ def test_worker_completes_task_and_records_ordered_events(service: TaskService) 
         "EXECUTION_OUTPUT_RECEIVED",
         "VALIDATION_STARTED",
         "VALIDATION_SUCCEEDED",
+        "ASSISTANT_REPLY",
         "TASK_COMPLETED",
     ]
+    reply = events[-2].payload
+    assert reply == {
+        "text": "All done. I handled your request: Research PostgreSQL hosting",
+        "emotion": "Warm",
+        "intensity": 0.7,
+        "outcome": "completed",
+    }
 
 
 def test_queued_task_survives_database_reconstruction(database_url: str) -> None:
@@ -90,7 +98,10 @@ def test_running_task_can_be_cancelled(service: TaskService) -> None:
 
     assert not thread.is_alive()
     assert service.get_task(task.id).status == TaskStatus.CANCELLED.value
-    assert service.list_events(task.id)[-1].event_type == "TASK_CANCELLED"
+    events = service.list_events(task.id)
+    assert events[-1].event_type == "TASK_CANCELLED"
+    assert events[-2].event_type == "ASSISTANT_REPLY"
+    assert events[-2].payload["outcome"] == "cancelled"
 
 
 def test_worker_returns_false_when_queue_is_empty(service: TaskService) -> None:
@@ -111,6 +122,30 @@ def test_task_fails_cleanly_when_no_enabled_capability_matches(
     assert failed.status == TaskStatus.FAILED.value
     assert service.list_events(task.id)[-1].event_type == "TASK_FAILED"
     assert "No enabled capability provides" in service.list_events(task.id)[-1].payload["error"]
+    reply = service.list_events(task.id)[-2]
+    assert reply.event_type == "ASSISTANT_REPLY"
+    assert reply.payload["outcome"] == "failed"
+    assert reply.payload["emotion"] == "Concerned"
+    assert "capability" not in reply.payload["text"].lower()
+
+
+def test_executor_exception_is_spoken_without_internal_details(service: TaskService) -> None:
+    class ExplodingExecutor(FakeExecutor):
+        def execute(self, **_kwargs):
+            raise RuntimeError("database password leaked in stack trace")
+
+    task = service.create_task(request="Break please")
+
+    assert make_worker(service, executors={"fake": ExplodingExecutor()}).run_once() is True
+
+    events = service.list_events(task.id)
+    assert events[-1].event_type == "TASK_FAILED"
+    assert events[-2].payload == {
+        "text": "Sorry, I couldn't finish that request.",
+        "emotion": "Concerned",
+        "intensity": 0.6,
+        "outcome": "failed",
+    }
 
 
 def test_worker_records_model_analysis_before_routing(service: TaskService) -> None:
