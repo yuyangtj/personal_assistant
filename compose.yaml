@@ -50,6 +50,10 @@ services:
       ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:assistant@postgres:5432/assistant
       ASSISTANT_CAPABILITIES_DIRECTORY: /service/capabilities
       ASSISTANT_WORKER_ID: worker-compose
+      # Read from the host environment; never commit keys to this file.
+      KIMI_API_KEY: ${KIMI_API_KEY:-}
+      ASSISTANT_KIMI_MODEL: ${ASSISTANT_KIMI_MODEL:-kimi-for-coding-highspeed}
+      ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS: ${ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS:-0.1}
     command: ["python", "-m", "app.worker"]
 
 volumes:

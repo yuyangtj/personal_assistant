@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
-from app.execution.base import ExecutionResult
+from app.execution.base import ConversationTurn, ExecutionResult
 
 
 class ExecutionCancelled(RuntimeError):
@@ -24,6 +24,7 @@ class FakeExecutor:
         task_id: str,
         request: str,
         is_cancelled: Callable[[], bool],
+        history: Sequence[ConversationTurn] = (),
     ) -> ExecutionResult:
         deadline = time.monotonic() + self.delay_seconds
         while time.monotonic() < deadline:

@@ -184,7 +184,8 @@ private fun ConversationPanel(
         Text(
             text = state.reply ?: placeholderReply(state),
             color = TextPrimary,
-            maxLines = 4,
+            maxLines = 6,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             style = MaterialTheme.typography.bodyLarge,
         )
         state.hint?.takeIf { it.isNotBlank() }?.let {

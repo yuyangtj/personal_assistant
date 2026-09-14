@@ -7,8 +7,9 @@ from collections.abc import Mapping
 
 from app.capabilities import CapabilityRegistry
 from app.config import Settings
-from app.execution import Executor, FakeExecutor
+from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.fake import ExecutionCancelled
+from app.integrations.kimi import KimiChatClient
 from app.manager import DeterministicManager, TaskManager
 from app.manager.decisions import DelegateDecision, FailDecision
 from app.persistence.database import Database
@@ -102,6 +103,7 @@ class TaskWorker:
                 task_id=task.id,
                 request=task.original_request,
                 is_cancelled=lambda: self.service.is_cancelled(task.id),
+                history=self.service.conversation_history(task),
             )
             if not self.service.start_validation(
                 task.id,
@@ -112,7 +114,12 @@ class TaskWorker:
             if not result.output or not result.output.get("summary"):
                 raise ValueError("Executor produced no summary")
             reply = result.output.get("reply") or result.output["summary"]
-            self.service.complete_task(task.id, execution_id, reply=str(reply))
+            self.service.complete_task(
+                task.id,
+                execution_id,
+                reply=str(reply),
+                emotion=str(result.output.get("emotion", "Warm")),
+            )
         except ExecutionCancelled:
             if execution_id is not None:
                 self.service.finish_cancelled_execution(execution_id)
@@ -146,13 +153,29 @@ def main() -> None:
     database = Database(settings.database_url)
     if settings.auto_create_schema:
         database.create_schema()
-    registry = CapabilityRegistry.from_directory(settings.capabilities_directory)
+    executors: dict[str, Executor] = {
+        "fake": FakeExecutor(delay_seconds=settings.fake_executor_delay_seconds),
+    }
+    if settings.kimi_api_key:
+        executors["kimi-conversation"] = ConversationExecutor(
+            KimiChatClient(
+                api_key=settings.kimi_api_key,
+                base_url=settings.kimi_base_url,
+                model=settings.kimi_model,
+                timeout_seconds=settings.kimi_timeout_seconds,
+            )
+        )
+        logger.info("Kimi conversation enabled with model %s", settings.kimi_model)
+    else:
+        logger.warning("KIMI_API_KEY is not set; conversation falls back to the fake executor")
+    # Only capabilities whose adapter is installed in this worker can be selected.
+    registry = CapabilityRegistry.from_directory(
+        settings.capabilities_directory
+    ).restricted_to_adapters(executors)
     worker = TaskWorker(
         service=TaskService(database),
         manager=DeterministicManager(registry),
-        executors={
-            "fake": FakeExecutor(delay_seconds=settings.fake_executor_delay_seconds),
-        },
+        executors=executors,
         worker_id=settings.worker_id,
         lease_seconds=settings.worker_lease_seconds,
         poll_interval_seconds=settings.worker_poll_interval_seconds,

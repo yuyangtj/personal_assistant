@@ -64,12 +64,17 @@ def test_capabilities_include_enabled_and_planned_adapters(client: TestClient) -
     assert [capability["id"] for capability in capabilities] == [
         "fake-executor",
         "kimi-code",
+        "kimi-conversation",
     ]
     assert capabilities[0]["availability"]["enabled"] is True
     assert capabilities[1]["availability"]["enabled"] is False
+    assert capabilities[2]["availability"]["enabled"] is True
 
     enabled = client.get("/capabilities", params={"include_disabled": False}).json()
-    assert [capability["id"] for capability in enabled["capabilities"]] == ["fake-executor"]
+    assert [capability["id"] for capability in enabled["capabilities"]] == [
+        "fake-executor",
+        "kimi-conversation",
+    ]
 
 
 def test_task_accepts_explicit_capability_requirements(client: TestClient) -> None:

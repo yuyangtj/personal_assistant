@@ -18,6 +18,10 @@ class Settings:
     worker_lease_seconds: int = 60
     fake_executor_delay_seconds: float = 0.1
     capabilities_directory: Path = Path("capabilities")
+    kimi_api_key: str | None = None
+    kimi_base_url: str = "https://api.kimi.com/coding/v1"
+    kimi_model: str = "kimi-for-coding-highspeed"
+    kimi_timeout_seconds: float = 30.0
     slack_signing_secret: str | None = None
     slack_bot_token: str | None = None
 
@@ -53,6 +57,12 @@ class Settings:
                     "ASSISTANT_CAPABILITIES_DIRECTORY",
                     str(defaults.capabilities_directory),
                 )
+            ),
+            kimi_api_key=os.getenv("ASSISTANT_KIMI_API_KEY") or os.getenv("KIMI_API_KEY") or None,
+            kimi_base_url=os.getenv("ASSISTANT_KIMI_BASE_URL", defaults.kimi_base_url),
+            kimi_model=os.getenv("ASSISTANT_KIMI_MODEL", defaults.kimi_model),
+            kimi_timeout_seconds=float(
+                os.getenv("ASSISTANT_KIMI_TIMEOUT_SECONDS", str(defaults.kimi_timeout_seconds))
             ),
             slack_signing_secret=os.getenv("ASSISTANT_SLACK_SIGNING_SECRET") or None,
             slack_bot_token=os.getenv("ASSISTANT_SLACK_BOT_TOKEN") or None,

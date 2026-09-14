@@ -53,6 +53,18 @@ class CapabilityRegistry:
             )
         return cls(manifests)
 
+    def restricted_to_adapters(self, adapters: Iterable[str]) -> CapabilityRegistry:
+        """Copy where capabilities without an installed adapter are disabled for routing."""
+        installed = set(adapters)
+        return CapabilityRegistry(
+            manifest
+            if manifest.execution.adapter in installed or not manifest.availability.enabled
+            else manifest.model_copy(
+                update={"availability": manifest.availability.model_copy(update={"enabled": False})}
+            )
+            for manifest in self._manifests.values()
+        )
+
     def get(self, capability_id: str) -> CapabilityManifest:
         try:
             return self._manifests[capability_id]

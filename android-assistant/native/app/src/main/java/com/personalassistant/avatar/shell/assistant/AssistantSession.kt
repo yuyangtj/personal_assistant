@@ -55,6 +55,9 @@ class AssistantSession(
     val uiState: StateFlow<UiState> = state.asStateFlow()
 
     private var api = AssistantApi(state.value.backendUrl)
+
+    /** One conversation per app launch, so follow-up questions keep their context. */
+    private val conversationId = "android-${UUID.randomUUID()}"
     private var taskJob: Job? = null
     private var pendingOutcome: String? = null
 
@@ -97,7 +100,7 @@ class AssistantSession(
 
         taskJob = scope.launch {
             val taskId = try {
-                api.createTask(request, UUID.randomUUID().toString())
+                api.createTask(request, UUID.randomUUID().toString(), conversationId)
             } catch (error: AssistantApiException) {
                 Log.w(TAG, "NATIVE_TASK_CREATE_FAILED: ${error.message}")
                 failLocally("I can't reach the assistant server right now. Please check the connection.")

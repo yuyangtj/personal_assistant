@@ -72,6 +72,10 @@ not hide a character or rig that fails the quality bar.
    adb shell am start -n com.personalassistant.avatar.shell/.MainActivity
    ```
 
+Each app launch starts a conversation (`source_context.conversation_id`), so follow-up
+questions keep their context. With `KIMI_API_KEY` set on the backend, replies are real
+answers from Kimi; otherwise the fake executor replies.
+
 Type a request, or tap the microphone and speak. While you talk he listens and your
 words appear live; the finished sentence is sent like a typed request. He thinks while
 the task runs, speaks the backend's `ASSISTANT_REPLY`, and shakes hands when it

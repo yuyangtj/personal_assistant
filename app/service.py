@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.capabilities.models import IDENTIFIER_PATTERN
 from app.domain.enums import EventType, ExecutionStatus, TaskStatus
 from app.domain.transitions import TERMINAL_STATUSES, ensure_transition
+from app.execution.base import ConversationTurn
 from app.persistence.database import Database
 from app.persistence.models import ExecutionModel, TaskEventModel, TaskModel
 from app.persistence.repository import TaskRepository
@@ -21,6 +22,8 @@ class TaskNotFoundError(LookupError):
 MAX_REPLY_CHARACTERS = 4000
 DEFAULT_FAILURE_REPLY = "Sorry, I couldn't finish that request."
 CANCELLED_REPLY = "Okay, I've stopped working on that."
+REPLY_EMOTIONS = {"Warm", "Curious", "Excited", "Concerned", "Neutral"}
+MAX_HISTORY_TURNS = 6
 
 
 def _reply_payload(text: str, *, emotion: str, intensity: float, outcome: str) -> dict[str, Any]:
@@ -114,6 +117,42 @@ class TaskService:
             if TaskRepository.get(session, task_id) is None:
                 raise TaskNotFoundError(task_id)
             return TaskRepository.list_events(session, task_id)
+
+    def conversation_history(
+        self,
+        task: TaskModel,
+        *,
+        limit: int = MAX_HISTORY_TURNS,
+    ) -> list[ConversationTurn]:
+        """Earlier completed turns sharing the task's `source_context.conversation_id`."""
+        conversation_id = (task.source_context or {}).get("conversation_id")
+        if not conversation_id:
+            return []
+        with self.database.session() as session:
+            recent = session.scalars(
+                select(TaskModel)
+                .where(TaskModel.status == TaskStatus.COMPLETED.value)
+                .where(TaskModel.created_at <= task.created_at)
+                .where(TaskModel.id != task.id)
+                .order_by(TaskModel.created_at.desc())
+                .limit(100)
+            ).all()
+            turns: list[ConversationTurn] = []
+            for previous in recent:
+                if (previous.source_context or {}).get("conversation_id") != conversation_id:
+                    continue
+                reply = session.scalar(
+                    select(TaskEventModel.payload)
+                    .where(TaskEventModel.task_id == previous.id)
+                    .where(TaskEventModel.event_type == EventType.ASSISTANT_REPLY.value)
+                    .order_by(TaskEventModel.sequence.desc())
+                    .limit(1)
+                )
+                if reply and reply.get("text"):
+                    turns.append(ConversationTurn(previous.original_request, reply["text"]))
+                if len(turns) >= limit:
+                    break
+            return list(reversed(turns))
 
     def claim_next_task(self, *, worker_id: str, lease_seconds: int) -> TaskModel | None:
         with self.database.session() as session, session.begin():
@@ -252,6 +291,7 @@ class TaskService:
         execution_id: str,
         *,
         reply: str | None = None,
+        emotion: str = "Warm",
     ) -> TaskModel:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
@@ -272,7 +312,12 @@ class TaskService:
                     session,
                     task,
                     EventType.ASSISTANT_REPLY,
-                    _reply_payload(reply, emotion="Warm", intensity=0.7, outcome="completed"),
+                    _reply_payload(
+                        reply,
+                        emotion=emotion if emotion in REPLY_EMOTIONS else "Warm",
+                        intensity=0.7,
+                        outcome="completed",
+                    ),
                 )
             task.status = TaskStatus.COMPLETED.value
             task.claimed_by = None

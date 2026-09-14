@@ -119,6 +119,36 @@ manager-model contract. After its structured-output behavior is verified, Kimi
 can separately be added as a coding-agent adapter inside an isolated Git
 worktree.
 
+## Conversational replies with Kimi
+
+When `KIMI_API_KEY` is set, the worker installs the `kimi-conversation` capability
+(priority 20). It answers everyday requests with short, speakable replies through Kimi's
+OpenAI-compatible API. Without a key, routing falls back to the fake executor, because
+only capabilities whose adapter is installed can be selected
+(`CapabilityRegistry.restricted_to_adapters`).
+
+| Variable | Default |
+| --- | --- |
+| `KIMI_API_KEY` / `ASSISTANT_KIMI_API_KEY` | unset (conversation disabled) |
+| `ASSISTANT_KIMI_BASE_URL` | `https://api.kimi.com/coding/v1` |
+| `ASSISTANT_KIMI_MODEL` | `kimi-for-coding-highspeed` (about 1.5–2 s per reply) |
+| `ASSISTANT_KIMI_TIMEOUT_SECONDS` | `30` |
+
+- Replies are one to three spoken sentences with an emotion (`Warm`, `Curious`,
+  `Excited`, `Concerned`, `Neutral`).
+- The system prompt states that the assistant cannot yet take actions such as calendar,
+  email or reminders, so it never claims to have done them.
+- Tasks with the same `source_context.conversation_id` share context: the last six
+  completed turns are sent along with the request.
+- Model, latency and token usage are recorded in `EXECUTION_OUTPUT_RECEIVED`. The API key
+  is only read from the environment and never logged.
+
+Docker Compose passes `KIMI_API_KEY` through from the host shell:
+
+```bash
+ASSISTANT_API_PORT=8010 ASSISTANT_POSTGRES_PORT=55433 docker compose up --build -d
+```
+
 ## Assistant replies
 
 Every finished task gets an `ASSISTANT_REPLY` event just before its terminal event:

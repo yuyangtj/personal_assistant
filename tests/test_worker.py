@@ -21,11 +21,12 @@ def make_worker(
     manager: TaskManager | None = None,
     executors: Mapping[str, FakeExecutor] | None = None,
 ) -> TaskWorker:
-    registry = CapabilityRegistry.from_directory("capabilities")
+    installed = executors or {"fake": FakeExecutor(delay_seconds=delay)}
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(installed)
     return TaskWorker(
         service=service,
         manager=manager or DeterministicManager(registry),
-        executors=executors or {"fake": FakeExecutor(delay_seconds=delay)},
+        executors=installed,
         worker_id="test-worker",
         lease_seconds=30,
         poll_interval_seconds=0.01,
@@ -149,7 +150,7 @@ def test_executor_exception_is_spoken_without_internal_details(service: TaskServ
 
 
 def test_worker_records_model_analysis_before_routing(service: TaskService) -> None:
-    registry = CapabilityRegistry.from_directory("capabilities")
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
     client = ScriptedManagerModelClient(
         [
             {
@@ -179,7 +180,7 @@ def test_worker_records_model_analysis_before_routing(service: TaskService) -> N
 
 
 def test_disabled_inferred_capability_is_recorded_as_gap(service: TaskService) -> None:
-    registry = CapabilityRegistry.from_directory("capabilities")
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
     client = ScriptedManagerModelClient(
         [
             {
@@ -212,7 +213,7 @@ def test_disabled_inferred_capability_is_recorded_as_gap(service: TaskService) -
 def test_worker_records_final_analysis_failure_without_raw_output(
     service: TaskService,
 ) -> None:
-    registry = CapabilityRegistry.from_directory("capabilities")
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
     client = ScriptedManagerModelClient(["secret malformed output", "still malformed"])
     manager = ModelAssistedManager(
         registry,

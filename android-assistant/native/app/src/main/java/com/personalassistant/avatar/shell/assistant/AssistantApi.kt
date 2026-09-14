@@ -25,13 +25,16 @@ class AssistantApi(baseUrl: String) {
         false
     }
 
-    /** Creates a task. [clientKey] makes retries of the same request idempotent. */
-    suspend fun createTask(request: String, clientKey: String): String {
+    /**
+     * Creates a task. [clientKey] makes retries idempotent; [conversationId] lets the backend
+     * include earlier turns of the same conversation as context.
+     */
+    suspend fun createTask(request: String, clientKey: String, conversationId: String): String {
         val body = JSONObject()
             .put("request", request)
             .put("external_source", "android")
             .put("external_key", clientKey)
-            .put("source_context", JSONObject().put("client", "android-avatar"))
+            .put("source_context", JSONObject().put("client", "android-avatar").put("conversation_id", conversationId))
         return request("POST", "/tasks", body).getString("id")
     }
 
