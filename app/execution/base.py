@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -28,4 +28,5 @@ class Executor(Protocol):
         request: str,
         is_cancelled: Callable[[], bool],
         history: Sequence[ConversationTurn] = (),
+        context: Mapping[str, Any] | None = None,
     ) -> ExecutionResult: ...

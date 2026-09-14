@@ -23,6 +23,7 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.personalassistant.avatar.MiloHost
 import com.personalassistant.avatar.shell.assistant.AssistantSession
+import com.personalassistant.avatar.shell.assistant.PhoneActionRunner
 import com.personalassistant.avatar.shell.avatar.AvatarBridge
 import com.personalassistant.avatar.shell.ui.AssistantScreen
 import com.personalassistant.avatar.shell.voice.VoiceInput
@@ -56,6 +57,7 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
             scope = lifecycleScope,
             avatar = AvatarBridge(),
             preferences = getSharedPreferences("assistant", Context.MODE_PRIVATE),
+            runAction = PhoneActionRunner(this)::run,
         )
         voice = VoiceInput(this, object : VoiceInput.Listener {
             override fun onListening() = session.onListening()
@@ -89,6 +91,8 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
                         onTestConnection = session::checkConnection,
                         voiceAvailable = voice.isAvailable,
                         onMicrophone = ::toggleListening,
+                        onConfirmAction = session::confirmAction,
+                        onDismissAction = session::dismissAction,
                     )
                 }
             }

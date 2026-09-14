@@ -61,6 +61,7 @@ def test_worker_completes_task_and_records_ordered_events(service: TaskService) 
         "emotion": "Warm",
         "intensity": 0.7,
         "outcome": "completed",
+        "action": None,
     }
 
 

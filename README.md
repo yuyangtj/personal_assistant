@@ -140,6 +140,11 @@ only capabilities whose adapter is installed can be selected
   email or reminders, so it never claims to have done them.
 - Tasks with the same `source_context.conversation_id` share context: the last six
   completed turns are sent along with the request.
+- A reply may carry one validated phone `action` (`set_timer`, `set_alarm`,
+  `create_event`) that clients run only after user confirmation. Unsupported or malformed
+  actions are dropped, and a reply that promised one is replaced with an honest failure
+  message. Clients send `local_time` and `timezone` in `source_context` so relative dates
+  resolve correctly.
 - Model, latency and token usage are recorded in `EXECUTION_OUTPUT_RECEIVED`. The API key
   is only read from the environment and never logged.
 

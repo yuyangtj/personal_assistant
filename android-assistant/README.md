@@ -32,7 +32,8 @@ for task orchestration; the Android application presents and controls it.
 - A provider-neutral `AssistantResponse` JSON contract and Android-to-Unity
   bridge route reply text into TTS, with duplicate-response protection and a
   credential-free device demo.
-- Android SDK 37 is still deferred until the native AppFunctions phase.
+- The assistant can set timers and alarms and draft calendar events on the phone.
+  Each action runs only after the user confirms it (see below).
 
 ## Build sequence
 
@@ -43,7 +44,13 @@ for task orchestration; the Android application presents and controls it.
 5. ~~Scaffold the Kotlin/Compose controller and embed Unity as a library.~~
 6. ~~Connect task creation and event polling to the Personal Assistant backend.~~
 7. ~~Add microphone and speech recognition.~~
-8. Implement, document, and test Android AppFunctions.
+8. ~~Confirmed on-phone actions: timers, alarms, and calendar event drafts through public
+   Android intents.~~
+9. Optionally expose the assistant as an Android AppFunction (for example
+   `askAssistant`), so approved system agents can call it. AppFunctions work in that
+   direction only: calling other apps' functions requires the privileged
+   `EXECUTE_APP_FUNCTIONS` permission, which ordinary apps cannot hold, and the
+   platform feature is still experimental on Android 16+.
 
 The visual spike is deliberately first. Backend and voice integration should
 not hide a character or rig that fails the quality bar.
@@ -71,6 +78,32 @@ not hide a character or rig that fails the quality bar.
    adb reverse tcp:8010 tcp:8010
    adb shell am start -n com.personalassistant.avatar.shell/.MainActivity
    ```
+
+### Phone actions
+
+When a request clearly asks for one, Kimi proposes a single structured action. The backend
+validates it (anything unsupported or malformed is dropped) and attaches it to the
+`ASSISTANT_REPLY`. The app shows a **Confirm action** card and runs the action only after
+you tap **Confirm**:
+
+| Action | Android API | Result |
+| --- | --- | --- |
+| `set_timer` | `AlarmClock.ACTION_SET_TIMER` (skip UI) | Timer starts in the Clock app |
+| `set_alarm` | `AlarmClock.ACTION_SET_ALARM` (skip UI, optional repeat days) | Alarm is set in the Clock app |
+| `create_event` | `Intent.ACTION_INSERT` on `CalendarContract.Events` | Calendar opens pre-filled; you tap Save |
+
+- **Not now** runs nothing.
+- Either way, the outcome is added to the task as a user message.
+- Requests are sent with the phone's local time and time zone, so "tomorrow at noon"
+  resolves correctly.
+- Reading calendars, email, or messages is deliberately not supported: it would send
+  personal data to the language model provider.
+
+Verified on the Pixel 10 Pro XL:
+
+- a 2-minute timer started in Clock;
+- "Lunch with Anna tomorrow at noon" opened Calendar for Tue 15 Sept 12:00–13:00;
+- **Not now** on an alarm produced no Clock call.
 
 Each app launch starts a conversation (`source_context.conversation_id`), so follow-up
 questions keep their context. With `KIMI_API_KEY` set on the backend, replies are real

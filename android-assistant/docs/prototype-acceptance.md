@@ -33,7 +33,8 @@ One full-screen Unity scene running on an Android phone must show:
 - Live speech recognition
 - Live language-model responses
 - Network connectivity
-- Android AppFunctions
+- On-device actions (since implemented as confirmed timer, alarm, and calendar intents)
+- Android AppFunctions (exposing the assistant to privileged system agents)
 - Background execution
 - Notifications
 - Multiple characters or outfits

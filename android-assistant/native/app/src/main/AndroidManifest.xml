@@ -4,6 +4,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Normal permission required by AlarmClock.ACTION_SET_ALARM and ACTION_SET_TIMER. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <!-- Package visibility for the system speech recognition service (Android 11+). -->
     <queries>

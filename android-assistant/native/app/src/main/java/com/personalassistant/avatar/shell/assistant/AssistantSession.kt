@@ -31,6 +31,7 @@ data class UiState(
     val transcript: String? = null,
     val voiceLevel: Float = 0f,
     val hint: String? = null,
+    val pendingAction: PhoneAction? = null,
 ) {
     val isBusy: Boolean get() = activity == Activity.SENDING || activity == Activity.THINKING || activity == Activity.SPEAKING
 }
@@ -43,6 +44,7 @@ class AssistantSession(
     private val scope: CoroutineScope,
     private val avatar: AvatarBridge,
     private val preferences: SharedPreferences,
+    private val runAction: (PhoneAction) -> String?,
 ) {
     private val state = MutableStateFlow(
         UiState(
@@ -94,7 +96,15 @@ class AssistantSession(
         if (request.isEmpty() || state.value.isBusy) return
         pendingOutcome = null
         state.update {
-            it.copy(activity = Activity.SENDING, lastRequest = request, reply = null, taskId = null, transcript = null, hint = null)
+            it.copy(
+                activity = Activity.SENDING,
+                lastRequest = request,
+                reply = null,
+                taskId = null,
+                transcript = null,
+                hint = null,
+                pendingAction = null,
+            )
         }
         avatar.command(AvatarMode.THINKING, AvatarEmotion.CURIOUS, 0.6f)
 
@@ -170,6 +180,12 @@ class AssistantSession(
         if (state.value.activity != Activity.SPEAKING && state.value.activity != Activity.THINKING) return
         val outcome = pendingOutcome ?: return
         Log.i(TAG, "NATIVE_SPEECH_FINISHED: id=$responseId reason=$reason outcome=$outcome")
+        if (state.value.pendingAction != null && outcome == "completed") {
+            // Wait for the user to confirm or dismiss the proposed action.
+            state.update { it.copy(activity = Activity.DONE) }
+            avatar.command(AvatarMode.IDLE, AvatarEmotion.CURIOUS, 0.5f)
+            return
+        }
         val (activity, mode, emotion) = when (outcome) {
             "completed" -> Triple(Activity.DONE, AvatarMode.SUCCESS, AvatarEmotion.WARM)
             "cancelled" -> Triple(Activity.CANCELLED, AvatarMode.IDLE, AvatarEmotion.NEUTRAL)
@@ -180,6 +196,37 @@ class AssistantSession(
         scope.launch {
             delay(if (mode == AvatarMode.SUCCESS) 4_500 else 2_500)
             if (!state.value.isBusy) avatar.command(AvatarMode.IDLE, AvatarEmotion.WARM, 0.45f)
+        }
+    }
+
+    /** Runs the confirmed action through the phone's apps and records the outcome on the task. */
+    fun confirmAction() {
+        val action = state.value.pendingAction ?: return
+        val taskId = state.value.taskId
+        state.update { it.copy(pendingAction = null) }
+        val failure = runAction(action)
+        Log.i(TAG, "NATIVE_ACTION_${if (failure == null) "DONE" else "FAILED"}: ${action.javaClass.simpleName}")
+        pendingOutcome = if (failure == null) "completed" else "failed"
+        val speech = failure ?: action.doneSpeech
+        state.update { it.copy(reply = speech, activity = Activity.THINKING) }
+        avatar.speak("action:${System.currentTimeMillis()}", speech, if (failure == null) AvatarEmotion.WARM else AvatarEmotion.CONCERNED, 0.65f)
+        if (taskId != null) {
+            scope.launch {
+                runCatching {
+                    api.addMessage(taskId, if (failure == null) "Phone action confirmed and started: ${action.summary}" else "Phone action failed: $failure")
+                }
+            }
+        }
+    }
+
+    fun dismissAction() {
+        val action = state.value.pendingAction ?: return
+        val taskId = state.value.taskId
+        state.update { it.copy(pendingAction = null, reply = "Okay, I won't do that.") }
+        avatar.command(AvatarMode.IDLE, AvatarEmotion.NEUTRAL, 0.45f)
+        Log.i(TAG, "NATIVE_ACTION_DISMISSED: ${action.javaClass.simpleName}")
+        if (taskId != null) {
+            scope.launch { runCatching { api.addMessage(taskId, "Phone action dismissed: ${action.summary}") } }
         }
     }
 
@@ -218,7 +265,9 @@ class AssistantSession(
             "ASSISTANT_REPLY" -> {
                 val text = event.payload.optString("text")
                 pendingOutcome = event.payload.optString("outcome", "completed")
-                state.update { it.copy(reply = text) }
+                val action = PhoneAction.fromJson(event.payload.optJSONObject("action"))
+                state.update { it.copy(reply = text, pendingAction = action) }
+                if (action != null) Log.i(TAG, "NATIVE_ACTION_PROPOSED: ${action.summary}")
                 if (text.isNotBlank()) {
                     avatar.speak(
                         responseId = "task:$taskId:${event.sequence}",

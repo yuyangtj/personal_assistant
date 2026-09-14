@@ -104,6 +104,7 @@ class TaskWorker:
                 request=task.original_request,
                 is_cancelled=lambda: self.service.is_cancelled(task.id),
                 history=self.service.conversation_history(task),
+                context=task.source_context or {},
             )
             if not self.service.start_validation(
                 task.id,
@@ -119,6 +120,7 @@ class TaskWorker:
                 execution_id,
                 reply=str(reply),
                 emotion=str(result.output.get("emotion", "Warm")),
+                action=result.output.get("action"),
             )
         except ExecutionCancelled:
             if execution_id is not None:

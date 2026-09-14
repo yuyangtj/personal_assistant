@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from app.execution.base import ConversationTurn, ExecutionResult
 
@@ -25,6 +26,7 @@ class FakeExecutor:
         request: str,
         is_cancelled: Callable[[], bool],
         history: Sequence[ConversationTurn] = (),
+        context: Mapping[str, Any] | None = None,
     ) -> ExecutionResult:
         deadline = time.monotonic() + self.delay_seconds
         while time.monotonic() < deadline:

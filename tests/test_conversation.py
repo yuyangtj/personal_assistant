@@ -179,3 +179,137 @@ def test_worker_answers_with_model_and_remembers_the_conversation(service: TaskS
     assert reply.payload["emotion"] == "Excited"
     assert service.get_task(first.id).status == TaskStatus.COMPLETED.value
     assert service.get_task(other.id).status == TaskStatus.COMPLETED.value
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            {"type": "set_timer", "seconds": 600, "label": "Tea"},
+            {"type": "set_timer", "seconds": 600, "label": "Tea"},
+        ),
+        (
+            {"type": "set_alarm", "hour": 6, "minute": 30, "label": "Run", "days": [2, 3]},
+            {"type": "set_alarm", "hour": 6, "minute": 30, "label": "Run", "days": [2, 3]},
+        ),
+        (
+            {
+                "type": "create_event",
+                "title": "Dentist",
+                "start": "2026-09-15T15:00",
+                "end": "2026-09-15T16:00",
+            },
+            {
+                "type": "create_event",
+                "title": "Dentist",
+                "start": "2026-09-15T15:00",
+                "end": "2026-09-15T16:00",
+                "location": "",
+            },
+        ),
+    ],
+)
+def test_valid_phone_actions_are_normalized(raw: dict, expected: dict) -> None:
+    from app.execution.actions import validate_action
+
+    assert validate_action(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        "set a timer",
+        {"type": "send_email", "to": "boss@example.com"},
+        {"type": "set_timer", "seconds": 0},
+        {"type": "set_alarm", "hour": 25, "minute": 0},
+        {"type": "set_alarm", "hour": 7, "minute": 0, "days": [0]},
+        {"type": "create_event", "title": "X", "start": "tomorrow at 3"},
+        {
+            "type": "create_event",
+            "title": "X",
+            "start": "2026-09-15T15:00",
+            "end": "2026-09-15T14:00",
+        },
+        {"type": "set_timer", "seconds": 60, "shell": "rm -rf /"},
+    ],
+)
+def test_invalid_or_unsupported_actions_are_dropped(raw: object) -> None:
+    from app.execution.actions import validate_action
+
+    assert validate_action(raw) is None
+
+
+def test_executor_uses_phone_local_time_and_returns_action() -> None:
+    client = RecordingChatClient(
+        [
+            '{"reply": "I can set a ten minute timer. Tap confirm.", "emotion": "Warm",'
+            ' "action": {"type": "set_timer", "seconds": 600, "label": "Tea"}}'
+        ]
+    )
+    result = ConversationExecutor(client).execute(
+        task_id="t1",
+        request="Set a timer for ten minutes for my tea",
+        is_cancelled=lambda: False,
+        context={"local_time": "2026-09-14T17:05:00+02:00", "timezone": "Europe/Stockholm"},
+    )
+    assert "Monday 14 September 2026, 17:05 (Europe/Stockholm)" in client.calls[0][0].content
+    assert result.output["action"] == {"type": "set_timer", "seconds": 600, "label": "Tea"}
+
+
+def test_worker_publishes_validated_action_in_reply(service: TaskService) -> None:
+    client = RecordingChatClient(
+        [
+            '{"reply": "Alarm for six thirty, tap confirm.", "emotion": "Warm",'
+            ' "action": {"type": "set_alarm", "hour": 6, "minute": 30, "label": "Wake up"}}'
+        ]
+    )
+    task = service.create_task(
+        request="Wake me at six thirty", source_context={"conversation_id": "c9"}
+    )
+    assert _conversation_worker(service, client).run_once() is True
+
+    reply = service.list_events(task.id)[-2].payload
+    assert reply["action"] == {
+        "type": "set_alarm",
+        "hour": 6,
+        "minute": 30,
+        "label": "Wake up",
+        "days": [],
+    }
+
+
+def test_event_times_are_normalized_from_iso_variants() -> None:
+    from app.execution.actions import validate_action
+
+    action = validate_action(
+        {
+            "type": "create_event",
+            "title": "Dentist",
+            "start": "2026-09-15 15:00:00",
+            "end": "null",
+            "location": None,
+        }
+    )
+    assert action == {
+        "type": "create_event",
+        "title": "Dentist",
+        "start": "2026-09-15T15:00",
+        "end": None,
+        "location": "",
+    }
+
+
+def test_invalid_proposed_action_replaces_confirm_reply() -> None:
+    client = RecordingChatClient(
+        [
+            '{"reply": "Tap Confirm to add it.", "emotion": "Warm",'
+            ' "action": {"type": "create_event", "title": "X", "start": "soon"}}'
+        ]
+    )
+    result = ConversationExecutor(client).execute(
+        task_id="t1", request="Add X", is_cancelled=lambda: False
+    )
+    assert result.output["action"] is None
+    assert result.output["emotion"] == "Concerned"
+    assert "couldn't prepare that" in result.output["reply"]

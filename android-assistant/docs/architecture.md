@@ -115,8 +115,12 @@ The assistant or language model may choose `mode`, `emotion`, and bounded
 - Unity owns only visual presentation and audio-aligned avatar animation.
 - The backend owns task orchestration, tools, approvals, and persistent history.
 - Speech recognition and synthesis are replaceable adapters.
-- AppFunctions call native repositories and never communicate with Unity
-  directly.
+- Phone actions (timers, alarms, calendar drafts) are proposed by the backend,
+  confirmed in native UI, and executed through public Android intents
+  (`PhoneActionRunner`); Unity only reacts with speech and gestures.
+- If the assistant is ever exposed as an AppFunction, that service calls native
+  repositories and never communicates with Unity directly. AppFunctions let
+  privileged system agents call this app; they do not let this app call others.
 
 ## Implemented assistant-response ingress
 

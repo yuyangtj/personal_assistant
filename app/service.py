@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.capabilities.models import IDENTIFIER_PATTERN
 from app.domain.enums import EventType, ExecutionStatus, TaskStatus
 from app.domain.transitions import TERMINAL_STATUSES, ensure_transition
+from app.execution.actions import validate_action
 from app.execution.base import ConversationTurn
 from app.persistence.database import Database
 from app.persistence.models import ExecutionModel, TaskEventModel, TaskModel
@@ -292,6 +293,7 @@ class TaskService:
         *,
         reply: str | None = None,
         emotion: str = "Warm",
+        action: dict[str, Any] | None = None,
     ) -> TaskModel:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
@@ -312,12 +314,16 @@ class TaskService:
                     session,
                     task,
                     EventType.ASSISTANT_REPLY,
-                    _reply_payload(
-                        reply,
-                        emotion=emotion if emotion in REPLY_EMOTIONS else "Warm",
-                        intensity=0.7,
-                        outcome="completed",
-                    ),
+                    {
+                        **_reply_payload(
+                            reply,
+                            emotion=emotion if emotion in REPLY_EMOTIONS else "Warm",
+                            intensity=0.7,
+                            outcome="completed",
+                        ),
+                        # A proposed phone action; clients execute it only after confirmation.
+                        "action": validate_action(action),
+                    },
                 )
             task.status = TaskStatus.COMPLETED.value
             task.claimed_by = None

@@ -30,11 +30,19 @@ class AssistantApi(baseUrl: String) {
      * include earlier turns of the same conversation as context.
      */
     suspend fun createTask(request: String, clientKey: String, conversationId: String): String {
+        val now = java.time.ZonedDateTime.now()
         val body = JSONObject()
             .put("request", request)
             .put("external_source", "android")
             .put("external_key", clientKey)
-            .put("source_context", JSONObject().put("client", "android-avatar").put("conversation_id", conversationId))
+            .put(
+                "source_context",
+                JSONObject()
+                    .put("client", "android-avatar")
+                    .put("conversation_id", conversationId)
+                    .put("local_time", now.withNano(0).toOffsetDateTime().toString())
+                    .put("timezone", now.zone.id),
+            )
         return request("POST", "/tasks", body).getString("id")
     }
 
@@ -44,6 +52,11 @@ class AssistantApi(baseUrl: String) {
             val event = events.getJSONObject(index)
             TaskEvent(event.getInt("sequence"), event.getString("event_type"), event.optJSONObject("payload") ?: JSONObject())
         }
+    }
+
+    /** Adds a note to the task's event stream, e.g. the outcome of a confirmed phone action. */
+    suspend fun addMessage(taskId: String, message: String) {
+        request("POST", "/tasks/$taskId/messages", JSONObject().put("message", message))
     }
 
     suspend fun cancel(taskId: String) {

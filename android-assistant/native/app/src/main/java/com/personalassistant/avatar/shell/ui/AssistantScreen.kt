@@ -71,6 +71,8 @@ fun AssistantScreen(
     onTestConnection: () -> Unit,
     voiceAvailable: Boolean,
     onMicrophone: () -> Unit,
+    onConfirmAction: () -> Unit,
+    onDismissAction: () -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
 
@@ -86,6 +88,8 @@ fun AssistantScreen(
             onCancel = onCancel,
             voiceAvailable = voiceAvailable,
             onMicrophone = onMicrophone,
+            onConfirmAction = onConfirmAction,
+            onDismissAction = onDismissAction,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
@@ -152,6 +156,8 @@ private fun ConversationPanel(
     onCancel: () -> Unit,
     voiceAvailable: Boolean,
     onMicrophone: () -> Unit,
+    onConfirmAction: () -> Unit,
+    onDismissAction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var prompt by remember { mutableStateOf("") }
@@ -188,6 +194,27 @@ private fun ConversationPanel(
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             style = MaterialTheme.typography.bodyLarge,
         )
+        state.pendingAction?.let { action ->
+            Spacer(modifier = Modifier.height(10.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF15343A), RoundedCornerShape(16.dp))
+                    .border(1.dp, Accent, RoundedCornerShape(16.dp))
+                    .padding(14.dp),
+            ) {
+                Text("CONFIRM ACTION", color = Accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                Text(action.summary, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = onConfirmAction,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF168C87)),
+                    ) { Text("Confirm", fontWeight = FontWeight.Bold) }
+                    OutlinedButton(onClick = onDismissAction) { Text("Not now", color = Muted) }
+                }
+            }
+        }
         state.hint?.takeIf { it.isNotBlank() }?.let {
             Spacer(modifier = Modifier.height(4.dp))
             Text(it, color = Color(0xFFFFC38A), style = MaterialTheme.typography.bodySmall)
