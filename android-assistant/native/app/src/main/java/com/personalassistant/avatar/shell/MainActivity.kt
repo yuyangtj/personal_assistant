@@ -1,7 +1,9 @@
 package com.personalassistant.avatar.shell
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.view.ViewGroup
@@ -23,6 +25,7 @@ import com.personalassistant.avatar.MiloHost
 import com.personalassistant.avatar.shell.assistant.AssistantSession
 import com.personalassistant.avatar.shell.avatar.AvatarBridge
 import com.personalassistant.avatar.shell.ui.AssistantScreen
+import com.personalassistant.avatar.shell.voice.VoiceInput
 import com.unity3d.player.UnityPlayerActivity
 
 /** Hosts the Unity avatar and overlays the native assistant controls. */
@@ -30,6 +33,7 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateController = SavedStateRegistryController.create(this)
     private lateinit var session: AssistantSession
+    private lateinit var voice: VoiceInput
 
     override val lifecycle: Lifecycle
         get() = lifecycleRegistry
@@ -53,6 +57,13 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
             avatar = AvatarBridge(),
             preferences = getSharedPreferences("assistant", Context.MODE_PRIVATE),
         )
+        voice = VoiceInput(this, object : VoiceInput.Listener {
+            override fun onListening() = session.onListening()
+            override fun onPartialTranscript(text: String) = session.onPartialTranscript(text)
+            override fun onFinalTranscript(text: String) = session.onFinalTranscript(text)
+            override fun onVoiceLevel(level: Float) = session.onVoiceLevel(level)
+            override fun onVoiceError(message: String) = session.onVoiceError(message)
+        })
         MiloHost.setListener(object : MiloHost.Listener {
             override fun onSpeechStarted(responseId: String) {
                 runOnUiThread { session.onSpeechStarted(responseId) }
@@ -76,6 +87,8 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
                         onBackendUrl = session::updateBackendUrl,
                         onCharacter = session::selectCharacter,
                         onTestConnection = session::checkConnection,
+                        voiceAvailable = voice.isAvailable,
+                        onMicrophone = ::toggleListening,
                     )
                 }
             }
@@ -98,12 +111,40 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
         handleDebugPrompt(intent)
     }
 
-    /** Debug builds accept `adb shell am start ... --es prompt "text"` for automated device checks. */
+    private fun toggleListening() {
+        if (session.uiState.value.activity == com.personalassistant.avatar.shell.assistant.Activity.LISTENING) {
+            voice.stop()
+            return
+        }
+        if (session.uiState.value.isBusy) return
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            voice.start()
+        } else {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MICROPHONE)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_MICROPHONE) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) voice.start()
+        else session.onVoiceError("Microphone permission is needed for voice requests.")
+    }
+
+    /**
+     * Debug builds accept `adb shell am start ... --es prompt 'text'` to send a request and
+     * `--ez listen true` to open the microphone, for automated device checks.
+     */
     private fun handleDebugPrompt(intent: Intent?) {
-        if (!BuildConfig.DEBUG) return
-        val prompt = intent?.getStringExtra(EXTRA_PROMPT) ?: return
-        intent.removeExtra(EXTRA_PROMPT)
-        window.decorView.postDelayed({ session.send(prompt) }, 1_500)
+        if (!BuildConfig.DEBUG || intent == null) return
+        intent.getStringExtra(EXTRA_PROMPT)?.let { prompt ->
+            intent.removeExtra(EXTRA_PROMPT)
+            window.decorView.postDelayed({ session.send(prompt) }, 1_500)
+        }
+        if (intent.getBooleanExtra(EXTRA_LISTEN, false)) {
+            intent.removeExtra(EXTRA_LISTEN)
+            window.decorView.postDelayed(::toggleListening, 1_500)
+        }
     }
 
     override fun onStart() {
@@ -118,6 +159,8 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
     }
 
     override fun onPause() {
+        voice.cancel()
+        session.onVoiceError("")
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         super.onPause()
     }
@@ -136,5 +179,7 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
     private companion object {
         const val TAG = "MiloNative"
         const val EXTRA_PROMPT = "prompt"
+        const val EXTRA_LISTEN = "listen"
+        const val REQUEST_MICROPHONE = 41
     }
 }

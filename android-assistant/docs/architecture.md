@@ -48,6 +48,12 @@ Compose text field ──send──▶ AssistantSession
 MiloHost.onSpeechFinished ─────┴─▶ SUCCESS (handshake) / ERROR / IDLE
 ```
 
+- **Voice input** (`voice/VoiceInput.kt`): tapping the mic requests `RECORD_AUDIO`
+  once, then starts Android `SpeechRecognizer` (on-device when available, otherwise
+  the system service). While listening the avatar is `LISTENING · CURIOUS`, partial
+  results fill the text field, and the mic ring follows the input level. The final
+  transcript goes through the same `send()` path as typed text. The mic is disabled
+  while a task runs or the avatar speaks, so his own voice is never captured.
 - `MainActivity` calls `MiloHost.setEmbedded(true)` before Unity starts, so Unity
   hides its prototype HUD and auto-demo; Compose owns every control.
 - Unity reports speech start and finish back through `MiloHost.Listener`.

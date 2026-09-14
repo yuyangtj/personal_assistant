@@ -1,6 +1,9 @@
 package com.personalassistant.avatar.shell.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +38,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -60,6 +69,8 @@ fun AssistantScreen(
     onBackendUrl: (String) -> Unit,
     onCharacter: (AvatarCharacter) -> Unit,
     onTestConnection: () -> Unit,
+    voiceAvailable: Boolean,
+    onMicrophone: () -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
 
@@ -73,6 +84,8 @@ fun AssistantScreen(
             state = state,
             onSend = onSend,
             onCancel = onCancel,
+            voiceAvailable = voiceAvailable,
+            onMicrophone = onMicrophone,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
@@ -120,6 +133,7 @@ private fun StatusBar(state: UiState, onSettings: () -> Unit, modifier: Modifier
 }
 
 private fun statusLabel(state: UiState): Pair<String, Color> = when {
+    state.activity == Activity.LISTENING -> "Listening" to Color(0xFF6FC3FF)
     state.activity == Activity.SENDING -> "Sending" to Color(0xFF6FC3FF)
     state.activity == Activity.THINKING -> "Thinking" to Color(0xFFB48CFF)
     state.activity == Activity.SPEAKING -> "Speaking" to Accent
@@ -136,9 +150,12 @@ private fun ConversationPanel(
     state: UiState,
     onSend: (String) -> Unit,
     onCancel: () -> Unit,
+    voiceAvailable: Boolean,
+    onMicrophone: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var prompt by remember { mutableStateOf("") }
+    val listening = state.activity == Activity.LISTENING
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
 
@@ -170,6 +187,10 @@ private fun ConversationPanel(
             maxLines = 4,
             style = MaterialTheme.typography.bodyLarge,
         )
+        state.hint?.takeIf { it.isNotBlank() }?.let {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(it, color = Color(0xFFFFC38A), style = MaterialTheme.typography.bodySmall)
+        }
         Spacer(modifier = Modifier.height(12.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -177,16 +198,19 @@ private fun ConversationPanel(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             OutlinedTextField(
-                value = prompt,
-                onValueChange = { prompt = it.take(2_000) },
+                value = if (listening) state.transcript.orEmpty() else prompt,
+                onValueChange = { if (!listening) prompt = it.take(2_000) },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Ask your assistant…") },
+                readOnly = listening,
+                placeholder = { Text(if (listening) "Listening…" else "Ask your assistant…") },
                 maxLines = 3,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { submit() }),
                 colors = fieldColors(),
             )
-            if (state.activity == Activity.THINKING || state.activity == Activity.SENDING) {
+            if (voiceAvailable && (prompt.isBlank() || listening) && !state.isBusy) {
+                MicrophoneButton(listening = listening, level = state.voiceLevel, onClick = onMicrophone)
+            } else if (state.activity == Activity.THINKING || state.activity == Activity.SENDING) {
                 OutlinedButton(onClick = onCancel) { Text("Cancel", color = Color(0xFFFF9C94)) }
             } else {
                 Button(
@@ -205,7 +229,44 @@ private fun ConversationPanel(
     }
 }
 
-private fun placeholderReply(state: UiState): String = if (state.activity == Activity.SENDING || state.activity == Activity.THINKING) {
+@Composable
+private fun MicrophoneButton(listening: Boolean, level: Float, onClick: () -> Unit) {
+    val ring = if (listening) 3.dp + (level * 7).dp else 1.dp
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .background(if (listening) Color(0xFF168C87) else Color(0xFF1B3036), CircleShape)
+            .border(ring, if (listening) Accent else Color(0xFF496067), CircleShape)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = if (listening) "Stop listening" else "Speak a request" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.size(24.dp)) {
+            val color = Color.White
+            val w = size.width
+            val h = size.height
+            if (listening) {
+                drawRoundRect(color, topLeft = Offset(w * 0.25f, h * 0.25f), size = Size(w * 0.5f, h * 0.5f), cornerRadius = CornerRadius(3f))
+                return@Canvas
+            }
+            drawRoundRect(color, topLeft = Offset(w * 0.34f, 0f), size = Size(w * 0.32f, h * 0.62f), cornerRadius = CornerRadius(w * 0.16f))
+            drawArc(
+                color = color,
+                startAngle = 0f,
+                sweepAngle = 180f,
+                useCenter = false,
+                topLeft = Offset(w * 0.18f, h * 0.22f),
+                size = Size(w * 0.64f, h * 0.56f),
+                style = Stroke(width = w * 0.09f),
+            )
+            drawLine(color, Offset(w * 0.5f, h * 0.78f), Offset(w * 0.5f, h * 0.95f), strokeWidth = w * 0.09f)
+        }
+    }
+}
+
+private fun placeholderReply(state: UiState): String = if (state.activity == Activity.LISTENING) {
+    "I'm listening…"
+} else if (state.activity == Activity.SENDING || state.activity == Activity.THINKING) {
     "Working on it…"
 } else when (state.connection) {
     Connection.OFFLINE -> "I can't reach the assistant server. Check Settings."

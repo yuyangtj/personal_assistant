@@ -42,7 +42,7 @@ for task orchestration; the Android application presents and controls it.
 4. ~~Define and test the provider-neutral assistant-response ingress.~~
 5. ~~Scaffold the Kotlin/Compose controller and embed Unity as a library.~~
 6. ~~Connect task creation and event polling to the Personal Assistant backend.~~
-7. Add microphone and speech recognition.
+7. ~~Add microphone and speech recognition.~~
 8. Implement, document, and test Android AppFunctions.
 
 The visual spike is deliberately first. Backend and voice integration should
@@ -72,9 +72,17 @@ not hide a character or rig that fails the quality bar.
    adb shell am start -n com.personalassistant.avatar.shell/.MainActivity
    ```
 
-Type a request. The avatar thinks while the task runs, speaks the backend's
-`ASSISTANT_REPLY`, and shakes hands when it completes. Debug builds also accept
-`--es prompt '<text>'` for scripted checks.
+Type a request, or tap the microphone and speak. While you talk he listens and your
+words appear live; the finished sentence is sent like a typed request. He thinks while
+the task runs, speaks the backend's `ASSISTANT_REPLY`, and shakes hands when it
+completes.
+
+Speech recognition runs on-device when an English model is installed, and otherwise
+falls back to the system recognizer. Microphone permission is requested the first
+time you tap the mic.
+
+Debug builds also accept `--es prompt '<text>'` (send a request) and `--ez listen true`
+(open the microphone) for scripted checks.
 
 Verified on a Pixel 10 Pro XL (Android 17):
 

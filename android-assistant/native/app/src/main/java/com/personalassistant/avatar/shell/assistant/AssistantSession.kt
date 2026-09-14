@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 
 enum class Connection { CHECKING, ONLINE, OFFLINE }
 
-enum class Activity { READY, SENDING, THINKING, SPEAKING, DONE, FAILED, CANCELLED }
+enum class Activity { READY, LISTENING, SENDING, THINKING, SPEAKING, DONE, FAILED, CANCELLED }
 
 data class UiState(
     val connection: Connection = Connection.CHECKING,
@@ -28,6 +28,9 @@ data class UiState(
     val taskId: String? = null,
     val backendUrl: String = AssistantSession.DEFAULT_BACKEND_URL,
     val character: AvatarCharacter = AvatarCharacter.COOL_MAN,
+    val transcript: String? = null,
+    val voiceLevel: Float = 0f,
+    val hint: String? = null,
 ) {
     val isBusy: Boolean get() = activity == Activity.SENDING || activity == Activity.THINKING || activity == Activity.SPEAKING
 }
@@ -87,7 +90,9 @@ class AssistantSession(
         val request = prompt.trim().take(MAX_REQUEST_CHARACTERS)
         if (request.isEmpty() || state.value.isBusy) return
         pendingOutcome = null
-        state.update { it.copy(activity = Activity.SENDING, lastRequest = request, reply = null, taskId = null) }
+        state.update {
+            it.copy(activity = Activity.SENDING, lastRequest = request, reply = null, taskId = null, transcript = null, hint = null)
+        }
         avatar.command(AvatarMode.THINKING, AvatarEmotion.CURIOUS, 0.6f)
 
         taskJob = scope.launch {
@@ -115,6 +120,41 @@ class AssistantSession(
                 Log.w(TAG, "NATIVE_TASK_CANCEL_FAILED: ${error.message}")
             }
         }
+    }
+
+    /** The microphone is open: the avatar listens and the transcript updates live. */
+    fun onListening() {
+        if (state.value.isBusy) return
+        state.update { it.copy(activity = Activity.LISTENING, transcript = "", voiceLevel = 0f, hint = null) }
+        avatar.command(AvatarMode.LISTENING, AvatarEmotion.CURIOUS, 0.6f)
+        Log.i(TAG, "NATIVE_LISTENING")
+    }
+
+    fun onPartialTranscript(text: String) {
+        if (state.value.activity == Activity.LISTENING) state.update { it.copy(transcript = text) }
+    }
+
+    fun onVoiceLevel(level: Float) {
+        if (state.value.activity == Activity.LISTENING) state.update { it.copy(voiceLevel = level) }
+    }
+
+    /** A finished utterance is sent exactly like a typed request. */
+    fun onFinalTranscript(text: String) {
+        Log.i(TAG, "NATIVE_VOICE_REQUEST: chars=${text.length}")
+        state.update { it.copy(activity = Activity.READY, transcript = null, voiceLevel = 0f) }
+        send(text)
+    }
+
+    fun onVoiceError(message: String) {
+        state.update {
+            it.copy(
+                activity = if (it.activity == Activity.LISTENING) Activity.READY else it.activity,
+                transcript = null,
+                voiceLevel = 0f,
+                hint = message,
+            )
+        }
+        if (!state.value.isBusy) avatar.command(AvatarMode.IDLE, AvatarEmotion.WARM, 0.45f)
     }
 
     /** Called by the Unity host bridge when the avatar starts speaking a response. */
