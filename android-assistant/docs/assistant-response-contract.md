@@ -43,8 +43,21 @@ method call, so validation remains credential-free.
 
 ## Backend relationship
 
-The current Personal Assistant manager-model adapter produces `TaskAnalysis`
-for capability selection, not user-facing prose. A later backend event or reply
-endpoint should produce the text and a durable event ID; the Kotlin client will
-map those fields into this envelope. Kimi credentials are not required until
-that provider client is connected.
+The backend appends an `ASSISTANT_REPLY` event to every task that finishes,
+immediately before its terminal event:
+
+```json
+{"text": "All done. I handled your request: Plan my morning",
+ "emotion": "Warm", "intensity": 0.7, "outcome": "completed"}
+```
+
+| Outcome | Emotion | Text source |
+| --- | --- | --- |
+| `completed` | `Warm` | The executor's `reply` output, falling back to its `summary` |
+| `failed` | `Concerned` | A safe user-facing sentence; raw errors are never spoken |
+| `cancelled` | `Neutral` | "Okay, I've stopped working on that." |
+
+The native client (`AssistantSession.kt`) maps this event to the envelope, using
+`responseId = "task:<task id>:<event sequence>"` so re-polling never repeats
+speech. When the connection fails, the client speaks a local `Concerned`
+message with a `local:<timestamp>` ID.

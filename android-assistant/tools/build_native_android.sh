@@ -8,7 +8,17 @@ NATIVE_ROOT="$REPO_ROOT/native"
 UNITY_EDITOR="/Applications/Unity/Hub/Editor/6000.3.24f1/Unity.app/Contents/MacOS/Unity"
 GRADLE_CACHE_ROOT="${GRADLE_USER_HOME:-${HOME}/.gradle}/wrapper/dists"
 
+# Re-export when asked (--reexport), when no export exists, or when Unity sources changed since.
+REEXPORT=false
+[[ "${1:-}" == "--reexport" ]] && REEXPORT=true
 if [[ ! -d "$UNITY_EXPORT/unityLibrary" ]]; then
+  REEXPORT=true
+elif [[ -n "$(find "$REPO_ROOT/unity/AvatarPrototype/Assets" -newer "$UNITY_EXPORT/unityLibrary/build.gradle" -type f ! -name '*.meta' -print -quit)" ]]; then
+  REEXPORT=true
+fi
+
+if [[ "$REEXPORT" == true ]]; then
+  echo "Exporting the Unity Android library…"
   "$UNITY_EDITOR" -batchmode -nographics -quit \
     -projectPath "$REPO_ROOT/unity/AvatarPrototype" \
     -executeMethod PersonalAssistant.Avatar.Editor.PrototypeProjectSetup.ExportAndroidLibrary \

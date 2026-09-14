@@ -38,6 +38,13 @@ namespace PersonalAssistant.Avatar
             Application.targetFrameRate = 60;
             if (avatar == null) avatar = FindFirstObjectByType<ProceduralAvatarController>();
             startedAt = Time.time;
+            if (AndroidHost.IsEmbedded)
+            {
+                // The native shell owns the controls; Unity only renders the avatar.
+                autoDemo = false;
+                Debug.Log("AVATAR_EMBEDDED: native host controls active");
+                return;
+            }
             if (GetComponent<PolishedPrototypeHud>() == null)
                 gameObject.AddComponent<PolishedPrototypeHud>();
         }

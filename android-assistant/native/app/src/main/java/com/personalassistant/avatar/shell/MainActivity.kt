@@ -1,78 +1,109 @@
 package com.personalassistant.avatar.shell
 
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.setViewTreeLifecycleOwner
-import com.personalassistant.avatar.MiloAssistantBridge
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.personalassistant.avatar.MiloHost
+import com.personalassistant.avatar.shell.assistant.AssistantSession
+import com.personalassistant.avatar.shell.avatar.AvatarBridge
+import com.personalassistant.avatar.shell.ui.AssistantScreen
 import com.unity3d.player.UnityPlayerActivity
-import org.json.JSONObject
 
-class MainActivity : UnityPlayerActivity(), LifecycleOwner {
+/** Hosts the Unity avatar and overlays the native assistant controls. */
+class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)
+    private val savedStateController = SavedStateRegistryController.create(this)
+    private lateinit var session: AssistantSession
 
     override val lifecycle: Lifecycle
         get() = lifecycleRegistry
 
+    override val savedStateRegistry: SavedStateRegistry
+        get() = savedStateController.savedStateRegistry
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Must be set before Unity starts so its prototype HUD stays hidden.
+        MiloHost.setEmbedded(true)
+        savedStateController.performAttach()
+        savedStateController.performRestore(savedInstanceState)
         super.onCreate(savedInstanceState)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+        // Compose resolves its owners from the window's root view, above Unity's own views.
+        window.decorView.setViewTreeLifecycleOwner(this)
+        window.decorView.setViewTreeSavedStateRegistryOwner(this)
 
-        val composeOverlay = ComposeView(this).apply {
+        session = AssistantSession(
+            scope = lifecycleScope,
+            avatar = AvatarBridge(),
+            preferences = getSharedPreferences("assistant", Context.MODE_PRIVATE),
+        )
+        MiloHost.setListener(object : MiloHost.Listener {
+            override fun onSpeechStarted(responseId: String) {
+                runOnUiThread { session.onSpeechStarted(responseId) }
+            }
+
+            override fun onSpeechFinished(responseId: String, reason: String) {
+                runOnUiThread { session.onSpeechFinished(responseId, reason) }
+            }
+        })
+
+        val overlay = ComposeView(this).apply {
             setViewTreeLifecycleOwner(this@MainActivity)
+            setViewTreeSavedStateRegistryOwner(this@MainActivity)
             setContent {
+                val state by session.uiState.collectAsState()
                 MaterialTheme {
-                    AssistantControllerOverlay(::deliverMockResponse)
+                    AssistantScreen(
+                        state = state,
+                        onSend = session::send,
+                        onCancel = session::cancel,
+                        onBackendUrl = session::updateBackendUrl,
+                        onCharacter = session::selectCharacter,
+                        onTestConnection = session::checkConnection,
+                    )
                 }
             }
         }
         mUnityPlayer.frameLayout.addView(
-            composeOverlay,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            ),
+            overlay,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
+        handleDebugPrompt(intent)
         Log.i(TAG, "NATIVE_SHELL_READY")
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        savedStateController.performSave(outState)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleDebugPrompt(intent)
+    }
+
+    /** Debug builds accept `adb shell am start ... --es prompt "text"` for automated device checks. */
+    private fun handleDebugPrompt(intent: Intent?) {
+        if (!BuildConfig.DEBUG) return
+        val prompt = intent?.getStringExtra(EXTRA_PROMPT) ?: return
+        intent.removeExtra(EXTRA_PROMPT)
+        window.decorView.postDelayed({ session.send(prompt) }, 1_500)
     }
 
     override fun onStart() {
@@ -83,6 +114,7 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner {
     override fun onResume() {
         super.onResume()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        session.checkConnection()
     }
 
     override fun onPause() {
@@ -96,104 +128,13 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner {
     }
 
     override fun onDestroy() {
+        MiloHost.setListener(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         super.onDestroy()
     }
 
-    private fun deliverMockResponse(prompt: String): String {
-        val responseId = "native-${System.currentTimeMillis()}"
-        val responseText = if (prompt.equals("hello", ignoreCase = true)) {
-            "Hello! The native Android controller is connected."
-        } else {
-            "I heard $prompt. The native controller is connected."
-        }
-        val responseJson = JSONObject()
-            .put("responseId", responseId)
-            .put("text", responseText)
-            .put("emotion", "Warm")
-            .put("intensity", 0.68)
-            .toString()
-        MiloAssistantBridge.deliverResponse(responseJson)
-        Log.i(TAG, "NATIVE_RESPONSE_SENT: id=$responseId, promptChars=${prompt.length}")
-        return responseText
-    }
-
     private companion object {
         const val TAG = "MiloNative"
-    }
-}
-
-@Composable
-private fun AssistantControllerOverlay(onSend: (String) -> String) {
-    var prompt by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf("Native controller ready") }
-    val focusManager = LocalFocusManager.current
-    val keyboardController = LocalSoftwareKeyboardController.current
-
-    fun send() {
-        val normalized = prompt.trim().take(160)
-        if (normalized.isEmpty()) return
-        status = onSend(normalized)
-        prompt = ""
-        focusManager.clearFocus()
-        keyboardController?.hide()
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(Color(0xF20A171C), RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                .navigationBarsPadding()
-                .imePadding()
-                .padding(horizontal = 22.dp, vertical = 18.dp),
-        ) {
-            Text(
-                text = "ASK MILO",
-                color = Color(0xFF6CE7D5),
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.labelMedium,
-            )
-            Spacer(modifier = Modifier.height(5.dp))
-            Text(
-                text = status,
-                color = Color(0xFFD7E8EA),
-                maxLines = 2,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = { prompt = it.take(160) },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Type a request…") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { send() }),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF49D9C6),
-                        unfocusedBorderColor = Color(0xFF496067),
-                        focusedPlaceholderColor = Color(0xFF8FA7AB),
-                        unfocusedPlaceholderColor = Color(0xFF8FA7AB),
-                        cursorColor = Color(0xFF49D9C6),
-                    ),
-                )
-                Button(
-                    onClick = ::send,
-                    enabled = prompt.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF168C87)),
-                ) {
-                    Text("Send", fontWeight = FontWeight.Bold)
-                }
-            }
-        }
+        const val EXTRA_PROMPT = "prompt"
     }
 }

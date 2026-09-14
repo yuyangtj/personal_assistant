@@ -119,6 +119,14 @@ namespace PersonalAssistant.Avatar
             ApplyCameraFraming();
         }
 
+        /// <summary>UnitySendMessage entry point for native hosts: "CoolMan" or "Milo".</summary>
+        public void SetCharacterName(string value)
+        {
+            if (!Enum.TryParse(value, true, out AvatarCharacter character)) return;
+            if (ActiveProfile != null && ActiveProfile.Character == character) return;
+            SetCharacter(character);
+        }
+
         /// <summary>Rebuilds the avatar as another character; the choice persists on device.</summary>
         public void SetCharacter(AvatarCharacter character, bool remember = true)
         {
@@ -194,6 +202,7 @@ namespace PersonalAssistant.Avatar
                 activeUtteranceId = null;
                 ActiveSpeechText = string.Empty;
                 AndroidTextToSpeech.Stop();
+                AndroidHost.NotifySpeechFinished(LastAssistantResponseId, "interrupted");
             }
 
             if (Mode != mode)
@@ -335,6 +344,7 @@ namespace PersonalAssistant.Avatar
             speechTime = 0f;
             audioClockActive = audioTimelineReceived;
             speechDeadlineAt = Time.time + speechTimelineDuration + 2f;
+            AndroidHost.NotifySpeechStarted(LastAssistantResponseId);
             Debug.Log($"TTS_STARTED: {utteranceId}, audioClock={audioClockActive}");
         }
 
@@ -737,6 +747,7 @@ namespace PersonalAssistant.Avatar
             ActiveViseme = "sil";
             ApplyCommand(AvatarMode.Idle, AvatarEmotion.Warm, 0.45f);
             Debug.Log($"TTS_FINISHED: {reason}");
+            AndroidHost.NotifySpeechFinished(LastAssistantResponseId, reason);
         }
 
         private void OnApplicationQuit()

@@ -2,9 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="false"
         android:label="Milo Assistant"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true">
 
         <activity
@@ -16,7 +19,8 @@
             android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|fontScale|layoutDirection|density"
             android:enabled="true"
             android:exported="true"
-            android:hardwareAccelerated="false"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize"
             android:launchMode="singleTask"
             android:resizeableActivity="true"
             android:screenOrientation="portrait"

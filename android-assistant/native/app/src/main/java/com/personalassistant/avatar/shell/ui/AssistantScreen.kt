@@ -1,0 +1,278 @@
+package com.personalassistant.avatar.shell.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import com.personalassistant.avatar.shell.assistant.Activity
+import com.personalassistant.avatar.shell.assistant.Connection
+import com.personalassistant.avatar.shell.assistant.UiState
+import com.personalassistant.avatar.shell.avatar.AvatarCharacter
+
+private val Panel = Color(0xE60A171C)
+private val Accent = Color(0xFF49D9C6)
+private val Muted = Color(0xFF9FB4B8)
+private val TextPrimary = Color(0xFFE6F1F2)
+
+@Composable
+fun AssistantScreen(
+    state: UiState,
+    onSend: (String) -> Unit,
+    onCancel: () -> Unit,
+    onBackendUrl: (String) -> Unit,
+    onCharacter: (AvatarCharacter) -> Unit,
+    onTestConnection: () -> Unit,
+) {
+    var showSettings by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        StatusBar(
+            state = state,
+            onSettings = { showSettings = true },
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+        ConversationPanel(
+            state = state,
+            onSend = onSend,
+            onCancel = onCancel,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            state = state,
+            onDismiss = { showSettings = false },
+            onBackendUrl = onBackendUrl,
+            onCharacter = onCharacter,
+            onTestConnection = onTestConnection,
+        )
+    }
+}
+
+@Composable
+private fun StatusBar(state: UiState, onSettings: () -> Unit, modifier: Modifier = Modifier) {
+    val (label, color) = statusLabel(state)
+    Row(
+        modifier = modifier
+            .statusBarsPadding()
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .background(Panel, RoundedCornerShape(20.dp))
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(modifier = Modifier.size(10.dp).background(color, CircleShape))
+            Spacer(modifier = Modifier.size(8.dp))
+            Text(state.character.label, color = TextPrimary, fontWeight = FontWeight.Bold)
+            Text("  ·  $label", color = Muted)
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        TextButton(
+            onClick = onSettings,
+            modifier = Modifier.background(Panel, RoundedCornerShape(20.dp)),
+        ) {
+            Text("Settings", color = Accent, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+private fun statusLabel(state: UiState): Pair<String, Color> = when {
+    state.activity == Activity.SENDING -> "Sending" to Color(0xFF6FC3FF)
+    state.activity == Activity.THINKING -> "Thinking" to Color(0xFFB48CFF)
+    state.activity == Activity.SPEAKING -> "Speaking" to Accent
+    state.activity == Activity.DONE -> "Done" to Color(0xFF6BE38A)
+    state.activity == Activity.FAILED -> "Problem" to Color(0xFFFF7A70)
+    state.activity == Activity.CANCELLED -> "Cancelled" to Muted
+    state.connection == Connection.CHECKING -> "Connecting" to Muted
+    state.connection == Connection.OFFLINE -> "Offline" to Color(0xFFFF7A70)
+    else -> "Online" to Color(0xFF6BE38A)
+}
+
+@Composable
+private fun ConversationPanel(
+    state: UiState,
+    onSend: (String) -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var prompt by remember { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    fun submit() {
+        if (prompt.isBlank() || state.isBusy) return
+        onSend(prompt)
+        prompt = ""
+        focusManager.clearFocus()
+        keyboard?.hide()
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Panel, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+    ) {
+        state.lastRequest?.let {
+            Text("YOU", color = Muted, style = MaterialTheme.typography.labelSmall)
+            Text(it, color = TextPrimary, maxLines = 2, style = MaterialTheme.typography.bodyMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        Text(state.character.label.uppercase(), color = Accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+        Text(
+            text = state.reply ?: placeholderReply(state),
+            color = TextPrimary,
+            maxLines = 4,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = prompt,
+                onValueChange = { prompt = it.take(2_000) },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Ask your assistant…") },
+                maxLines = 3,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { submit() }),
+                colors = fieldColors(),
+            )
+            if (state.activity == Activity.THINKING || state.activity == Activity.SENDING) {
+                OutlinedButton(onClick = onCancel) { Text("Cancel", color = Color(0xFFFF9C94)) }
+            } else {
+                Button(
+                    onClick = ::submit,
+                    enabled = prompt.isNotBlank() && !state.isBusy,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF168C87)),
+                ) {
+                    Text("Send", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        state.character.credit?.let {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(it, color = Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.align(Alignment.CenterHorizontally))
+        }
+    }
+}
+
+private fun placeholderReply(state: UiState): String = if (state.activity == Activity.SENDING || state.activity == Activity.THINKING) {
+    "Working on it…"
+} else when (state.connection) {
+    Connection.OFFLINE -> "I can't reach the assistant server. Check Settings."
+    Connection.CHECKING -> "Connecting to your assistant…"
+    Connection.ONLINE -> "Hi! What can I do for you?"
+}
+
+@Composable
+private fun SettingsDialog(
+    state: UiState,
+    onDismiss: () -> Unit,
+    onBackendUrl: (String) -> Unit,
+    onCharacter: (AvatarCharacter) -> Unit,
+    onTestConnection: () -> Unit,
+) {
+    var url by remember { mutableStateOf(state.backendUrl) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Assistant settings") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("Backend URL") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                )
+                Text(
+                    "Over USB run: adb reverse tcp:8010 tcp:8010",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text("Connection: ${state.connection.name.lowercase()}", style = MaterialTheme.typography.bodySmall)
+                Text("Character", fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AvatarCharacter.entries.forEach { character ->
+                        FilterChip(
+                            selected = state.character == character,
+                            onClick = { onCharacter(character) },
+                            label = { Text(character.label) },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onBackendUrl(url)
+                onDismiss()
+            }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                onBackendUrl(url)
+                onTestConnection()
+            }) { Text("Test connection") }
+        },
+    )
+}
+
+@Composable
+private fun fieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    focusedBorderColor = Accent,
+    unfocusedBorderColor = Color(0xFF496067),
+    focusedPlaceholderColor = Muted,
+    unfocusedPlaceholderColor = Muted,
+    cursorColor = Accent,
+)

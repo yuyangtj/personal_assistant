@@ -40,13 +40,49 @@ for task orchestration; the Android application presents and controls it.
 2. ~~Produce and integrate a detailed rigged character.~~
 3. ~~Validate expressions and English TTS lip-sync on-device.~~
 4. ~~Define and test the provider-neutral assistant-response ingress.~~
-5. Scaffold the Kotlin/Compose controller and embed Unity as a library.
-6. Connect task creation and event polling to the Personal Assistant backend.
+5. ~~Scaffold the Kotlin/Compose controller and embed Unity as a library.~~
+6. ~~Connect task creation and event polling to the Personal Assistant backend.~~
 7. Add microphone and speech recognition.
 8. Implement, document, and test Android AppFunctions.
 
 The visual spike is deliberately first. Backend and voice integration should
 not hide a character or rig that fails the quality bar.
+
+## Run the native app with the backend
+
+1. Start the backend from the repository root. The alternate host ports avoid clashes with
+   other local services:
+
+   ```shell
+   ASSISTANT_API_PORT=8010 ASSISTANT_POSTGRES_PORT=55433 docker compose up --build -d
+   ```
+
+2. Build the native app. The script re-exports Unity when its sources changed, or pass
+   `--reexport`:
+
+   ```shell
+   zsh tools/build_native_android.sh
+   adb install -r native/app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+3. Let the phone reach the Mac backend over USB, then launch the app:
+
+   ```shell
+   adb reverse tcp:8010 tcp:8010
+   adb shell am start -n com.personalassistant.avatar.shell/.MainActivity
+   ```
+
+Type a request. The avatar thinks while the task runs, speaks the backend's
+`ASSISTANT_REPLY`, and shakes hands when it completes. Debug builds also accept
+`--es prompt '<text>'` for scripted checks.
+
+Verified on a Pixel 10 Pro XL (Android 17):
+
+- a request completed and was spoken with lip-sync;
+- cancelling a slow task spoke the cancellation reply;
+- with the API stopped, he spoke a local offline message;
+- switching characters in Settings worked;
+- the screen recording averaged 59.8 fps.
 
 ## Documents
 
