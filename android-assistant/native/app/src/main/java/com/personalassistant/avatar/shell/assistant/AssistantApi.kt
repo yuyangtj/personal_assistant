@@ -1,8 +1,10 @@
 package com.personalassistant.avatar.shell.assistant
 
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -16,7 +18,7 @@ class AssistantApiException(message: String, cause: Throwable? = null) : IOExcep
 /**
  * Minimal client for the Personal Assistant HTTP API. Blocking I/O runs on [Dispatchers.IO].
  */
-class AssistantApi(baseUrl: String) {
+class AssistantApi(baseUrl: String, private val speechCacheDirectory: File) {
     private val base = baseUrl.trim().trimEnd('/')
 
     suspend fun health(): Boolean = try {
@@ -63,13 +65,49 @@ class AssistantApi(baseUrl: String) {
         request("POST", "/tasks/$taskId/cancel")
     }
 
+    /** Downloads a cloud-generated WAV into app-private cache and returns its canonical path. */
+    suspend fun speech(text: String, emotion: String): String = withContext(Dispatchers.IO) {
+        if (text.length > MAX_SPEECH_CHARACTERS) {
+            throw@withContext AssistantApiException("Reply is too long for cloud speech")
+        }
+        val body = JSONObject().put("text", text).put("emotion", emotion)
+        val connection = open("/speech")
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 4_000
+            connection.readTimeout = 35_000
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "audio/wav")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.outputStream.use { it.write(body.toString().toByteArray()) }
+            val code = connection.responseCode
+            if (code !in 200..299) throw AssistantApiException("HTTP $code for POST /speech")
+            val declared = connection.contentLengthLong
+            if (declared > MAX_AUDIO_BYTES) throw AssistantApiException("Cloud speech was too large")
+            val audio = connection.inputStream.use { it.readBytes() }
+            if (audio.size !in 44..MAX_AUDIO_BYTES || !audio.copyOfRange(0, 4).contentEquals("RIFF".toByteArray())) {
+                throw AssistantApiException("Cloud speech was not a valid WAV")
+            }
+            val directory = File(speechCacheDirectory, "assistant-speech")
+            if (!directory.isDirectory && !directory.mkdirs()) {
+                throw AssistantApiException("Speech cache is unavailable")
+            }
+            directory.listFiles()?.forEach { stale ->
+                if (!stale.delete()) stale.deleteOnExit()
+            }
+            File(directory, "${UUID.randomUUID()}.wav").apply { writeBytes(audio) }.canonicalPath
+        } catch (error: AssistantApiException) {
+            throw error
+        } catch (error: Exception) {
+            throw AssistantApiException("Cloud speech is unavailable", error)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private suspend fun request(method: String, path: String, body: JSONObject? = null): JSONObject =
         withContext(Dispatchers.IO) {
-            val connection = try {
-                URL(base + path).openConnection() as HttpURLConnection
-            } catch (error: Exception) {
-                throw AssistantApiException("Invalid backend URL: $base", error)
-            }
+            val connection = open(path)
             try {
                 connection.requestMethod = method
                 connection.connectTimeout = 4_000
@@ -93,4 +131,15 @@ class AssistantApi(baseUrl: String) {
                 connection.disconnect()
             }
         }
+
+    private fun open(path: String): HttpURLConnection = try {
+        URL(base + path).openConnection() as HttpURLConnection
+    } catch (error: Exception) {
+        throw AssistantApiException("Invalid backend URL: $base", error)
+    }
+
+    private companion object {
+        const val MAX_SPEECH_CHARACTERS = 600
+        const val MAX_AUDIO_BYTES = 12 * 1024 * 1024
+    }
 }

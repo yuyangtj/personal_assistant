@@ -42,7 +42,8 @@ Compose text field ──send──▶ AssistantSession
                                │
    TASK_PLANNING_STARTED/PLAN ─┼─▶ AvatarCommand THINKING · CURIOUS
    EXECUTION_STARTED ──────────┼─▶ AvatarCommand THINKING · NEUTRAL
-   ASSISTANT_REPLY ────────────┼─▶ AssistantResponse ─▶ Unity TTS + lip-sync
+   ASSISTANT_REPLY ────────────┼─▶ POST /speech ─▶ cached WAV ─▶ Unity playback + lip-sync
+                               │       └─ unavailable/too long ─▶ Android TTS fallback
    TASK_COMPLETED/FAILED/CANCELLED ─▶ stop polling
                                │
 MiloHost.onSpeechFinished ─────┴─▶ SUCCESS (handshake) / ERROR / IDLE
@@ -127,11 +128,14 @@ The assistant or language model may choose `mode`, `emotion`, and bounded
 The provider boundary now stops before Unity:
 
 ```text
-Kimi / another model / deterministic mock
+Kimi / MiniMax / deterministic mock
                     |
                     v
          Android assistant client
-                    | AssistantResponse JSON
+                    | POST /speech (optional Gemini TTS)
+                    v
+       app-private 24 kHz WAV cache
+                    | AssistantResponse JSON + audioPath
                     v
           MiloAssistantBridge
                     | UnitySendMessage
@@ -140,13 +144,14 @@ Kimi / another model / deterministic mock
                     |
           validate + deduplicate
                     v
-       SpeakEnglish -> Android TTS
+       SpeakEnglish -> cloud WAV or Android TTS fallback
                     |
                     v
-          range-aligned visemes
+          audio-clock-aligned visemes
 ```
 
-Unity does not know which provider generated the reply. The response ID is used
+Unity does not know which text model generated the reply. It receives only a validated
+app-private audio path, never credentials or provider controls. The response ID is used
 to prevent polling or delivery retries from speaking the same response twice.
 The in-memory check protects the current Unity process; durable event cursors
 remain the future Kotlin client's responsibility.

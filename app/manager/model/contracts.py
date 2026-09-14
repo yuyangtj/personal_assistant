@@ -53,6 +53,8 @@ class ModelInvocation(BaseModel):
     raw_output: str | dict[str, Any]
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
+    provider: str | None = None
+    model: str | None = None
 
 
 class TokenUsage(BaseModel):

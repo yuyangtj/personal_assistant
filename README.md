@@ -23,10 +23,11 @@ agent, tool, approval, and Slack integrations.
 - Retry malformed model output once without persisting raw responses.
 - Keep capability selection deterministic after model inference.
 
-The fake executor remains intentional. A scripted manager-model client exercises
-the inference boundary in tests. Kimi is represented by a disabled
-manifest, so the orchestration design can be inspected without allowing the CLI
-to run before its adapter and sandbox are tested.
+The fake executor remains as a credential-free fallback, and a scripted client
+exercises the manager inference boundary in tests. Kimi and MiniMax conversational
+execution and opt-in manager analysis are implemented. The separate Kimi Code
+capability is still represented by a disabled manifest, so its CLI cannot run before
+the adapter and worktree sandbox are tested.
 
 The before-and-after architecture diagrams are in
 [`docs/architecture.md`](docs/architecture.md).
@@ -109,35 +110,77 @@ Docker Compose backend.
 
 ## Current boundaries
 
-There is no real model, coding-agent, Slack, or application integration yet.
-The production worker uses the deterministic manager. The provider-neutral
-model-assisted manager is implemented and tested, but it requires a real model
-client before being enabled in the worker process.
+There is no coding-agent, Slack, or general tool integration yet. Kimi or MiniMax can
+independently provide conversational execution and manager analysis. Manager analysis
+is opt-in; the production worker keeps deterministic routing by default. Kimi Code
+remains a separate disabled capability until its executor and isolated Git-worktree
+sandbox are implemented and tested.
 
-The next slice should implement one real provider client behind the existing
-manager-model contract. After its structured-output behavior is verified, Kimi
-can separately be added as a coding-agent adapter inside an isolated Git
-worktree.
+## Optional manager-model analysis
 
-## Conversational replies with Kimi
-
-When `KIMI_API_KEY` is set, the worker installs the `kimi-conversation` capability
-(priority 20). It answers everyday requests with short, speakable replies through Kimi's
-OpenAI-compatible API. Without a key, routing falls back to the fake executor, because
-only capabilities whose adapter is installed can be selected
-(`CapabilityRegistry.restricted_to_adapters`).
+Set `ASSISTANT_MANAGER_MODEL_ENABLED=true` to let Kimi or MiniMax infer a task's
+required capabilities before deterministic routing. Explicit `required_capabilities`
+still bypass the model. Responses are validated against the existing `TaskAnalysis`
+schema, invented capabilities are rejected, and one repair attempt is allowed.
 
 | Variable | Default |
 | --- | --- |
-| `KIMI_API_KEY` / `ASSISTANT_KIMI_API_KEY` | unset (conversation disabled) |
+| `ASSISTANT_MANAGER_MODEL_ENABLED` | `false` |
+| `ASSISTANT_MANAGER_MODEL_PROVIDER` | `kimi` (`kimi` or `minimax`) |
+| `ASSISTANT_MANAGER_MODEL_FALLBACK_PROVIDER` | `auto` (the other routine provider) |
+| `ASSISTANT_MANAGER_MODEL_BASE_URL` | unset; use the selected provider's URL |
+| `ASSISTANT_MANAGER_MODEL` | unset; use the selected provider's model |
+| `ASSISTANT_MANAGER_MODEL_TIMEOUT_SECONDS` | `30` |
+| `ASSISTANT_MANAGER_MODEL_MINIMUM_CONFIDENCE` | `0.5` |
+
+| Provider | Key | Provider URL | Default manager model |
+| --- | --- | --- | --- |
+| Kimi | `KIMI_API_KEY` / `ASSISTANT_KIMI_API_KEY` | `https://api.kimi.com/coding/v1` | `kimi-for-coding-highspeed` |
+| MiniMax | `MINIMAX_API_KEY` / `ASSISTANT_MINIMAX_API_KEY` | `https://api.minimax.chat/v1` | `MiniMax-M2.7-highspeed` |
+
+When manager analysis is enabled, an ordinary request can make two model calls:
+one to infer capabilities and one to execute the selected capability. Those calls
+may use different providers. Provider, model, latency, attempts, and token usage are
+recorded with the task analysis.
+
+For example, to analyze with MiniMax M3 while keeping the default Kimi conversation
+provider:
+
+```bash
+ASSISTANT_MANAGER_MODEL_ENABLED=true \
+ASSISTANT_MANAGER_MODEL_PROVIDER=minimax \
+ASSISTANT_MANAGER_MODEL=MiniMax-M3 \
+docker compose up --build
+```
+
+## Conversational replies with Kimi or MiniMax
+
+The worker installs the provider-neutral `model-conversation` capability (priority 20)
+when at least one configured provider key is available. It answers everyday requests with short,
+speakable replies through an OpenAI-compatible API. Without that key, routing falls
+back to the fake executor, because only capabilities whose adapter is installed can be
+selected (`CapabilityRegistry.restricted_to_adapters`).
+
+| Variable | Default |
+| --- | --- |
+| `ASSISTANT_CONVERSATION_MODEL_PROVIDER` | `kimi` (`kimi` or `minimax`) |
+| `ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER` | `auto` (the other routine provider) |
+| `ASSISTANT_CONVERSATION_MODEL_BASE_URL` | unset; use the selected provider's URL |
+| `ASSISTANT_CONVERSATION_MODEL` | unset; use the selected provider's model |
+| `ASSISTANT_CONVERSATION_MODEL_TIMEOUT_SECONDS` | unset; use the provider timeout |
+| `KIMI_API_KEY` / `ASSISTANT_KIMI_API_KEY` | unset |
 | `ASSISTANT_KIMI_BASE_URL` | `https://api.kimi.com/coding/v1` |
 | `ASSISTANT_KIMI_MODEL` | `kimi-for-coding-highspeed` (about 1.5–2 s per reply) |
 | `ASSISTANT_KIMI_TIMEOUT_SECONDS` | `30` |
+| `MINIMAX_API_KEY` / `ASSISTANT_MINIMAX_API_KEY` | unset |
+| `ASSISTANT_MINIMAX_BASE_URL` | `https://api.minimax.chat/v1` |
+| `ASSISTANT_MINIMAX_MODEL` | `MiniMax-M2.7-highspeed` |
+| `ASSISTANT_MINIMAX_TIMEOUT_SECONDS` | `30` |
 
 - Replies are one to three spoken sentences with an emotion (`Warm`, `Curious`,
   `Excited`, `Concerned`, `Neutral`).
-- The system prompt states that the assistant cannot yet take actions such as calendar,
-  email or reminders, so it never claims to have done them.
+- The model can propose confirmation-gated timers, alarms, and calendar events, but it
+  cannot read accounts or claim that an action has already happened.
 - Tasks with the same `source_context.conversation_id` share context: the last six
   completed turns are sent along with the request.
 - A reply may carry one validated phone `action` (`set_timer`, `set_alarm`,
@@ -151,11 +194,37 @@ only capabilities whose adapter is installed can be selected
 - Model, latency and token usage are recorded in `EXECUTION_OUTPUT_RECEIVED`. The API key
   is only read from the environment and never logged.
 
-Docker Compose passes `KIMI_API_KEY` through from the host shell:
+When both keys are configured, routine calls try the selected provider first and retry
+the other provider only after a sanitized timeout or provider failure. `auto` chooses
+MiniMax after Kimi, or Kimi after MiniMax. Set either fallback variable to `off` to use
+only the primary provider. Events record the provider and model that actually succeeded.
+
+For example, use MiniMax M3 for replies while leaving manager analysis disabled:
+
+```bash
+ASSISTANT_CONVERSATION_MODEL_PROVIDER=minimax \
+ASSISTANT_CONVERSATION_MODEL=MiniMax-M3 \
+docker compose up --build
+```
+
+Docker Compose passes both provider keys through from the host shell:
 
 ```bash
 ASSISTANT_API_PORT=8010 ASSISTANT_POSTGRES_PORT=55433 docker compose up --build -d
 ```
+
+## Gemini speech only
+
+Set `GEMINI_TTS_API_KEY` to enable `POST /speech`. This is a deliberately narrow,
+audio-only integration: the key is passed to the API service but not the worker, so
+Gemini cannot be selected for conversation or manager analysis. The endpoint accepts up
+to 600 characters and returns a 24 kHz mono WAV using
+`gemini-3.1-flash-tts-preview` and the friendly `Achird` voice by default.
+
+Identical text and emotion pairs are cached in memory (128 entries by default) to avoid
+repeat billable requests. The Android client downloads the WAV into app-private cache;
+if Gemini is unavailable, slow, or the reply exceeds the cloud limit, it automatically
+uses Android's on-device English TTS instead.
 
 ## Assistant replies
 

@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
 
+from app.integrations.speech import SpeechAudio
+
 
 def test_create_get_list_and_cancel_task(client: TestClient) -> None:
     created_response = client.post(
@@ -57,6 +59,46 @@ def test_health_checks_database(client: TestClient) -> None:
     assert client.get("/health").json() == {"status": "ok"}
 
 
+def test_speech_is_unavailable_without_dedicated_tts_key(client: TestClient) -> None:
+    response = client.post("/speech", json={"text": "Hello", "emotion": "Warm"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Cloud speech is not configured"
+
+
+def test_speech_returns_cached_wav_with_provider_headers(client: TestClient) -> None:
+    class StubSpeechSynthesizer:
+        def synthesize(self, text: str, *, emotion: str) -> SpeechAudio:
+            assert text == "Hello"
+            assert emotion == "Excited"
+            return SpeechAudio(
+                wav_bytes=b"RIFFtest",
+                provider="gemini-tts",
+                model="gemini-tts-model",
+                voice="Achird",
+                duration_ms=420,
+                cache_hit=True,
+            )
+
+    client.app.state.speech_synthesizer = StubSpeechSynthesizer()
+
+    response = client.post("/speech", json={"text": "Hello", "emotion": "Excited"})
+
+    assert response.status_code == 200
+    assert response.content == b"RIFFtest"
+    assert response.headers["content-type"] == "audio/wav"
+    assert response.headers["x-speech-provider"] == "gemini-tts"
+    assert response.headers["x-speech-model"] == "gemini-tts-model"
+    assert response.headers["x-speech-voice"] == "Achird"
+    assert response.headers["x-speech-duration-ms"] == "420"
+    assert response.headers["x-speech-cache"] == "hit"
+
+
+def test_speech_rejects_blank_or_oversized_text(client: TestClient) -> None:
+    assert client.post("/speech", json={"text": "   "}).status_code == 422
+    assert client.post("/speech", json={"text": "x" * 601}).status_code == 422
+
+
 def test_capabilities_include_enabled_and_planned_adapters(client: TestClient) -> None:
     response = client.get("/capabilities")
     assert response.status_code == 200
@@ -64,7 +106,7 @@ def test_capabilities_include_enabled_and_planned_adapters(client: TestClient) -
     assert [capability["id"] for capability in capabilities] == [
         "fake-executor",
         "kimi-code",
-        "kimi-conversation",
+        "model-conversation",
     ]
     assert capabilities[0]["availability"]["enabled"] is True
     assert capabilities[1]["availability"]["enabled"] is False
@@ -73,7 +115,7 @@ def test_capabilities_include_enabled_and_planned_adapters(client: TestClient) -
     enabled = client.get("/capabilities", params={"include_disabled": False}).json()
     assert [capability["id"] for capability in enabled["capabilities"]] == [
         "fake-executor",
-        "kimi-conversation",
+        "model-conversation",
     ]
 
 

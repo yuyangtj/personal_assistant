@@ -57,6 +57,7 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
             scope = lifecycleScope,
             avatar = AvatarBridge(),
             preferences = getSharedPreferences("assistant", Context.MODE_PRIVATE),
+            speechCacheDirectory = cacheDir,
             runAction = PhoneActionRunner(this)::run,
         )
         voice = VoiceInput(this, object : VoiceInput.Listener {

@@ -227,6 +227,11 @@ namespace PersonalAssistant.Avatar
 
         private void SpeakEnglish(string text, AvatarEmotion emotion, float intensity)
         {
+            SpeakEnglish(text, emotion, intensity, null);
+        }
+
+        private void SpeakEnglish(string text, AvatarEmotion emotion, float intensity, string audioPath)
+        {
             if (string.IsNullOrWhiteSpace(text)) return;
             englishSpeechCues = EnglishVisemePlanner.Build(text, out speechTimelineDuration);
             ActiveSpeechText = text.Trim();
@@ -240,7 +245,10 @@ namespace PersonalAssistant.Avatar
             speechDeadlineAt = Time.time + speechTimelineDuration + 2f;
             ApplyCommand(AvatarMode.Speaking, emotion, intensity);
 
-            bool nativeSpeechRequested = AndroidTextToSpeech.Speak(gameObject, ActiveSpeechText, ActiveProfile?.VoiceStyle ?? "default");
+            string voiceStyle = ActiveProfile?.VoiceStyle ?? "default";
+            bool nativeSpeechRequested = !string.IsNullOrWhiteSpace(audioPath)
+                ? AndroidTextToSpeech.SpeakWave(gameObject, ActiveSpeechText, audioPath, voiceStyle)
+                : AndroidTextToSpeech.Speak(gameObject, ActiveSpeechText, voiceStyle);
             // The mouth rests while Android synthesizes; the timeline starts with the audio.
             awaitingSpeechAudio = nativeSpeechRequested;
             Debug.Log($"TTS_REQUESTED: chars={ActiveSpeechText.Length}, cues={englishSpeechCues.Count}, estimatedSeconds={speechTimelineDuration:F2}, native={nativeSpeechRequested}");
@@ -285,7 +293,7 @@ namespace PersonalAssistant.Avatar
             RememberAssistantResponse(response.responseId);
             GetComponent<PrototypeDemo>()?.DisableAutoDemo();
             Debug.Log($"ASSISTANT_RESPONSE_ACCEPTED: id={LastAssistantResponseId}, chars={response.text.Length}, emotion={emotion}");
-            SpeakEnglish(response.text, emotion, intensity);
+            SpeakEnglish(response.text, emotion, intensity, response.audioPath);
         }
 
         private void RememberAssistantResponse(string responseId)

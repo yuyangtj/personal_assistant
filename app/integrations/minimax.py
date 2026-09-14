@@ -1,36 +1,39 @@
 from __future__ import annotations
 
 import json
+import re
 
 import httpx
 
 from app.integrations.chat import ChatCompletion, ChatMessage, ProviderError
 from app.manager.model.contracts import ManagerModelRequest, ModelInvocation
 
-DEFAULT_KIMI_BASE_URL = "https://api.kimi.com/coding/v1"
-DEFAULT_KIMI_MODEL = "kimi-for-coding-highspeed"
+DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.chat/v1"
+DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7-highspeed"
+
+_LEADING_THINK = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
 
 
-class KimiError(ProviderError):
-    """Kimi request failed. Messages never include the API key or response bodies."""
+class MiniMaxError(ProviderError):
+    """MiniMax request failed. Messages never include credentials or response bodies."""
 
 
-class KimiChatClient:
-    """Minimal OpenAI-compatible chat client for the Kimi API."""
+class MiniMaxChatClient:
+    """Minimal OpenAI-compatible chat client for conversational replies."""
 
-    provider = "kimi"
+    provider = "minimax"
 
     def __init__(
         self,
         *,
         api_key: str,
-        base_url: str = DEFAULT_KIMI_BASE_URL,
-        model: str = DEFAULT_KIMI_MODEL,
+        base_url: str = DEFAULT_MINIMAX_BASE_URL,
+        model: str = DEFAULT_MINIMAX_MODEL,
         timeout_seconds: float = 30.0,
         transport: httpx.BaseTransport | None = None,
     ):
         if not api_key:
-            raise ValueError("A Kimi API key is required")
+            raise ValueError("A MiniMax API key is required")
         self.model = model
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
@@ -39,10 +42,16 @@ class KimiChatClient:
             transport=transport,
         )
 
-    def complete(self, messages: list[ChatMessage], *, max_tokens: int = 700) -> ChatCompletion:
+    def complete(
+        self,
+        messages: list[ChatMessage],
+        *,
+        max_tokens: int = 700,
+    ) -> ChatCompletion:
         payload = {
             "model": self.model,
-            "max_tokens": max_tokens,
+            "max_completion_tokens": max_tokens,
+            "reasoning_split": True,
             "messages": [
                 {"role": message.role, "content": message.content} for message in messages
             ],
@@ -50,14 +59,22 @@ class KimiChatClient:
         try:
             response = self._client.post("/chat/completions", json=payload)
         except httpx.HTTPError as error:
-            raise KimiError(f"Kimi request failed: {type(error).__name__}") from error
+            raise MiniMaxError(f"MiniMax request failed: {type(error).__name__}") from error
         if response.status_code != 200:
-            raise KimiError(f"Kimi returned HTTP {response.status_code}")
+            raise MiniMaxError(f"MiniMax returned HTTP {response.status_code}")
         try:
             body = response.json()
+            base_response = body.get("base_resp") or {}
+            if base_response.get("status_code", 0) != 0:
+                raise MiniMaxError("MiniMax returned a provider error")
             text = body["choices"][0]["message"].get("content") or ""
+            if not isinstance(text, str):
+                raise TypeError("chat content must be text")
+            text = _LEADING_THINK.sub("", text, count=1)
+        except MiniMaxError:
+            raise
         except (ValueError, KeyError, IndexError, TypeError) as error:
-            raise KimiError("Kimi returned an unexpected response shape") from error
+            raise MiniMaxError("MiniMax returned an unexpected response shape") from error
         usage = body.get("usage") or {}
         return ChatCompletion(
             text=text,
@@ -71,21 +88,21 @@ class KimiChatClient:
         self._client.close()
 
 
-class KimiManagerModelClient:
-    """Kimi implementation of the provider-neutral manager-analysis contract."""
+class MiniMaxManagerModelClient:
+    """MiniMax OpenAI-compatible implementation of manager task analysis."""
 
-    provider = "kimi"
+    provider = "minimax"
 
     def __init__(
         self,
         *,
         api_key: str,
-        base_url: str = DEFAULT_KIMI_BASE_URL,
-        model: str = DEFAULT_KIMI_MODEL,
+        base_url: str = DEFAULT_MINIMAX_BASE_URL,
+        model: str = DEFAULT_MINIMAX_MODEL,
         transport: httpx.BaseTransport | None = None,
     ):
         if not api_key:
-            raise ValueError("A Kimi API key is required")
+            raise ValueError("A MiniMax API key is required")
         self.model = model
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
@@ -102,7 +119,8 @@ class KimiManagerModelClient:
         schema = json.dumps(request.response_schema, sort_keys=True, separators=(",", ":"))
         payload = {
             "model": self.model,
-            "max_tokens": 1_000,
+            "max_completion_tokens": 1_000,
+            "reasoning_split": True,
             "messages": [
                 {"role": "system", "content": request.system_prompt},
                 {
@@ -123,16 +141,25 @@ class KimiManagerModelClient:
                 timeout=timeout_seconds,
             )
         except httpx.HTTPError as error:
-            raise KimiError(f"Kimi manager request failed: {type(error).__name__}") from error
+            raise MiniMaxError(
+                f"MiniMax manager request failed: {type(error).__name__}"
+            ) from error
         if response.status_code != 200:
-            raise KimiError(f"Kimi manager returned HTTP {response.status_code}")
+            raise MiniMaxError(f"MiniMax manager returned HTTP {response.status_code}")
         try:
             body = response.json()
+            base_response = body.get("base_resp") or {}
+            if base_response.get("status_code", 0) != 0:
+                raise MiniMaxError("MiniMax manager returned a provider error")
             raw_output = body["choices"][0]["message"].get("content")
+            if isinstance(raw_output, str):
+                raw_output = _LEADING_THINK.sub("", raw_output, count=1)
             if not isinstance(raw_output, (str, dict)):
                 raise TypeError("manager content must be JSON text or an object")
+        except MiniMaxError:
+            raise
         except (ValueError, KeyError, IndexError, TypeError) as error:
-            raise KimiError("Kimi manager returned an unexpected response shape") from error
+            raise MiniMaxError("MiniMax manager returned an unexpected response shape") from error
         usage = body.get("usage") or {}
         return ModelInvocation(
             raw_output=raw_output,

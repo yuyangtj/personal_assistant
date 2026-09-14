@@ -40,6 +40,7 @@ namespace PersonalAssistant.Avatar
     {
         public string responseId;
         public string text;
+        public string audioPath;
         public string emotion = "Warm";
         [Range(0f, 1f)] public float intensity = 0.65f;
     }

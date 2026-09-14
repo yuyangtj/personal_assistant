@@ -115,6 +115,40 @@ public final class MiloTextToSpeech {
         });
     }
 
+    /** Plays an app-private WAV produced by cloud TTS; invalid files fall back to Android TTS. */
+    public static void speakWave(String gameObjectName, String text, String audioPath, String voiceStyle) {
+        if (gameObjectName == null || gameObjectName.isEmpty() || text == null || text.trim().isEmpty()) return;
+        UnityPlayer.currentActivity.runOnUiThread(() -> {
+            File file;
+            try {
+                File cache = UnityPlayer.currentActivity.getCacheDir().getCanonicalFile();
+                file = new File(audioPath).getCanonicalFile();
+                if (!file.getPath().startsWith(cache.getPath() + File.separator) || !file.isFile())
+                    throw new IOException("audio path is outside app cache");
+            } catch (IOException | RuntimeException exception) {
+                Log.w(TAG, "Cloud WAV rejected; using Android TTS", exception);
+                speak(gameObjectName, text, voiceStyle);
+                return;
+            }
+
+            cancelActive();
+            String utteranceId = "milo-cloud-" + UUID.randomUUID();
+            Utterance utterance = new Utterance(utteranceId, gameObjectName, text, file);
+            active = utterance;
+            WORKER.execute(() -> {
+                try {
+                    Wave wave = Wave.read(file);
+                    String timeline = buildTimeline(utterance, wave);
+                    MAIN.post(() -> play(utterance, wave, timeline));
+                } catch (IOException | RuntimeException exception) {
+                    Log.w(TAG, "Cloud WAV unreadable; using Android TTS", exception);
+                    if (!file.delete()) Log.w(TAG, "Could not delete " + file);
+                    MAIN.post(() -> speak(gameObjectName, text, voiceStyle));
+                }
+            });
+        });
+    }
+
     /** Presentation position of the playing utterance in milliseconds, or -1 when idle. */
     public static long getPlaybackPositionMs() {
         AudioTrack current = track;
@@ -301,7 +335,8 @@ public final class MiloTextToSpeech {
 
         track = audio;
         trackSampleRate = wave.sampleRate;
-        Log.i(TAG, "TTS_PITCH voice=" + (engine.getVoice() == null ? "?" : engine.getVoice().getName()) + " medianF0Hz=" + wave.medianPitchHz());
+        String voiceName = engine == null || engine.getVoice() == null ? "cloud" : engine.getVoice().getName();
+        Log.i(TAG, "TTS_PITCH voice=" + voiceName + " medianF0Hz=" + wave.medianPitchHz());
         send(utterance.target, "OnTtsTimeline", timeline);
         audio.play();
         send(utterance.target, "OnTtsStarted", utterance.id);

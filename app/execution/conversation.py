@@ -5,12 +5,12 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from time import monotonic
-from typing import Any, Protocol
+from typing import Any
 
 from app.execution.actions import alarm_matches_next_occurrence, validate_action
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
-from app.integrations.kimi import ChatCompletion, ChatMessage
+from app.integrations.chat import ChatClient, ChatMessage
 
 ALLOWED_EMOTIONS = ("Warm", "Curious", "Excited", "Concerned", "Neutral")
 MAX_REPLY_CHARACTERS = 600
@@ -43,17 +43,10 @@ Respond with only a JSON object: {"reply": "<spoken reply>", "emotion": "<one of
 Curious, Excited, Concerned, Neutral>", "action": <one action object or null>}."""
 
 
-class ChatClient(Protocol):
-    provider: str
-    model: str
-
-    def complete(self, messages: list[ChatMessage], *, max_tokens: int = 700) -> ChatCompletion: ...
-
-
 class ConversationExecutor:
     """Answers requests conversationally with a chat model, as short speakable replies."""
 
-    id = "kimi-conversation"
+    id = "model-conversation"
 
     def __init__(self, client: ChatClient, *, now: Callable[[], datetime] | None = None):
         self.client = client
@@ -87,7 +80,7 @@ class ConversationExecutor:
                 "emotion": emotion,
                 "action": action,
                 "executor": self.id,
-                "provider": self.client.provider,
+                "provider": completion.provider or self.client.provider,
                 "model": completion.model,
                 "latency_ms": round((monotonic() - started) * 1000),
                 "usage": {

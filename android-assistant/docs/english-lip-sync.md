@@ -3,13 +3,14 @@
 ## Runtime flow
 
 ```text
-AssistantResponse text
+AssistantResponse text + optional cloud WAV
         |
         v
 SpeakEnglish(text) ── mouth rests while audio is prepared
         |
-        v
-Android TextToSpeech.synthesizeToFile (on-device US-English voice)
+        ├── cloud WAV: use measured duration + loudness envelope
+        |
+        └── Android TextToSpeech.synthesizeToFile (on-device US-English voice)
         |   records every word range + its exact audio frame
         v
 MiloTextToSpeech (Java): read WAV → 60 Hz loudness envelope
@@ -36,6 +37,11 @@ The response text is still the single input. Speech is synthesized to a file
 before playback so the timeline is known up front: each word's audio start is
 the frame reported by the TTS engine, and the mouth follows the audio device's
 presentation clock rather than an estimate started when the request was sent.
+
+Gemini audio does not currently include word or phoneme timestamps. For that path, the
+same English pronunciation plan is stretched to the WAV's measured duration and the
+60 Hz envelope drives the jaw. Local Android TTS remains slightly more precise at word
+boundaries because it supplies range callbacks; both paths use the real playback clock.
 
 ## Accuracy
 

@@ -4,14 +4,18 @@ import threading
 import time
 from collections.abc import Mapping
 
+import pytest
+
 from app.capabilities import CapabilityRegistry
+from app.config import Settings
 from app.domain.enums import TaskStatus
 from app.execution.fake import FakeExecutor
+from app.integrations.fallback import FallbackChatClient, FallbackManagerModelClient
 from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
 from app.manager.model import ScriptedManagerModelClient, ValidatedManagerModelAdapter
 from app.persistence.database import Database
 from app.service import TaskService
-from app.worker import TaskWorker
+from app.worker import TaskWorker, build_conversation_executor, build_manager
 
 
 def make_worker(
@@ -31,6 +35,154 @@ def make_worker(
         lease_seconds=30,
         poll_interval_seconds=0.01,
     )
+
+
+def test_runtime_conversation_uses_kimi_by_default() -> None:
+    executor = build_conversation_executor(Settings(kimi_api_key="sk-test"))
+
+    assert executor is not None
+    assert executor.id == "model-conversation"
+    assert executor.client.provider == "kimi"
+    assert executor.client.model == "kimi-for-coding-highspeed"
+    executor.client.close()
+
+
+def test_runtime_conversation_can_use_minimax() -> None:
+    executor = build_conversation_executor(
+        Settings(
+            minimax_api_key="sk-test",
+            conversation_model_provider="minimax",
+            conversation_model_base_url="https://chat.example/v1",
+            conversation_model_name="MiniMax-M3",
+            conversation_model_timeout_seconds=19,
+        )
+    )
+
+    assert executor is not None
+    assert executor.id == "model-conversation"
+    assert executor.client.provider == "minimax"
+    assert executor.client.model == "MiniMax-M3"
+    assert executor.client._client.timeout.connect == 19
+    executor.client.close()
+
+
+def test_runtime_conversation_builds_preferred_provider_chain() -> None:
+    executor = build_conversation_executor(
+        Settings(kimi_api_key="sk-kimi", minimax_api_key="sk-minimax")
+    )
+
+    assert executor is not None
+    assert isinstance(executor.client, FallbackChatClient)
+    assert [client.provider for client in executor.client.clients] == ["kimi", "minimax"]
+    executor.client.close()
+
+
+def test_runtime_conversation_uses_available_fallback_when_primary_has_no_key() -> None:
+    executor = build_conversation_executor(
+        Settings(kimi_api_key="sk-kimi", conversation_model_provider="minimax")
+    )
+
+    assert executor is not None
+    assert executor.client.provider == "kimi"
+    executor.client.close()
+
+
+def test_runtime_conversation_rejects_unknown_provider() -> None:
+    with pytest.raises(ValueError, match="Unsupported model provider"):
+        build_conversation_executor(Settings(conversation_model_provider="unknown"))
+
+
+def test_runtime_manager_is_deterministic_by_default() -> None:
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
+
+    manager = build_manager(Settings(), registry)
+
+    assert isinstance(manager, DeterministicManager)
+
+
+def test_runtime_manager_can_use_kimi_analysis() -> None:
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
+    settings = Settings(
+        kimi_api_key="sk-test",
+        manager_model_enabled=True,
+        manager_model_base_url="https://manager.example/v1",
+        manager_model_name="kimi-manager-test",
+        manager_model_timeout_seconds=12,
+        manager_model_minimum_confidence=0.7,
+    )
+
+    manager = build_manager(settings, registry)
+
+    assert isinstance(manager, ModelAssistedManager)
+    assert manager.minimum_confidence == 0.7
+    assert manager.analyzer.timeout_seconds == 12
+    assert manager.analyzer.client.model == "kimi-manager-test"
+    manager.analyzer.client.close()
+
+
+def test_runtime_manager_can_use_minimax_analysis() -> None:
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
+    settings = Settings(
+        minimax_api_key="sk-test",
+        manager_model_enabled=True,
+        manager_model_provider="minimax",
+        manager_model_base_url="https://minimax.example/v1",
+        manager_model_name="MiniMax-M3",
+    )
+
+    manager = build_manager(settings, registry)
+
+    assert isinstance(manager, ModelAssistedManager)
+    assert manager.analyzer.client.provider == "minimax"
+    assert manager.analyzer.client.model == "MiniMax-M3"
+    manager.analyzer.client.close()
+
+
+def test_runtime_manager_builds_preferred_provider_chain() -> None:
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
+    manager = build_manager(
+        Settings(
+            kimi_api_key="sk-kimi",
+            minimax_api_key="sk-minimax",
+            manager_model_enabled=True,
+        ),
+        registry,
+    )
+
+    assert isinstance(manager, ModelAssistedManager)
+    assert isinstance(manager.analyzer.client, FallbackManagerModelClient)
+    assert [client.provider for client in manager.analyzer.client.clients] == [
+        "kimi",
+        "minimax",
+    ]
+    manager.analyzer.client.close()
+
+
+def test_runtime_manager_requires_kimi_credentials_when_enabled() -> None:
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
+
+    with pytest.raises(ValueError, match="requires credentials"):
+        build_manager(Settings(manager_model_enabled=True), registry)
+
+
+def test_runtime_manager_requires_minimax_credentials_when_selected() -> None:
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
+
+    with pytest.raises(ValueError, match="requires credentials"):
+        build_manager(
+            Settings(manager_model_enabled=True, manager_model_provider="minimax"),
+            registry,
+        )
+
+
+def test_runtime_manager_rejects_unknown_provider() -> None:
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
+
+    with pytest.raises(ValueError, match="Unsupported model provider"):
+        build_manager(
+            Settings(manager_model_enabled=True, manager_model_provider="unknown"),
+            registry,
+        )
 
 
 def test_worker_completes_task_and_records_ordered_events(service: TaskService) -> None:

@@ -5,6 +5,8 @@ from fastapi import FastAPI
 from app.api.routes import router
 from app.capabilities import CapabilityRegistry
 from app.config import Settings
+from app.integrations.gemini_tts import GeminiTtsClient
+from app.integrations.speech import CachedSpeechSynthesizer
 from app.persistence.database import Database
 from app.service import TaskService
 
@@ -30,6 +32,20 @@ def create_app(
     application.state.database = database
     application.state.task_service = TaskService(database)
     application.state.capability_registry = registry
+    application.state.speech_synthesizer = (
+        CachedSpeechSynthesizer(
+            GeminiTtsClient(
+                api_key=resolved_settings.gemini_tts_api_key,
+                base_url=resolved_settings.gemini_tts_base_url,
+                model=resolved_settings.gemini_tts_model,
+                voice=resolved_settings.gemini_tts_voice,
+                timeout_seconds=resolved_settings.gemini_tts_timeout_seconds,
+            ),
+            max_entries=resolved_settings.gemini_tts_cache_entries,
+        )
+        if resolved_settings.gemini_tts_api_key
+        else None
+    )
     application.include_router(router)
     return application
 

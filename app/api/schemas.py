@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,6 +21,11 @@ class CreateTaskRequest(BaseModel):
 
 class AddMessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=20_000)
+
+
+class SpeechRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+    emotion: Literal["Warm", "Curious", "Excited", "Concerned", "Neutral"] = "Warm"
 
 
 class TaskResponse(BaseModel):

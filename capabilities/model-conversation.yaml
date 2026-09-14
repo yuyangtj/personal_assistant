@@ -1,7 +1,7 @@
-id: kimi-conversation
-name: Kimi conversation
+id: model-conversation
+name: Model conversation
 kind: model
-description: Answers everyday requests with short spoken replies using Kimi; cannot take actions.
+description: Answers everyday requests through the configured chat provider and can propose confirmed phone actions.
 provides:
   - conversation
   - task_execution
@@ -9,7 +9,7 @@ availability:
   enabled: true
   concurrency: 4
 execution:
-  adapter: kimi-conversation
+  adapter: model-conversation
   timeout_seconds: 60
 risk:
   default_level: 0

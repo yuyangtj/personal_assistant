@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+
+import httpx
 import pytest
 
 from app.capabilities import CapabilityRegistry
+from app.integrations.kimi import KimiError, KimiManagerModelClient
 from app.manager import ModelAssistedManager
 from app.manager.decisions import DelegateDecision
 from app.manager.model import (
@@ -34,6 +38,73 @@ def valid_analysis() -> dict:
     }
 
 
+def test_kimi_manager_client_sends_contract_and_reads_usage() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["authorization"] = request.headers["authorization"]
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "model": "kimi-manager-test",
+                "choices": [
+                    {
+                        "message": {
+                            "content": f"```json\n{json.dumps(valid_analysis())}\n```"
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 31, "completion_tokens": 17},
+            },
+        )
+
+    registry = CapabilityRegistry.from_directory("capabilities")
+    client = KimiManagerModelClient(
+        api_key="sk-test",
+        model="kimi-manager-test",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = ValidatedManagerModelAdapter(client).analyze(task(), registry.list())
+
+    assert result.analysis.required_capabilities == ("task_execution",)
+    assert result.provider == "kimi"
+    assert result.model == "kimi-manager-test"
+    assert result.usage.input_tokens == 31
+    assert result.usage.output_tokens == 17
+    assert seen["path"] == "/coding/v1/chat/completions"
+    assert seen["authorization"] == "Bearer sk-test"
+    body = seen["body"]
+    assert isinstance(body, dict)
+    assert body["model"] == "kimi-manager-test"
+    assert body["messages"][0]["role"] == "system"
+    assert "RESPONSE_JSON_SCHEMA" in body["messages"][1]["content"]
+    assert "required_capabilities" in body["messages"][1]["content"]
+    client.close()
+
+
+def test_kimi_manager_errors_do_not_leak_credentials_or_response_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "bad key sk-manager-secret"})
+
+    client = KimiManagerModelClient(
+        api_key="sk-manager-secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(KimiError) as captured:
+        client.generate(
+            ValidatedManagerModelAdapter._build_request(task(), tuple()),
+            timeout_seconds=5,
+        )
+
+    assert str(captured.value) == "Kimi manager returned HTTP 401"
+    assert "sk-manager-secret" not in str(captured.value)
+    client.close()
+
+
 def test_validated_adapter_returns_analysis_and_usage() -> None:
     registry = CapabilityRegistry.from_directory("capabilities")
     client = ScriptedManagerModelClient(
@@ -50,7 +121,19 @@ def test_validated_adapter_returns_analysis_and_usage() -> None:
     assert result.usage.input_tokens == 20
     assert result.usage.output_tokens == 10
     assert "untrusted data" in client.requests[0].system_prompt
+    assert "ability names" in client.requests[0].system_prompt
     assert "fake-executor" in client.requests[0].user_prompt
+    assert "not manifest IDs" in client.requests[0].user_prompt
+    assert client.requests[0].response_schema["properties"]["required_capabilities"][
+        "items"
+    ]["enum"] == [
+        "coding",
+        "conversation",
+        "repository_analysis",
+        "shell_execution",
+        "task_execution",
+        "testing",
+    ]
 
 
 def test_invalid_json_is_retried_once() -> None:

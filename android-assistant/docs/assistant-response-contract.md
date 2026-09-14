@@ -11,7 +11,8 @@ details, task-routing decisions, audio timing, bones, or blendshape weights.
   "responseId": "event-018f2f",
   "text": "Hello! I'm Milo. How can I help you today?",
   "emotion": "Excited",
-  "intensity": 0.72
+  "intensity": 0.72,
+  "audioPath": "/data/user/0/com.personalassistant.avatar.shell/cache/assistant-speech/id.wav"
 }
 ```
 
@@ -21,6 +22,7 @@ details, task-routing decisions, audio timing, bones, or blendshape weights.
 | `text` | Required, non-blank English speech text; maximum 4,000 characters. |
 | `emotion` | Optional avatar emotion name; unknown values fall back to `Warm`. |
 | `intensity` | Optional `0.0`–`1.0` presentation strength; runtime clamps it. |
+| `audioPath` | Optional app-private WAV path supplied only by the trusted Kotlin host. |
 
 ## Android delivery
 
@@ -35,7 +37,9 @@ MiloAssistantBridge.deliverResponse("AvatarRuntime", responseJson)
 The bridge uses `UnitySendMessage` to call
 `AvatarRuntime.ApplyAssistantResponseJson`. Unity validates the envelope,
 suppresses a recently repeated `responseId`, selects the requested emotion, and passes
-the text into the existing English TTS/viseme pipeline.
+the text and optional audio into the existing English TTS/viseme pipeline. The Java
+bridge canonicalizes `audioPath` and rejects anything outside the app's cache directory;
+an absent, rejected, or unreadable WAV falls back to Android TTS.
 
 The current Speaking button constructs a mock envelope and routes it through
 the same Java bridge on Android. In the Unity Editor it falls back to a direct

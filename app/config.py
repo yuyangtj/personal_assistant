@@ -22,6 +22,28 @@ class Settings:
     kimi_base_url: str = "https://api.kimi.com/coding/v1"
     kimi_model: str = "kimi-for-coding-highspeed"
     kimi_timeout_seconds: float = 30.0
+    minimax_api_key: str | None = None
+    minimax_base_url: str = "https://api.minimax.chat/v1"
+    minimax_model: str = "MiniMax-M2.7-highspeed"
+    minimax_timeout_seconds: float = 30.0
+    gemini_tts_api_key: str | None = None
+    gemini_tts_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    gemini_tts_model: str = "gemini-3.1-flash-tts-preview"
+    gemini_tts_voice: str = "Achird"
+    gemini_tts_timeout_seconds: float = 30.0
+    gemini_tts_cache_entries: int = 128
+    conversation_model_provider: str = "kimi"
+    conversation_model_fallback_provider: str | None = "auto"
+    conversation_model_base_url: str | None = None
+    conversation_model_name: str | None = None
+    conversation_model_timeout_seconds: float | None = None
+    manager_model_enabled: bool = False
+    manager_model_provider: str = "kimi"
+    manager_model_fallback_provider: str | None = "auto"
+    manager_model_base_url: str | None = None
+    manager_model_name: str | None = None
+    manager_model_timeout_seconds: float = 30.0
+    manager_model_minimum_confidence: float = 0.5
     slack_signing_secret: str | None = None
     slack_bot_token: str | None = None
 
@@ -63,6 +85,96 @@ class Settings:
             kimi_model=os.getenv("ASSISTANT_KIMI_MODEL", defaults.kimi_model),
             kimi_timeout_seconds=float(
                 os.getenv("ASSISTANT_KIMI_TIMEOUT_SECONDS", str(defaults.kimi_timeout_seconds))
+            ),
+            minimax_api_key=os.getenv("ASSISTANT_MINIMAX_API_KEY")
+            or os.getenv("MINIMAX_API_KEY")
+            or None,
+            minimax_base_url=os.getenv(
+                "ASSISTANT_MINIMAX_BASE_URL",
+                defaults.minimax_base_url,
+            ),
+            minimax_model=os.getenv(
+                "ASSISTANT_MINIMAX_MODEL",
+                defaults.minimax_model,
+            ),
+            minimax_timeout_seconds=float(
+                os.getenv(
+                    "ASSISTANT_MINIMAX_TIMEOUT_SECONDS",
+                    str(defaults.minimax_timeout_seconds),
+                )
+            ),
+            gemini_tts_api_key=os.getenv("ASSISTANT_GEMINI_TTS_API_KEY")
+            or os.getenv("GEMINI_TTS_API_KEY")
+            or None,
+            gemini_tts_base_url=os.getenv(
+                "ASSISTANT_GEMINI_TTS_BASE_URL",
+                defaults.gemini_tts_base_url,
+            ),
+            gemini_tts_model=os.getenv(
+                "ASSISTANT_GEMINI_TTS_MODEL",
+                defaults.gemini_tts_model,
+            ),
+            gemini_tts_voice=os.getenv(
+                "ASSISTANT_GEMINI_TTS_VOICE",
+                defaults.gemini_tts_voice,
+            ),
+            gemini_tts_timeout_seconds=float(
+                os.getenv(
+                    "ASSISTANT_GEMINI_TTS_TIMEOUT_SECONDS",
+                    str(defaults.gemini_tts_timeout_seconds),
+                )
+            ),
+            gemini_tts_cache_entries=int(
+                os.getenv(
+                    "ASSISTANT_GEMINI_TTS_CACHE_ENTRIES",
+                    str(defaults.gemini_tts_cache_entries),
+                )
+            ),
+            conversation_model_provider=os.getenv(
+                "ASSISTANT_CONVERSATION_MODEL_PROVIDER",
+                defaults.conversation_model_provider,
+            ),
+            conversation_model_fallback_provider=os.getenv(
+                "ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER",
+                defaults.conversation_model_fallback_provider,
+            )
+            or None,
+            conversation_model_base_url=os.getenv("ASSISTANT_CONVERSATION_MODEL_BASE_URL")
+            or None,
+            conversation_model_name=os.getenv("ASSISTANT_CONVERSATION_MODEL") or None,
+            conversation_model_timeout_seconds=(
+                float(value)
+                if (value := os.getenv("ASSISTANT_CONVERSATION_MODEL_TIMEOUT_SECONDS"))
+                else None
+            ),
+            manager_model_enabled=_as_bool(
+                os.getenv(
+                    "ASSISTANT_MANAGER_MODEL_ENABLED",
+                    str(defaults.manager_model_enabled),
+                )
+            ),
+            manager_model_provider=os.getenv(
+                "ASSISTANT_MANAGER_MODEL_PROVIDER",
+                defaults.manager_model_provider,
+            ),
+            manager_model_fallback_provider=os.getenv(
+                "ASSISTANT_MANAGER_MODEL_FALLBACK_PROVIDER",
+                defaults.manager_model_fallback_provider,
+            )
+            or None,
+            manager_model_base_url=os.getenv("ASSISTANT_MANAGER_MODEL_BASE_URL") or None,
+            manager_model_name=os.getenv("ASSISTANT_MANAGER_MODEL") or None,
+            manager_model_timeout_seconds=float(
+                os.getenv(
+                    "ASSISTANT_MANAGER_MODEL_TIMEOUT_SECONDS",
+                    str(defaults.manager_model_timeout_seconds),
+                )
+            ),
+            manager_model_minimum_confidence=float(
+                os.getenv(
+                    "ASSISTANT_MANAGER_MODEL_MINIMUM_CONFIDENCE",
+                    str(defaults.manager_model_minimum_confidence),
+                )
             ),
             slack_signing_secret=os.getenv("ASSISTANT_SLACK_SIGNING_SECRET") or None,
             slack_bot_token=os.getenv("ASSISTANT_SLACK_BOT_TOKEN") or None,

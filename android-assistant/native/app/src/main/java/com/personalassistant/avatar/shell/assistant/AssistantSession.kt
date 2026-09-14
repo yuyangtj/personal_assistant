@@ -6,6 +6,7 @@ import com.personalassistant.avatar.shell.avatar.AvatarBridge
 import com.personalassistant.avatar.shell.avatar.AvatarCharacter
 import com.personalassistant.avatar.shell.avatar.AvatarEmotion
 import com.personalassistant.avatar.shell.avatar.AvatarMode
+import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -44,6 +45,7 @@ class AssistantSession(
     private val scope: CoroutineScope,
     private val avatar: AvatarBridge,
     private val preferences: SharedPreferences,
+    private val speechCacheDirectory: File,
     private val runAction: (PhoneAction) -> String?,
 ) {
     private val state = MutableStateFlow(
@@ -56,7 +58,7 @@ class AssistantSession(
     )
     val uiState: StateFlow<UiState> = state.asStateFlow()
 
-    private var api = AssistantApi(state.value.backendUrl)
+    private var api = AssistantApi(state.value.backendUrl, speechCacheDirectory)
 
     /** One conversation per app launch, so follow-up questions keep their context. */
     private val conversationId = "android-${UUID.randomUUID()}"
@@ -80,7 +82,7 @@ class AssistantSession(
         val normalized = url.trim().trimEnd('/')
         if (normalized.isEmpty()) return
         preferences.edit().putString(KEY_BACKEND_URL, normalized).apply()
-        api = AssistantApi(normalized)
+        api = AssistantApi(normalized, speechCacheDirectory)
         state.update { it.copy(backendUrl = normalized) }
         checkConnection()
     }
@@ -257,7 +259,7 @@ class AssistantSession(
     }
 
     /** Returns true when the task reached a terminal event. */
-    private fun handleEvent(taskId: String, event: TaskEvent): Boolean {
+    private suspend fun handleEvent(taskId: String, event: TaskEvent): Boolean {
         Log.i(TAG, "NATIVE_EVENT: task=$taskId seq=${event.sequence} type=${event.type}")
         when (event.type) {
             "TASK_PLANNING_STARTED", "PLAN_CREATED" -> avatar.command(AvatarMode.THINKING, AvatarEmotion.CURIOUS, 0.6f)
@@ -269,11 +271,20 @@ class AssistantSession(
                 state.update { it.copy(reply = text, pendingAction = action) }
                 if (action != null) Log.i(TAG, "NATIVE_ACTION_PROPOSED: ${action.summary}")
                 if (text.isNotBlank()) {
+                    val audioPath = try {
+                        api.speech(text, event.payload.optString("emotion", "Warm")).also {
+                            Log.i(TAG, "NATIVE_CLOUD_TTS_READY: task=$taskId")
+                        }
+                    } catch (error: AssistantApiException) {
+                        Log.i(TAG, "NATIVE_CLOUD_TTS_FALLBACK: ${error.message}")
+                        null
+                    }
                     avatar.speak(
                         responseId = "task:$taskId:${event.sequence}",
                         text = text,
                         emotion = AvatarEmotion.fromName(event.payload.optString("emotion")),
                         intensity = event.payload.optDouble("intensity", 0.65).toFloat(),
+                        audioPath = audioPath,
                     )
                     Log.i(TAG, "NATIVE_REPLY_DELIVERED: task=$taskId outcome=$pendingOutcome chars=${text.length}")
                 }

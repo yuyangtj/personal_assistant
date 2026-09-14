@@ -37,12 +37,19 @@ class AvatarBridge {
     }
 
     /** Speaks [text] with lip-sync. A repeated [responseId] is ignored by Unity. */
-    fun speak(responseId: String, text: String, emotion: AvatarEmotion, intensity: Float) {
+    fun speak(
+        responseId: String,
+        text: String,
+        emotion: AvatarEmotion,
+        intensity: Float,
+        audioPath: String? = null,
+    ) {
         val json = JSONObject()
             .put("responseId", responseId)
             .put("text", text.take(MAX_SPEECH_CHARACTERS))
             .put("emotion", emotion.unityName)
             .put("intensity", intensity.coerceIn(0f, 1f).toDouble())
+        if (!audioPath.isNullOrBlank()) json.put("audioPath", audioPath)
         MiloAssistantBridge.deliverResponse(TARGET, json.toString())
     }
 

@@ -23,6 +23,25 @@ namespace PersonalAssistant.Avatar
 #endif
         }
 
+        public static bool SpeakWave(GameObject callbackTarget, string text, string audioPath, string voiceStyle = "default")
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                using AndroidJavaClass bridge = new("com.personalassistant.avatar.MiloTextToSpeech");
+                bridge.CallStatic("speakWave", callbackTarget.name, text, audioPath, voiceStyle);
+                return true;
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogWarning($"TTS_WAVE_BRIDGE_ERROR: {exception.Message}");
+                return false;
+            }
+#else
+            return false;
+#endif
+        }
+
 #if UNITY_ANDROID && !UNITY_EDITOR
         private static AndroidJavaClass positionBridge;
 #endif
