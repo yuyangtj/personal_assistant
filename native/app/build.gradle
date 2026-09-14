@@ -1,0 +1,64 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+android {
+    namespace 'com.personalassistant.avatar.shell'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.personalassistant.avatar.shell'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        compose true
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
+    }
+}
+
+dependencies {
+    implementation project(':unityLibrary')
+    // Unity keeps this JAR internal to its library; the subclass needs its public
+    // lifecycle supertypes at compile time, while the unityLibrary owns runtime packaging.
+    compileOnly files('../../unity/AvatarPrototype/Builds/AndroidExport/unityLibrary/libs/unity-classes.jar')
+
+    // Pinned to the last Compose generation compatible with Unity's SDK 36 export.
+    implementation platform('androidx.compose:compose-bom:2025.08.01')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+}

@@ -1,0 +1,22 @@
+plugins {
+    id 'com.android.application' version '9.0.0' apply false
+    id 'com.android.library' version '9.0.0' apply false
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.2.10' apply false
+}
+
+def unityPropertiesFile = file('../unity/AvatarPrototype/Builds/AndroidExport/gradle.properties')
+if (!unityPropertiesFile.isFile()) {
+    throw new GradleException('Unity export properties are missing. Re-export the Android library project.')
+}
+
+def unityProperties = new Properties()
+unityPropertiesFile.withInputStream { unityProperties.load(it) }
+allprojects { targetProject ->
+    unityProperties.each { key, value ->
+        targetProject.ext.set(key.toString(), value)
+    }
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}

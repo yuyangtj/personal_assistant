@@ -1,0 +1,31 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        google()
+        mavenCentral()
+        flatDir {
+            dirs file('../unity/AvatarPrototype/Builds/AndroidExport/unityLibrary/libs')
+        }
+    }
+}
+
+rootProject.name = 'MiloAssistant'
+
+def unityExport = file('../unity/AvatarPrototype/Builds/AndroidExport')
+if (!unityExport.isDirectory()) {
+    throw new GradleException('Unity Android export is missing. Run Personal Assistant/Export Android Library Project first.')
+}
+
+include ':app'
+include ':unityLibrary'
+include ':unityLibrary:MiloTts.androidlib'
+project(':unityLibrary').projectDir = new File(unityExport, 'unityLibrary')
+project(':unityLibrary:MiloTts.androidlib').projectDir = new File(unityExport, 'unityLibrary/MiloTts.androidlib')
