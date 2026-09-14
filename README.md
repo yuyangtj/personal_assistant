@@ -118,3 +118,20 @@ The next slice should implement one real provider client behind the existing
 manager-model contract. After its structured-output behavior is verified, Kimi
 can separately be added as a coding-agent adapter inside an isolated Git
 worktree.
+
+## Android assistant
+
+[`android-assistant/`](android-assistant/README.md) contains the Android client
+prototype: a Unity avatar with pronunciation-accurate English lip-sync, a native
+Kotlin shell, and two characters.
+
+## Credits
+
+- **"Cool Man" 3D character** by [ardhanaputra](https://sketchfab.com/ardhanaputra),
+  from [Sketchfab](https://sketchfab.com/3d-models/cool-man-ad14b71697dd4ea7836c1f06c75e5f72),
+  licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/).
+  Modified for this project (rig clean-up, merged meshes, generated facial
+  blendshapes, mouth interior, status light). Full details are in
+  [`android-assistant/docs/credits.md`](android-assistant/docs/credits.md).
+- English pronunciations derive from the CMU Pronouncing Dictionary
+  (Carnegie Mellon University, BSD-style licence).

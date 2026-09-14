@@ -9,4 +9,3 @@ __pycache__/
 *.sqlite3
 artifacts/
 hetzner-mcp/
-android-assistant/

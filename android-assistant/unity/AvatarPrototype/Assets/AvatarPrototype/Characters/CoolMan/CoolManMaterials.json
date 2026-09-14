@@ -1,0 +1,81 @@
+{
+  "materials": [
+    {
+      "name": "CoolMan_Body",
+      "alphaClip": false,
+      "smoothness": 0.35,
+      "baseColor": "CoolMan_Body_baseColor.png"
+    },
+    {
+      "name": "CoolMan_Eye",
+      "alphaClip": false,
+      "smoothness": 0.75,
+      "baseColor": "CoolMan_Eye_baseColor.png"
+    },
+    {
+      "name": "CoolMan_Glasses",
+      "alphaClip": false,
+      "smoothness": 0.8,
+      "baseColor": "CoolMan_Glasses_baseColor.png"
+    },
+    {
+      "name": "CoolMan_Hair",
+      "alphaClip": true,
+      "smoothness": 0.25,
+      "baseColor": "CoolMan_Hair_baseColor.png"
+    },
+    {
+      "name": "CoolMan_Bottom",
+      "alphaClip": false,
+      "smoothness": 0.35,
+      "baseColor": "CoolMan_Bottom_baseColor.png",
+      "normal": "CoolMan_Bottom_normal.png"
+    },
+    {
+      "name": "CoolMan_Footwear",
+      "alphaClip": false,
+      "smoothness": 0.35,
+      "baseColor": "CoolMan_Footwear_baseColor.png"
+    },
+    {
+      "name": "CoolMan_Top",
+      "alphaClip": false,
+      "smoothness": 0.35,
+      "baseColor": "CoolMan_Top_baseColor.png"
+    },
+    {
+      "name": "CoolMan_Skin",
+      "alphaClip": false,
+      "smoothness": 0.22,
+      "baseColor": "CoolMan_Skin_baseColor.png"
+    },
+    {
+      "name": "CoolMan_Teeth",
+      "alphaClip": false,
+      "smoothness": 0.3,
+      "baseColor": "CoolMan_Teeth_baseColor.png"
+    },
+    {
+      "name": "CoolMan_MouthCavity",
+      "color": [
+        0.09,
+        0.02,
+        0.025,
+        1.0
+      ],
+      "smoothness": 0.0,
+      "matte": true
+    },
+    {
+      "name": "CoolMan_StatusLight",
+      "color": [
+        0.1,
+        0.88,
+        0.55,
+        1.0
+      ],
+      "emission": true,
+      "smoothness": 0.6
+    }
+  ]
+}

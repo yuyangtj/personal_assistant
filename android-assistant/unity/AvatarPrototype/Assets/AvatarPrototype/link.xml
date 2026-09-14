@@ -1,0 +1,12 @@
+<linker>
+  <!-- GameObject.CreatePrimitive resolves these collider types dynamically. -->
+  <assembly fullname="UnityEngine.PhysicsModule">
+    <type fullname="UnityEngine.BoxCollider" preserve="all" />
+    <type fullname="UnityEngine.CapsuleCollider" preserve="all" />
+    <type fullname="UnityEngine.SphereCollider" preserve="all" />
+  </assembly>
+  <assembly fullname="Assembly-CSharp">
+    <type fullname="PersonalAssistant.Avatar.ProceduralAvatarController" preserve="all" />
+    <type fullname="PersonalAssistant.Avatar.AssistantResponse" preserve="all" />
+  </assembly>
+</linker>
