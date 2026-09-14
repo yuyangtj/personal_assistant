@@ -19,11 +19,16 @@ for task orchestration; the Android application presents and controls it.
 - Local tooling checked: Android Studio, Java 17, ADB, and Android SDK 36/36.1
   are installed.
 - Unity 6.3 LTS (`6000.3.24f1`) and Android Build Support are installed.
-- A standalone URP prototype now lives in `unity/AvatarPrototype` with the
-  Blender-authored Milo rig, six assistant modes, five emotions, blinking,
-  gaze, layered body motion, and fourteen speech visemes.
-- Android on-device English TTS drives range-anchored lip motion on a Pixel 10
-  Pro XL running Android 17.
+- A standalone URP prototype now lives in `unity/AvatarPrototype`. The default
+  character is the realistic "Cool Man" by ardhanaputra (CC BY 4.0, modified): the
+  generated face has 28 blendshapes, and he greets with a salute and shakes hands on
+  success. The cartoon Milo (soft clay, Shin-chan-style, own identity) remains available
+  through the in-app LOOK toggle.
+- English lip-sync follows pronunciation, not spelling. A bundled CMUdict
+  lexicon gives the sounds, speech is synthesized before playback so each word's
+  audio frame is known, and the mouth follows the AudioTrack presentation clock
+  with coarticulated visemes, sealed p/b/m and f/v closures, and a
+  loudness-driven jaw. Validated at 60 fps on a Pixel 10 Pro XL running Android 17.
 - A provider-neutral `AssistantResponse` JSON contract and Android-to-Unity
   bridge route reply text into TTS, with duplicate-response protection and a
   credential-free device demo.
@@ -50,3 +55,7 @@ not hide a character or rig that fails the quality bar.
 - `docs/prototype-acceptance.md`: measurable visual-spike completion criteria.
 - `docs/assistant-response-contract.md`: backend/native reply envelope and
   Android-to-Unity delivery boundary.
+- `docs/english-lip-sync.md`: speech timing, pronunciation, and viseme mixing.
+- `docs/realistic-character-pipeline.md`: converting and validating Cool Man.
+- `docs/credits.md`: third-party asset attribution (required for CC BY).
+- `docs/rigged-character-pipeline.md`: regenerating and validating the character.

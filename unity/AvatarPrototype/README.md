@@ -36,6 +36,12 @@ method: ApplyCommandJson
 payload: {"mode":"Speaking","emotion":"Warm","intensity":0.8}
 ```
 
-The generated avatar is a functional animation stand-in, not the final art.
-Replace its geometry with the approved rigged model while preserving
-`ProceduralAvatarController`'s state boundary or an equivalent implementation.
+The runtime loads the realistic `Resources/Character/CoolManRig.fbx` by default
+(see `../../docs/realistic-character-pipeline.md`) and the cartoon
+`Resources/Character/MiloRig.fbx` through the LOOK toggle
+(see `../../docs/rigged-character-pipeline.md`). The primitive avatar in
+`ProceduralAvatarController` is only the fallback when that asset is missing or
+incomplete.
+
+Validation methods (run with `-executeMethod`): `ConfigureCoolManAsset`, `ValidateSpeech`,
+`ValidateRiggedAsset`, `ValidatePrototype`, and `CapturePrototypeFrame`.

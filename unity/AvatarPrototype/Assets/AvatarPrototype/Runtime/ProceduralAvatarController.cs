@@ -6,9 +6,10 @@ using UnityEngine.Rendering;
 namespace PersonalAssistant.Avatar
 {
     /// <summary>
-    /// A deliberately asset-free avatar stand-in. It validates the runtime contract,
-    /// animation layering, state transitions, gaze, blinking, and deterministic visemes
-    /// before the final rigged character replaces the generated geometry.
+    /// Drives the assistant character: the realistic Cool Man or the cartoon Milo rig (see
+    /// <see cref="AvatarCharacterProfile"/>), falling back to a primitive stand-in. Handles
+    /// state transitions, gestures, gaze, blinking, expressions, and English speech visemes
+    /// synchronized to the Android TTS audio clock.
     /// </summary>
     public sealed class ProceduralAvatarController : MonoBehaviour
     {
@@ -19,6 +20,9 @@ namespace PersonalAssistant.Avatar
         public string ActiveSpeechText { get; private set; } = string.Empty;
         public bool IsEnglishSpeechActive => ttsTimelineActive;
         public string LastAssistantResponseId { get; private set; } = string.Empty;
+        public AvatarCharacterProfile ActiveProfile { get; private set; }
+
+        private const string CharacterPreferenceKey = "assistant.character";
 
         private readonly Dictionary<string, Material> materials = new();
         private Transform avatarRoot;
@@ -41,19 +45,12 @@ namespace PersonalAssistant.Avatar
         private Transform rightArm;
         private Transform statusOrb;
         private bool usingRiggedAsset;
-        private SkinnedMeshRenderer riggedMouthRenderer;
-        private Transform riggedTeeth;
-        private Transform riggedTongue;
-        private Vector3 leftPupilBasePosition;
-        private Vector3 rightPupilBasePosition;
-        private Vector3 leftLidBasePosition;
-        private Vector3 rightLidBasePosition;
-        private Vector3 leftLidBaseScale;
-        private Vector3 rightLidBaseScale;
-        private Vector3 leftBrowBasePosition;
-        private Vector3 rightBrowBasePosition;
-        private Quaternion leftBrowBaseRotation;
-        private Quaternion rightBrowBaseRotation;
+        private SkinnedMeshRenderer riggedFace;
+        private Vector3 leftEyeBaseInHead;
+        private Vector3 rightEyeBaseInHead;
+        private readonly int[] visemeShapeIndices = new int[VisemeMixer.Visemes.Length];
+        private readonly Dictionary<string, int> faceShapeIndices = new();
+        private float[] faceShapeWeights = Array.Empty<float>();
 
         private Vector3 bodyBasePosition;
         private Vector3 headBasePosition;
@@ -61,6 +58,10 @@ namespace PersonalAssistant.Avatar
         private Quaternion leftArmBaseRotation;
         private Quaternion rightArmBaseRotation;
         private Vector3 statusOrbBaseScale;
+        private Transform characterRoot;
+        private UnityEngine.Animation gestureAnimation;
+        private float gestureEndsAt;
+        private bool greetingPlayed;
         private float blinkAmount;
         private float blinkVelocity;
         private float nextBlinkAt;
@@ -71,6 +72,16 @@ namespace PersonalAssistant.Avatar
         private bool ttsTimelineActive;
         private string activeUtteranceId;
         private List<EnglishVisemeCue> englishSpeechCues = new();
+        private readonly VisemeMixer visemeMixer = new();
+        private List<EnglishVisemeCue> demoSpeechCues;
+        private float demoSpeechDuration;
+        private bool audioTimelineReceived;
+        private bool awaitingSpeechAudio;
+        private bool audioClockActive;
+        private float speechTime;
+        private float nextSpeechLogAt;
+        private int[] speechEnvelope;
+        private float speechEnvelopeRate;
         private readonly HashSet<string> handledAssistantResponseIds = new();
         private readonly Queue<string> handledAssistantResponseOrder = new();
         private Color statusColor = new(0.20f, 0.80f, 0.75f);
@@ -78,19 +89,7 @@ namespace PersonalAssistant.Avatar
         private Vector2 gazeTarget;
         private float nextGazeAt;
 
-        private static readonly VisemeCue[] DemoVisemes =
-        {
-            new(0.00f, "sil", 0.04f, 0.70f), new(0.18f, "HH", 0.24f, 0.92f),
-            new(0.35f, "E", 0.16f, 1.10f), new(0.52f, "LL", 0.20f, 0.72f),
-            new(0.70f, "oh", 0.26f, 0.82f), new(0.92f, "PP", 0.04f, 0.62f),
-            new(1.08f, "aa", 0.35f, 0.92f), new(1.32f, "SS", 0.10f, 1.18f),
-            new(1.55f, "ih", 0.16f, 0.86f), new(1.78f, "SS", 0.08f, 1.15f),
-            new(1.98f, "TH", 0.12f, 0.72f), new(2.14f, "aa", 0.34f, 0.96f),
-            new(2.38f, "nn", 0.10f, 0.72f), new(2.58f, "kk", 0.16f, 0.78f),
-            new(2.80f, "aa", 0.30f, 0.90f), new(3.04f, "nn", 0.08f, 0.74f),
-            new(3.24f, "PP", 0.03f, 0.62f), new(3.42f, "ou", 0.20f, 0.62f),
-            new(3.68f, "RR", 0.15f, 0.76f), new(3.90f, "sil", 0.03f, 0.72f)
-        };
+        private const string DemoSpeechLine = "Hello! I'm Milo. How can I help you today?";
 
         private void Awake()
         {
@@ -109,7 +108,7 @@ namespace PersonalAssistant.Avatar
         private void EnsureBuilt()
         {
             if (avatarRoot != null) return;
-            BuildAvatar();
+            BuildAvatar(PreferredCharacter());
             bodyBasePosition = body.localPosition;
             headBasePosition = head.localPosition;
             headBaseRotation = head.localRotation;
@@ -117,6 +116,54 @@ namespace PersonalAssistant.Avatar
             rightArmBaseRotation = rightArm.localRotation;
             statusOrbBaseScale = statusOrb.localScale;
             if (usingRiggedAsset) CaptureRiggedDefaults();
+            ApplyCameraFraming();
+        }
+
+        /// <summary>Rebuilds the avatar as another character; the choice persists on device.</summary>
+        public void SetCharacter(AvatarCharacter character, bool remember = true)
+        {
+            if (remember)
+            {
+                PlayerPrefs.SetInt(CharacterPreferenceKey, (int)character);
+                PlayerPrefs.Save();
+            }
+            if (avatarRoot != null)
+            {
+                if (Application.isPlaying) Destroy(avatarRoot.gameObject);
+                else DestroyImmediate(avatarRoot.gameObject);
+            }
+            avatarRoot = null;
+            usingRiggedAsset = false;
+            riggedFace = null;
+            characterRoot = null;
+            gestureAnimation = null;
+            gestureEndsAt = 0f;
+            greetingPlayed = false;
+            ActiveProfile = null;
+            faceShapeIndices.Clear();
+            faceShapeWeights = Array.Empty<float>();
+            preferredCharacterOverride = character;
+            EnsureBuilt();
+        }
+
+        private AvatarCharacter? preferredCharacterOverride;
+
+        private AvatarCharacter PreferredCharacter()
+        {
+            if (preferredCharacterOverride.HasValue) return preferredCharacterOverride.Value;
+            int stored = PlayerPrefs.GetInt(CharacterPreferenceKey, (int)AvatarCharacter.CoolMan);
+            return Enum.IsDefined(typeof(AvatarCharacter), stored) ? (AvatarCharacter)stored : AvatarCharacter.CoolMan;
+        }
+
+        private void ApplyCameraFraming()
+        {
+            AvatarCharacterProfile profile = ActiveProfile ?? AvatarCharacterProfile.Milo;
+            Camera camera = Camera.main;
+            if (camera == null) return;
+            camera.transform.position = transform.TransformPoint(profile.CameraPosition);
+            camera.transform.LookAt(transform.TransformPoint(profile.CameraTarget));
+            camera.fieldOfView = profile.CameraFieldOfView;
+            camera.nearClipPlane = profile.Character == AvatarCharacter.CoolMan ? 0.05f : 0.3f;
         }
 
         private void Update()
@@ -124,7 +171,13 @@ namespace PersonalAssistant.Avatar
             float t = Time.time;
             UpdateBlink(t);
             UpdateGaze(t);
-            UpdateBody(t);
+            if (usingRiggedAsset && !greetingPlayed && Application.isPlaying)
+            {
+                greetingPlayed = true;
+                PlayGesture(ActiveProfile.GreetingClip);
+            }
+            if (!IsGesturePlaying(t)) UpdateBody(t);
+            SampleSpeech(t);
             UpdateFace(t);
             UpdateStatusOrb(t);
             if (ttsTimelineActive && t >= speechDeadlineAt) FinishEnglishSpeech("timeout");
@@ -135,6 +188,9 @@ namespace PersonalAssistant.Avatar
             if (mode != AvatarMode.Speaking && ttsTimelineActive)
             {
                 ttsTimelineActive = false;
+                audioTimelineReceived = false;
+                audioClockActive = false;
+                speechEnvelope = null;
                 activeUtteranceId = null;
                 ActiveSpeechText = string.Empty;
                 AndroidTextToSpeech.Stop();
@@ -143,6 +199,7 @@ namespace PersonalAssistant.Avatar
             if (Mode != mode)
             {
                 stateChangedAt = Time.time;
+                if (mode == AvatarMode.Success && ActiveProfile != null) PlayGesture(ActiveProfile.SuccessClip);
                 if (mode == AvatarMode.Speaking)
                 {
                     speechStartedAt = Time.time;
@@ -165,12 +222,18 @@ namespace PersonalAssistant.Avatar
             englishSpeechCues = EnglishVisemePlanner.Build(text, out speechTimelineDuration);
             ActiveSpeechText = text.Trim();
             activeUtteranceId = null;
+            audioTimelineReceived = false;
+            audioClockActive = false;
+            speechEnvelope = null;
+            speechTime = 0f;
             ttsTimelineActive = true;
             speechStartedAt = Time.time;
             speechDeadlineAt = Time.time + speechTimelineDuration + 2f;
             ApplyCommand(AvatarMode.Speaking, emotion, intensity);
 
-            bool nativeSpeechRequested = AndroidTextToSpeech.Speak(gameObject, ActiveSpeechText);
+            bool nativeSpeechRequested = AndroidTextToSpeech.Speak(gameObject, ActiveSpeechText, ActiveProfile?.VoiceStyle ?? "default");
+            // The mouth rests while Android synthesizes; the timeline starts with the audio.
+            awaitingSpeechAudio = nativeSpeechRequested;
             Debug.Log($"TTS_REQUESTED: chars={ActiveSpeechText.Length}, cues={englishSpeechCues.Count}, estimatedSeconds={speechTimelineDuration:F2}, native={nativeSpeechRequested}");
         }
 
@@ -211,6 +274,7 @@ namespace PersonalAssistant.Avatar
             if (!Enum.TryParse(response.emotion, true, out AvatarEmotion emotion)) emotion = AvatarEmotion.Warm;
             float intensity = float.IsNaN(response.intensity) || float.IsInfinity(response.intensity) ? 0.65f : Mathf.Clamp01(response.intensity);
             RememberAssistantResponse(response.responseId);
+            GetComponent<PrototypeDemo>()?.DisableAutoDemo();
             Debug.Log($"ASSISTANT_RESPONSE_ACCEPTED: id={LastAssistantResponseId}, chars={response.text.Length}, emotion={emotion}");
             SpeakEnglish(response.text, emotion, intensity);
         }
@@ -231,13 +295,47 @@ namespace PersonalAssistant.Avatar
             ApplyCommand(AvatarMode.Error, AvatarEmotion.Concerned, 0.65f);
         }
 
+        /// <summary>Exact word audio frames and loudness from speech synthesized before playback.</summary>
+        public void OnTtsTimeline(string json)
+        {
+            if (!ttsTimelineActive) return;
+            TtsTimelineEvent timeline;
+            try
+            {
+                timeline = JsonUtility.FromJson<TtsTimelineEvent>(json);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"TTS_TIMELINE_INVALID: {exception.GetType().Name}");
+                return;
+            }
+            if (timeline == null || timeline.sampleRate <= 0) return;
+
+            List<TtsWordTiming> timings = new();
+            if (timeline.words != null)
+                foreach (TtsRangeEvent word in timeline.words)
+                    timings.Add(new TtsWordTiming(word.start, word.end, word.frame / (float)timeline.sampleRate));
+
+            speechTimelineDuration = timeline.durationMs / 1000f;
+            englishSpeechCues = EnglishVisemePlanner.Build(ActiveSpeechText, timings, speechTimelineDuration);
+            speechEnvelope = timeline.envelope;
+            speechEnvelopeRate = timeline.envelopeRate;
+            activeUtteranceId = timeline.utteranceId;
+            audioTimelineReceived = true;
+            speechDeadlineAt = Time.time + speechTimelineDuration + 3f;
+            Debug.Log($"TTS_TIMELINE: words={timings.Count}, envelope={(speechEnvelope == null ? 0 : speechEnvelope.Length)}, cues={englishSpeechCues.Count}, durationMs={timeline.durationMs}");
+        }
+
         public void OnTtsStarted(string utteranceId)
         {
             if (!ttsTimelineActive) return;
             activeUtteranceId = utteranceId;
+            awaitingSpeechAudio = false;
             speechStartedAt = Time.time;
+            speechTime = 0f;
+            audioClockActive = audioTimelineReceived;
             speechDeadlineAt = Time.time + speechTimelineDuration + 2f;
-            Debug.Log($"TTS_STARTED: {utteranceId}");
+            Debug.Log($"TTS_STARTED: {utteranceId}, audioClock={audioClockActive}");
         }
 
         public void OnTtsRange(string json)
@@ -289,8 +387,37 @@ namespace PersonalAssistant.Avatar
             if (Enum.TryParse(value, true, out AvatarEmotion emotion)) ApplyCommand(Mode, emotion, Intensity);
         }
 
+        private bool IsGesturePlaying(float now)
+        {
+            return gestureAnimation != null && now < gestureEndsAt;
+        }
+
+        private void PlayGesture(string clipName)
+        {
+            if (gestureAnimation == null || string.IsNullOrEmpty(clipName) || !Application.isPlaying) return;
+            AnimationClip clip = FindGestureClip(clipName);
+            if (clip == null) return;
+            gestureAnimation.CrossFade(clip.name, 0.25f);
+            gestureEndsAt = Time.time + clip.length;
+            Debug.Log($"GESTURE_PLAYING: {clip.name} ({clip.length:F2}s)");
+        }
+
+        private AnimationClip FindGestureClip(string clipName)
+        {
+            if (gestureAnimation == null) return null;
+            foreach (AnimationState state in gestureAnimation)
+                if (state.clip != null && state.clip.name.EndsWith(clipName, StringComparison.OrdinalIgnoreCase)) return state.clip;
+            return null;
+        }
+
         private void UpdateBody(float t)
         {
+            if (ActiveProfile != null && ActiveProfile.Gestures == GestureSpace.Character)
+            {
+                UpdateCharacterSpaceBody(t);
+                return;
+            }
+
             float stateTime = t - stateChangedAt;
             float breathe = Mathf.Sin(t * 1.65f) * 0.018f;
             float transition = Smooth01(stateTime / 0.38f);
@@ -331,6 +458,57 @@ namespace PersonalAssistant.Avatar
             rightArm.localRotation = Quaternion.Slerp(rightArm.localRotation, rightArmTarget, Time.deltaTime * 5f);
         }
 
+        /// <summary>
+        /// Restrained, realistic motion expressed in world-aligned character space so it does not
+        /// depend on the imported bone axes. Negative pitch (x) lowers the chin toward the viewer.
+        /// </summary>
+        private void UpdateCharacterSpaceBody(float t)
+        {
+            float stateTime = t - stateChangedAt;
+            float breathe = Mathf.Sin(t * 1.4f) * 0.004f;
+            Vector3 targetPosition = bodyBasePosition + Vector3.up * breathe;
+            Vector3 headEuler = new(Mathf.Sin(t * 0.7f) * 1.2f, Mathf.Sin(t * 0.45f) * 2f, 0f);
+            Vector3 leftArmEuler = new(0f, 0f, Mathf.Sin(t * 1.4f) * 0.8f);
+            Vector3 rightArmEuler = new(0f, 0f, -Mathf.Sin(t * 1.4f) * 0.8f);
+
+            switch (Mode)
+            {
+                case AvatarMode.Listening:
+                    targetPosition += new Vector3(0f, 0f, -0.012f);
+                    headEuler += new Vector3(-4f, 0f, 3f);
+                    break;
+                case AvatarMode.Thinking:
+                    headEuler += new Vector3(4f, -12f, -5f);
+                    rightArmEuler += new Vector3(-20f, 0f, 8f);
+                    break;
+                case AvatarMode.Speaking:
+                    headEuler += new Vector3(Mathf.Sin(t * 2.3f) * 2.4f, Mathf.Sin(t * 1.3f) * 3.5f, Mathf.Sin(t * 1.7f) * 1.2f);
+                    leftArmEuler += new Vector3(Mathf.Sin(t * 2.1f) * 4f, 0f, Mathf.Sin(t * 1.6f) * 3f);
+                    rightArmEuler += new Vector3(Mathf.Sin(t * 1.9f + 0.8f) * 4f, 0f, -Mathf.Sin(t * 1.5f + 0.4f) * 3f);
+                    break;
+                case AvatarMode.Success:
+                    headEuler += new Vector3(-4f * Mathf.Exp(-stateTime * 2f) * Mathf.Sin(stateTime * 9f), 0f, 0f);
+                    break;
+                case AvatarMode.Error:
+                    headEuler += new Vector3(-6f, 0f, Mathf.Sin(stateTime * 7f) * 3f * Mathf.Exp(-stateTime * 1.5f));
+                    break;
+            }
+
+            body.localPosition = Vector3.Lerp(body.localPosition, targetPosition, Time.deltaTime * 4f);
+            head.localRotation = Quaternion.Slerp(head.localRotation, CharacterSpaceRotation(head, headBaseRotation, headEuler), Time.deltaTime * 4f);
+            leftArm.localRotation = Quaternion.Slerp(leftArm.localRotation, CharacterSpaceRotation(leftArm, leftArmBaseRotation, leftArmEuler), Time.deltaTime * 4f);
+            rightArm.localRotation = Quaternion.Slerp(rightArm.localRotation, CharacterSpaceRotation(rightArm, rightArmBaseRotation, rightArmEuler), Time.deltaTime * 4f);
+        }
+
+        /// <summary>Local rotation that applies <paramref name="euler"/> (character space) on top of the base pose.</summary>
+        private Quaternion CharacterSpaceRotation(Transform bone, Quaternion baseLocal, Vector3 euler)
+        {
+            Quaternion parent = bone.parent == null ? Quaternion.identity : bone.parent.rotation;
+            Quaternion character = avatarRoot.rotation;
+            Quaternion offset = character * Quaternion.Euler(euler) * Quaternion.Inverse(character);
+            return Quaternion.Inverse(parent) * offset * parent * baseLocal;
+        }
+
         private void UpdateFace(float t)
         {
             if (usingRiggedAsset)
@@ -364,8 +542,8 @@ namespace PersonalAssistant.Avatar
 
             if (Mode == AvatarMode.Speaking)
             {
-                EvaluateSpeechViseme(t, out mouthOpen, out float visemeWidth);
-                mouthWidth *= visemeWidth;
+                mouthOpen = visemeMixer.Open;
+                mouthWidth *= visemeMixer.Width;
             }
             else if (Mode == AvatarMode.Success)
             {
@@ -403,150 +581,156 @@ namespace PersonalAssistant.Avatar
             rightLid.localScale = new Vector3(0.29f, lidScale, 0.15f);
         }
 
-        private void EvaluateViseme(float time, out float open, out float width)
+        private void SampleSpeech(float now)
         {
-            VisemeCue current = DemoVisemes[0];
-            for (int i = 1; i < DemoVisemes.Length; i++)
+            if (Mode != AvatarMode.Speaking)
             {
-                if (DemoVisemes[i].Time > time) break;
-                current = DemoVisemes[i];
-            }
-
-            ActiveViseme = current.Name;
-            open = current.Open;
-            width = current.Width;
-        }
-
-        private void EvaluateSpeechViseme(float now, out float open, out float width)
-        {
-            if (!ttsTimelineActive || englishSpeechCues.Count == 0)
-            {
-                EvaluateViseme(Mathf.Repeat(now - speechStartedAt, 4.12f), out open, out width);
+                visemeMixer.Clear();
+                ActiveViseme = "sil";
                 return;
             }
 
-            float elapsed = Mathf.Max(0f, now - speechStartedAt);
-            EnglishVisemeCue current = englishSpeechCues[0];
-            for (int i = 1; i < englishSpeechCues.Count; i++)
+            if (!ttsTimelineActive || englishSpeechCues.Count == 0)
             {
-                if (englishSpeechCues[i].Time > elapsed) break;
-                current = englishSpeechCues[i];
+                // Demo speech without a TTS utterance loops a planned English line.
+                demoSpeechCues ??= EnglishVisemePlanner.Build(DemoSpeechLine, out demoSpeechDuration);
+                visemeMixer.Evaluate(demoSpeechCues, Mathf.Repeat(now - speechStartedAt, demoSpeechDuration + 0.6f), -1f);
+                ActiveViseme = visemeMixer.Dominant;
+                return;
             }
 
-            ActiveViseme = current.Name;
-            open = current.Open;
-            width = current.Width;
+            if (awaitingSpeechAudio)
+            {
+                visemeMixer.Clear();
+                ActiveViseme = "sil";
+                return;
+            }
+
+            speechTime = CurrentSpeechTime(now);
+            visemeMixer.Evaluate(englishSpeechCues, speechTime, LoudnessAt(speechTime));
+            ActiveViseme = visemeMixer.Dominant;
+            if (Debug.isDebugBuild && now >= nextSpeechLogAt)
+            {
+                nextSpeechLogAt = now + 0.2f;
+                Debug.Log($"TTS_CLOCK: t={speechTime:F3}, audioClock={audioClockActive}, viseme={ActiveViseme}, jaw={visemeMixer.Jaw:F2}, loud={LoudnessAt(speechTime):F2}");
+            }
+        }
+
+        private float CurrentSpeechTime(float now)
+        {
+            if (!audioClockActive) return Mathf.Max(0f, now - speechStartedAt);
+
+            float predicted = speechTime + Time.deltaTime;
+            long positionMs = AndroidTextToSpeech.GetPlaybackPositionMs();
+            if (positionMs < 0) return predicted;
+            float position = positionMs / 1000f;
+            // Follow the audio presentation clock, smoothing the coarse position updates.
+            return Mathf.Abs(position - predicted) > 0.08f ? position : Mathf.Lerp(predicted, position, 0.25f);
+        }
+
+        private float LoudnessAt(float time)
+        {
+            if (speechEnvelope == null || speechEnvelope.Length == 0 || speechEnvelopeRate <= 0f) return -1f;
+            float sample = time * speechEnvelopeRate;
+            int index = Mathf.Clamp(Mathf.FloorToInt(sample), 0, speechEnvelope.Length - 1);
+            int next = Mathf.Min(index + 1, speechEnvelope.Length - 1);
+            return Mathf.Lerp(speechEnvelope[index], speechEnvelope[next], sample - Mathf.Floor(sample)) / 100f;
         }
 
         private void CaptureRiggedDefaults()
         {
-            leftPupilBasePosition = leftPupil.localPosition;
-            rightPupilBasePosition = rightPupil.localPosition;
-            leftLidBasePosition = leftLid.localPosition;
-            rightLidBasePosition = rightLid.localPosition;
-            leftLidBaseScale = leftLid.localScale;
-            rightLidBaseScale = rightLid.localScale;
-            leftBrowBasePosition = leftBrow.localPosition;
-            rightBrowBasePosition = rightBrow.localPosition;
-            leftBrowBaseRotation = leftBrow.localRotation;
-            rightBrowBaseRotation = rightBrow.localRotation;
+            leftEyeBaseInHead = head.InverseTransformPoint(leftPupil.position);
+            rightEyeBaseInHead = head.InverseTransformPoint(rightPupil.position);
         }
 
         private void UpdateRiggedFace(float t)
         {
-            float browTilt = 0f;
-            float browHeight = 0f;
-            string activeShape = "viseme_sil";
-            float activeWeight = 88f;
-
+            float smile = 0f, frown = 0f, browUpLeft = 0f, browUpRight = 0f, browDown = 0f, browInner = 0f, cheek = 0f;
             switch (Emotion)
             {
                 case AvatarEmotion.Warm:
-                    activeShape = "expression_smile";
-                    activeWeight = 72f;
-                    browHeight = 0.018f;
+                    smile = 0.45f; browUpLeft = browUpRight = 0.15f; cheek = 0.25f;
                     break;
                 case AvatarEmotion.Curious:
-                    browTilt = 10f;
-                    browHeight = 0.035f;
+                    browUpLeft = 0.85f; browUpRight = 0.20f; browInner = 0.25f;
                     break;
                 case AvatarEmotion.Excited:
-                    activeShape = "expression_smile";
-                    activeWeight = 100f;
-                    browHeight = 0.055f;
+                    smile = 0.85f; browUpLeft = browUpRight = 0.55f; cheek = 0.6f;
                     break;
                 case AvatarEmotion.Concerned:
-                    activeShape = "expression_concerned";
-                    activeWeight = 90f;
-                    browTilt = -12f;
-                    browHeight = 0.020f;
+                    frown = 0.65f; browInner = 0.9f; browDown = 0.15f;
                     break;
             }
 
-            float mouthOpen = 0.08f;
-            if (Mode == AvatarMode.Speaking)
+            float successOpen = 0f;
+            switch (Mode)
             {
-                EvaluateSpeechViseme(t, out mouthOpen, out _);
-                activeShape = ResolveRiggedViseme(ActiveViseme);
-                activeWeight = Mathf.Lerp(68f, 100f, Intensity);
-            }
-            else if (Mode == AvatarMode.Success)
-            {
-                activeShape = "viseme_aa";
-                activeWeight = 72f;
-                mouthOpen = 0.45f;
-            }
-            else
-            {
-                ActiveViseme = "sil";
-            }
-
-            if (riggedMouthRenderer != null && riggedMouthRenderer.sharedMesh != null)
-            {
-                Mesh mesh = riggedMouthRenderer.sharedMesh;
-                for (int i = 0; i < mesh.blendShapeCount; i++)
-                {
-                    float target = mesh.GetBlendShapeName(i) == activeShape ? activeWeight : 0f;
-                    float current = riggedMouthRenderer.GetBlendShapeWeight(i);
-                    riggedMouthRenderer.SetBlendShapeWeight(i, Mathf.Lerp(current, target, Time.deltaTime * 14f));
-                }
+                case AvatarMode.Listening:
+                    browUpLeft += 0.2f; browUpRight += 0.2f;
+                    break;
+                case AvatarMode.Thinking:
+                    browDown = Mathf.Max(browDown, 0.35f); browUpLeft = 0.6f;
+                    break;
+                case AvatarMode.Speaking:
+                    // Expressions stay layered under speech without overpowering the visemes.
+                    smile = Mathf.Min(smile, 0.4f);
+                    frown = Mathf.Min(frown, 0.4f);
+                    break;
+                case AvatarMode.Success:
+                    smile = 1f; successOpen = 0.45f; cheek = 0.8f;
+                    break;
             }
 
-            if (riggedTongue != null)
-                riggedTongue.gameObject.SetActive(Mode == AvatarMode.Speaking || Mode == AvatarMode.Success);
-            if (riggedTeeth != null)
-                riggedTeeth.localScale = Vector3.Lerp(riggedTeeth.localScale, new Vector3(1f, Mathf.Lerp(0.45f, 1f, mouthOpen), 1f), Time.deltaTime * 12f);
+            float intensity = Mathf.Lerp(0.75f, 1f, Intensity);
+            SetFaceShape("mouthSmile.L", smile * intensity, 10f);
+            SetFaceShape("mouthSmile.R", smile * intensity, 10f);
+            SetFaceShape("mouthFrown.L", frown * intensity, 10f);
+            SetFaceShape("mouthFrown.R", frown * intensity, 10f);
+            SetFaceShape("browOuterUp.L", Mathf.Clamp01(browUpLeft), 8f);
+            SetFaceShape("browOuterUp.R", Mathf.Clamp01(browUpRight), 8f);
+            SetFaceShape("browDown.L", browDown, 8f);
+            SetFaceShape("browDown.R", browDown, 8f);
+            SetFaceShape("browInnerUp", browInner, 8f);
+            SetFaceShape("cheekPuff", cheek, 6f);
+            SetFaceShape("eyeBlink.L", blinkAmount, 0f);
+            SetFaceShape("eyeBlink.R", blinkAmount, 0f);
 
-            leftBrow.localPosition = Vector3.Lerp(leftBrow.localPosition, leftBrowBasePosition + Vector3.up * browHeight, Time.deltaTime * 8f);
-            rightBrow.localPosition = Vector3.Lerp(rightBrow.localPosition, rightBrowBasePosition + Vector3.up * browHeight, Time.deltaTime * 8f);
-            leftBrow.localRotation = Quaternion.Slerp(leftBrow.localRotation, leftBrowBaseRotation * Quaternion.Euler(0f, 0f, -browTilt), Time.deltaTime * 8f);
-            rightBrow.localRotation = Quaternion.Slerp(rightBrow.localRotation, rightBrowBaseRotation * Quaternion.Euler(0f, 0f, browTilt), Time.deltaTime * 8f);
-
-            float lidStretch = Mathf.Lerp(1f, 18f, blinkAmount);
-            float lidDrop = Mathf.Lerp(0f, 0.19f, blinkAmount);
-            bool lidsVisible = blinkAmount > 0.012f;
-            leftLid.gameObject.SetActive(lidsVisible);
-            rightLid.gameObject.SetActive(lidsVisible);
-            leftLid.localPosition = leftLidBasePosition + Vector3.down * lidDrop;
-            rightLid.localPosition = rightLidBasePosition + Vector3.down * lidDrop;
-            leftLid.localScale = new Vector3(leftLidBaseScale.x, leftLidBaseScale.y * lidStretch, leftLidBaseScale.z);
-            rightLid.localScale = new Vector3(rightLidBaseScale.x, rightLidBaseScale.y * lidStretch, rightLidBaseScale.z);
+            // The mixer already blends and times speech, so visemes are applied directly.
+            bool speaking = Mode == AvatarMode.Speaking;
+            float speechRate = speaking ? 0f : 16f;
+            float speechGain = speaking ? Mathf.Lerp(0.85f, 1f, Intensity) : 0f;
+            for (int i = 1; i < visemeShapeIndices.Length; i++)
+            {
+                float target = visemeMixer.Weights[i] * speechGain;
+                if (Mode == AvatarMode.Success && VisemeMixer.Visemes[i] == "aa") target = successOpen;
+                SetFaceShape(visemeShapeIndices[i], target, speechRate);
+            }
+            float jawScale = ActiveProfile == null ? 0.55f : ActiveProfile.JawOpenScale;
+            SetFaceShape("jawOpen", speaking ? visemeMixer.Jaw * jawScale : successOpen * 0.3f, speechRate);
         }
 
-        private static string ResolveRiggedViseme(string viseme)
+        private void SetFaceShape(string shapeName, float weight, float rate)
         {
-            return viseme switch
-            {
-                "HH" => "viseme_aa",
-                "LL" => "viseme_nn",
-                "sil" => "viseme_sil",
-                _ => $"viseme_{viseme}"
-            };
+            if (faceShapeIndices.TryGetValue(shapeName, out int index)) SetFaceShape(index, weight, rate);
+        }
+
+        /// <param name="rate">Smoothing speed; zero applies the weight immediately.</param>
+        private void SetFaceShape(int index, float weight, float rate)
+        {
+            if (riggedFace == null || index < 0) return;
+            float target = Mathf.Clamp01(weight) * 100f;
+            float value = rate <= 0f ? target : Mathf.Lerp(faceShapeWeights[index], target, Mathf.Clamp01(Time.deltaTime * rate));
+            if (Mathf.Abs(value - faceShapeWeights[index]) < 0.01f) return;
+            faceShapeWeights[index] = value;
+            riggedFace.SetBlendShapeWeight(index, value);
         }
 
         private void FinishEnglishSpeech(string reason)
         {
             ttsTimelineActive = false;
+            audioTimelineReceived = false;
+            audioClockActive = false;
+            speechEnvelope = null;
             activeUtteranceId = null;
             englishSpeechCues.Clear();
             ActiveSpeechText = string.Empty;
@@ -596,8 +780,9 @@ namespace PersonalAssistant.Avatar
             gaze = Vector2.Lerp(gaze, gazeTarget, Time.deltaTime * 5f);
             if (usingRiggedAsset)
             {
-                leftPupil.localPosition = leftPupilBasePosition + new Vector3(gaze.x, gaze.y, 0f);
-                rightPupil.localPosition = rightPupilBasePosition + new Vector3(gaze.x, gaze.y, 0f);
+                Vector3 offset = (avatarRoot.right * gaze.x + avatarRoot.up * gaze.y) * ActiveProfile.GazeScale;
+                leftPupil.position = head.TransformPoint(leftEyeBaseInHead) + offset;
+                rightPupil.position = head.TransformPoint(rightEyeBaseInHead) + offset;
             }
             else
             {
@@ -624,22 +809,22 @@ namespace PersonalAssistant.Avatar
             renderer.GetPropertyBlock(block);
             block.SetColor("_BaseColor", statusColor);
             block.SetColor("_Color", statusColor);
+            block.SetColor("_EmissionColor", statusColor * 1.6f);
             renderer.SetPropertyBlock(block);
             float pulse = 1f + Mathf.Sin(t * (Mode == AvatarMode.Thinking ? 4.5f : 2.2f)) * 0.08f;
             statusOrb.localScale = statusOrbBaseScale * pulse;
         }
 
-        private void BuildAvatar()
+        private void BuildAvatar(AvatarCharacter preferred)
         {
             avatarRoot = new GameObject("GeneratedAvatar").transform;
             avatarRoot.SetParent(transform, false);
 
-            Transform backdrop = Create(PrimitiveType.Cylinder, "BackdropHalo", avatarRoot, new Vector3(0f, 2.20f, 1.05f), new Vector3(2.15f, 0.025f, 3.05f), "backdrop");
-            backdrop.localRotation = Quaternion.Euler(90f, 0f, 0f);
             Create(PrimitiveType.Cylinder, "GroundShadow", avatarRoot, new Vector3(0f, 0.045f, 0.08f), new Vector3(0.82f, 0.018f, 0.47f), "shadow");
             body = new GameObject("BodyMotion").transform;
             body.SetParent(avatarRoot, false);
-            if (TryBuildRiggedAvatar()) return;
+            AvatarCharacter other = preferred == AvatarCharacter.CoolMan ? AvatarCharacter.Milo : AvatarCharacter.CoolMan;
+            if (TryBuildRiggedAvatar(AvatarCharacterProfile.For(preferred)) || TryBuildRiggedAvatar(AvatarCharacterProfile.For(other))) return;
 
             Create(PrimitiveType.Capsule, "LeftLeg", body, new Vector3(-0.23f, 0.46f, 0f), new Vector3(0.22f, 0.23f, 0.24f), "skin");
             Create(PrimitiveType.Capsule, "RightLeg", body, new Vector3(0.23f, 0.46f, 0f), new Vector3(0.22f, 0.23f, 0.24f), "skin");
@@ -689,95 +874,103 @@ namespace PersonalAssistant.Avatar
             BuildStatusPin();
         }
 
-        private bool TryBuildRiggedAvatar()
+        private bool TryBuildRiggedAvatar(AvatarCharacterProfile profile)
         {
-            GameObject prefab = Resources.Load<GameObject>("Character/MiloRig");
+            GameObject prefab = Resources.Load<GameObject>(profile.ResourcePath);
             if (prefab == null) return false;
 
             GameObject instance = Instantiate(prefab, body);
-            instance.name = "MiloRiggedCharacter";
+            instance.name = $"{profile.Character}Character";
             instance.transform.localPosition = Vector3.zero;
             instance.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
-            instance.transform.localScale = Vector3.one;
 
             head = FindDescendant(instance.transform, "Head");
-            leftEye = FindDescendant(instance.transform, "White_Eye.L");
-            rightEye = FindDescendant(instance.transform, "White_Eye.R");
-            leftPupil = FindDescendant(instance.transform, "Iris_Eye.L");
-            rightPupil = FindDescendant(instance.transform, "Iris_Eye.R");
-            leftLid = FindDescendant(instance.transform, "Lid_Eye.L");
-            rightLid = FindDescendant(instance.transform, "Lid_Eye.R");
-            leftBrow = FindDescendant(instance.transform, "Brow.L");
-            rightBrow = FindDescendant(instance.transform, "Brow.R");
-            mouth = FindDescendant(instance.transform, "Mouth_Interior");
-            leftMouthCorner = FindDescendant(instance.transform, "MouthCorner.L");
-            rightMouthCorner = FindDescendant(instance.transform, "MouthCorner.R");
-            leftCheek = FindDescendant(instance.transform, "Blush.L");
-            rightCheek = FindDescendant(instance.transform, "Blush.R");
-            leftArm = FindDescendant(instance.transform, "UpperArm.L");
-            rightArm = FindDescendant(instance.transform, "UpperArm.R");
+            leftPupil = FindDescendant(instance.transform, profile.LeftEyeBone);
+            rightPupil = FindDescendant(instance.transform, profile.RightEyeBone);
+            leftArm = FindDescendant(instance.transform, profile.ScreenLeftArm);
+            rightArm = FindDescendant(instance.transform, profile.ScreenRightArm);
             statusOrb = FindDescendant(instance.transform, "Status_Orb");
-            riggedTeeth = FindDescendant(instance.transform, "Mouth_Teeth");
-            riggedTongue = FindDescendant(instance.transform, "Mouth_Tongue");
+            Transform face = FindDescendant(instance.transform, profile.FaceRenderer);
+            riggedFace = face == null ? null : face.GetComponent<SkinnedMeshRenderer>();
 
-            Transform[] required = { head, leftEye, rightEye, leftPupil, rightPupil, leftLid, rightLid, leftBrow, rightBrow, mouth, leftArm, rightArm, statusOrb };
-            for (int i = 0; i < required.Length; i++)
+            Transform[] required = { head, leftPupil, rightPupil, leftArm, rightArm, statusOrb };
+            bool complete = riggedFace != null && riggedFace.sharedMesh != null && Array.TrueForAll(required, item => item != null);
+            if (complete) BindFaceShapes();
+            if (!complete || visemeShapeIndices[VisemeMixer.IndexOf("PP")] < 0)
             {
-                if (required[i] != null) continue;
-                Debug.LogWarning("Rigged avatar is incomplete; using procedural fallback.");
+                Debug.LogWarning($"Rigged avatar {profile.Character} is incomplete; trying the next fallback.");
+                riggedFace = null;
                 if (Application.isPlaying) Destroy(instance);
                 else DestroyImmediate(instance);
                 return false;
             }
 
-            riggedMouthRenderer = mouth.GetComponent<SkinnedMeshRenderer>();
-            ApplyRiggedMaterials(instance);
+            ActiveProfile = profile;
+            characterRoot = instance.transform;
+            gestureAnimation = instance.GetComponent<UnityEngine.Animation>();
+            if (gestureAnimation != null)
+            {
+                gestureAnimation.playAutomatically = false;
+                gestureAnimation.Stop();
+                // A frame of the handshake clip gives a natural arms-down idle pose.
+                AnimationClip idle = FindGestureClip(profile.IdlePoseClip);
+                if (idle != null) idle.SampleAnimation(instance, 0f);
+            }
+
+            if (profile.UseClayShader) ApplyRiggedMaterials(instance);
+            else ConfigureTexturedRenderers(instance, profile);
             usingRiggedAsset = true;
-            Debug.Log($"RIGGED_AVATAR_ACTIVE: renderers={instance.GetComponentsInChildren<Renderer>(true).Length}, mouthBlendShapes={(riggedMouthRenderer == null ? 0 : riggedMouthRenderer.sharedMesh.blendShapeCount)}");
+            Debug.Log($"RIGGED_AVATAR_ACTIVE: profile={profile.Character}, renderers={instance.GetComponentsInChildren<Renderer>(true).Length}, skinned={instance.GetComponentsInChildren<SkinnedMeshRenderer>(true).Length}, faceBlendShapes={riggedFace.sharedMesh.blendShapeCount}, clips={(gestureAnimation == null ? 0 : gestureAnimation.GetClipCount())}");
             return true;
+        }
+
+        private static void ConfigureTexturedRenderers(GameObject instance, AvatarCharacterProfile profile)
+        {
+            foreach (Renderer renderer in instance.GetComponentsInChildren<Renderer>(true))
+            {
+                bool orb = renderer.name == "Status_Orb";
+                renderer.shadowCastingMode = profile.CastShadows && !orb ? ShadowCastingMode.On : ShadowCastingMode.Off;
+                renderer.receiveShadows = profile.CastShadows;
+                if (renderer is SkinnedMeshRenderer skinned) skinned.updateWhenOffscreen = true;
+            }
+        }
+
+        private void BindFaceShapes()
+        {
+            Mesh mesh = riggedFace.sharedMesh;
+            faceShapeIndices.Clear();
+            for (int i = 0; i < mesh.blendShapeCount; i++) faceShapeIndices[mesh.GetBlendShapeName(i)] = i;
+            for (int i = 0; i < visemeShapeIndices.Length; i++)
+                visemeShapeIndices[i] = faceShapeIndices.TryGetValue($"viseme_{VisemeMixer.Visemes[i]}", out int index) ? index : -1;
+            faceShapeWeights = new float[mesh.blendShapeCount];
         }
 
         private void ApplyRiggedMaterials(GameObject instance)
         {
+            Material clay = GetClayMaterial();
             foreach (Renderer renderer in instance.GetComponentsInChildren<Renderer>(true))
             {
-                string objectName = renderer.gameObject.name;
-                string key = objectName switch
-                {
-                    _ when objectName.StartsWith("Skin_EarInner") => "skinRoseSoft",
-                    _ when objectName.StartsWith("Skin_") => "skin",
-                    _ when objectName.StartsWith("Hair_") || objectName.StartsWith("Brow") => "hair",
-                    _ when objectName.StartsWith("Shirt_") && (objectName.Contains("Rib") || objectName.Contains("Hem") || objectName.Contains("Cuff")) => "shirtRedDark",
-                    _ when objectName.StartsWith("Shirt_") => "shirtRed",
-                    _ when objectName.StartsWith("Shorts_") => "shortsBlue",
-                    _ when objectName.StartsWith("Shoe_Sole") => "shoeSole",
-                    _ when objectName.StartsWith("Shoe_") => "shoeYellow",
-                    _ when objectName.StartsWith("Sock_") || objectName.StartsWith("White_") || objectName.StartsWith("Glint_") || objectName.StartsWith("Status_Petal") || objectName == "Mouth_Teeth" => "white",
-                    _ when objectName.StartsWith("Iris_") => "iris",
-                    _ when objectName.StartsWith("Pupil_") => "pupil",
-                    _ when objectName.StartsWith("Blush") => "blush",
-                    _ when objectName == "Mouth_Tongue" => "tongue",
-                    _ when objectName.StartsWith("Mouth") => "mouth",
-                    _ when objectName == "Status_Orb" => "status",
-                    _ => null
-                };
-                if (key == null) continue;
-                Material material = GetMaterial(key);
-                renderer.sharedMaterial = material;
-                Color color = material.HasProperty("_BaseColor") ? material.GetColor("_BaseColor") : material.color;
-                MaterialPropertyBlock block = new();
-                renderer.GetPropertyBlock(block);
-                block.SetColor("_BaseColor", color);
-                block.SetColor("_Color", color);
-                renderer.SetPropertyBlock(block);
-                bool facialOverlay = objectName.StartsWith("Brow") || objectName.StartsWith("Lid_") ||
-                                     objectName.StartsWith("White_Eye") || objectName.StartsWith("Iris_") ||
-                                     objectName.StartsWith("Pupil_") || objectName.StartsWith("Glint_") ||
-                                     objectName.StartsWith("Blush") || objectName.StartsWith("Mouth") ||
-                                     objectName == "Skin_Nose";
-                renderer.shadowCastingMode = facialOverlay ? ShadowCastingMode.Off : ShadowCastingMode.On;
-                renderer.receiveShadows = !facialOverlay;
+                Material[] shared = new Material[renderer.sharedMaterials.Length];
+                for (int i = 0; i < shared.Length; i++) shared[i] = clay;
+                renderer.sharedMaterials = shared;
+                renderer.shadowCastingMode = ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                if (renderer is SkinnedMeshRenderer skinned) skinned.updateWhenOffscreen = true;
             }
+        }
+
+        private Material GetClayMaterial()
+        {
+            if (materials.TryGetValue("clay", out Material existing)) return existing;
+            Shader shader = Shader.Find("PersonalAssistant/MiloClayToon");
+            if (shader == null)
+            {
+                Debug.LogWarning("MiloClayToon shader is unavailable; using URP Lit.");
+                return GetMaterial("skin");
+            }
+            Material material = new(shader) { name = "Runtime_MiloClay" };
+            materials["clay"] = material;
+            return material;
         }
 
         private static Transform FindDescendant(Transform root, string objectName)
@@ -869,8 +1062,7 @@ namespace PersonalAssistant.Avatar
                 "mouth" => new Color(0.25f, 0.025f, 0.025f),
                 "tongue" => new Color(0.95f, 0.18f, 0.25f),
                 "mouthLine" => new Color(0.16f, 0.018f, 0.018f),
-                "shadow" => new Color(0.08f, 0.12f, 0.14f),
-                "backdrop" => new Color(0.035f, 0.13f, 0.15f),
+                "shadow" => new Color(0.80f, 0.68f, 0.60f),
                 _ => new Color(0.20f, 0.80f, 0.75f)
             };
             material.color = color;
@@ -886,28 +1078,23 @@ namespace PersonalAssistant.Avatar
             return value * value * (3f - 2f * value);
         }
 
-        private readonly struct VisemeCue
-        {
-            public readonly float Time;
-            public readonly string Name;
-            public readonly float Open;
-            public readonly float Width;
-
-            public VisemeCue(float time, string name, float open, float width)
-            {
-                Time = time;
-                Name = name;
-                Open = open;
-                Width = width;
-            }
-        }
-
         [Serializable]
         private sealed class TtsRangeEvent
         {
             public int start;
             public int end;
             public int frame;
+        }
+
+        [Serializable]
+        private sealed class TtsTimelineEvent
+        {
+            public string utteranceId;
+            public int sampleRate;
+            public int durationMs;
+            public float envelopeRate;
+            public TtsRangeEvent[] words;
+            public int[] envelope;
         }
     }
 }

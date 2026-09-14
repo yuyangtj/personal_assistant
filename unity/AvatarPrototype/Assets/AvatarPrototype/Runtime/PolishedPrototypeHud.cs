@@ -71,6 +71,14 @@ namespace PersonalAssistant.Avatar
             if (GUI.Button(new Rect(width - 214f, safeTop + 10f, 184f, 48f), demo.AutoDemo ? "AUTO  •  ON" : "AUTO  •  OFF", autoStyle))
                 demo.ToggleAutoDemo();
 
+            AvatarCharacterProfile profile = avatar.ActiveProfile;
+            string characterLabel = profile == null ? "BASIC" : profile.DisplayName;
+            if (GUI.Button(new Rect(width - 214f, safeTop + 66f, 184f, 44f), $"LOOK  •  {characterLabel}", button))
+            {
+                AvatarCharacter next = profile != null && profile.Character == AvatarCharacter.CoolMan ? AvatarCharacter.Milo : AvatarCharacter.CoolMan;
+                avatar.SetCharacter(next);
+            }
+
             string caption = avatar.Mode switch
             {
                 AvatarMode.Listening => "I’m listening…",
@@ -84,8 +92,11 @@ namespace PersonalAssistant.Avatar
 
             float dockWidth = Mathf.Min(940f, width - 48f);
             float dockX = (width - dockWidth) * 0.5f;
-            float dockY = height - safeBottom - 154f;
-            GUI.Box(new Rect(dockX, dockY, dockWidth, 154f), GUIContent.none, dock);
+            AvatarCharacterProfile activeProfile = avatar.ActiveProfile;
+            bool hasCredit = activeProfile != null && !string.IsNullOrEmpty(activeProfile.Credit);
+            float dockHeight = hasCredit ? 176f : 154f;
+            float dockY = height - safeBottom - dockHeight;
+            GUI.Box(new Rect(dockX, dockY, dockWidth, dockHeight), GUIContent.none, dock);
             GUI.Label(new Rect(dockX + 24f, dockY + 14f, dockWidth - 48f, 38f), caption, captionStyle);
 
             float gap = 10f;
@@ -99,10 +110,18 @@ namespace PersonalAssistant.Avatar
 
             if (avatar.Mode == AvatarMode.Speaking)
             {
-                GUIStyle viseme = LabelStyle(13, FontStyle.Bold, new Color(0.56f, 0.94f, 0.82f));
+                GUIStyle viseme = LabelStyle(13, FontStyle.Bold, new Color(0.04f, 0.40f, 0.38f));
                 viseme.alignment = TextAnchor.MiddleRight;
                 string syncLabel = avatar.IsEnglishSpeechActive ? "TTS SYNC" : "DEMO";
-                GUI.Label(new Rect(width - 260f, safeTop + 68f, 230f, 24f), $"{syncLabel}  ·  {avatar.ActiveViseme}", viseme);
+                GUI.Label(new Rect(width - 260f, safeTop + 116f, 230f, 24f), $"{syncLabel}  ·  {avatar.ActiveViseme}", viseme);
+            }
+
+            // CC-BY attribution for the active character, inside the dock under the buttons.
+            if (hasCredit)
+            {
+                GUIStyle credit = LabelStyle(12, FontStyle.Normal, new Color(0.72f, 0.80f, 0.82f));
+                credit.alignment = TextAnchor.MiddleCenter;
+                GUI.Label(new Rect(dockX, dockY + 136f, dockWidth, 24f), activeProfile.Credit, credit);
             }
 
             GUI.color = previousColor;

@@ -4,13 +4,13 @@ namespace PersonalAssistant.Avatar
 {
     internal static class AndroidTextToSpeech
     {
-        public static bool Speak(GameObject callbackTarget, string text)
+        public static bool Speak(GameObject callbackTarget, string text, string voiceStyle = "default")
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
             try
             {
                 using AndroidJavaClass bridge = new("com.personalassistant.avatar.MiloTextToSpeech");
-                bridge.CallStatic("speak", callbackTarget.name, text);
+                bridge.CallStatic("speak", callbackTarget.name, text, voiceStyle);
                 return true;
             }
             catch (System.Exception exception)
@@ -20,6 +20,29 @@ namespace PersonalAssistant.Avatar
             }
 #else
             return false;
+#endif
+        }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        private static AndroidJavaClass positionBridge;
+#endif
+
+        /// <summary>Milliseconds of synthesized speech presented to the speaker, or -1 when not playing.</summary>
+        public static long GetPlaybackPositionMs()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                positionBridge ??= new AndroidJavaClass("com.personalassistant.avatar.MiloTextToSpeech");
+                return positionBridge.CallStatic<long>("getPlaybackPositionMs");
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogWarning($"TTS_POSITION_ERROR: {exception.Message}");
+                return -1;
+            }
+#else
+            return -1;
 #endif
         }
 

@@ -1,10 +1,19 @@
 # Avatar Rig Contract
 
-This contract uses `design/character-reference-v2.jpeg` as the current visual
-direction for an animation-ready, mobile-friendly 3D character. Its compact
-proportions, clear brows, and broad pose language are the primary references;
-the production character should retain its own identity and the assistant's
-flower-shaped state indicator.
+This contract uses `design/character-reference-v2.jpeg` as a style reference
+only: soft clay 3D, compact proportions, a rice-ball head with puffy cheeks,
+thick brows, and broad pose language. The character must not copy the
+referenced cartoon character. Milo keeps his own face, forehead lock, and the
+assistant's flower-shaped state indicator. The v3 implementation is described
+in `docs/rigged-character-pipeline.md`.
+
+## Character profiles
+
+The runtime supports several characters through `AvatarCharacterProfile`: the realistic
+Cool Man (default, `docs/realistic-character-pipeline.md`) and cartoon Milo. Every
+character must provide the same facial blendshape names listed below, a `Head` bone,
+`Eye.L/R` bones, upper-arm bones, and a `Status_Orb` node. Profiles define resource path,
+node names, gesture space, gaze scale, camera framing, gesture clips, and credit text.
 
 ## Deliverables
 

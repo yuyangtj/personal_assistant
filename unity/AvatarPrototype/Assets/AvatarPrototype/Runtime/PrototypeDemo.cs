@@ -10,6 +10,14 @@ namespace PersonalAssistant.Avatar
         private int lastStage = -1;
         private int mockResponseSequence;
 
+        // Lines cover open vowels, rounded vowels, and many lip closures (p/b/m, f/v).
+        private static readonly string[] MockResponses =
+        {
+            "Hello! I'm Milo. How can I help you today?",
+            "My mom bought five big bubbles from Milo.",
+            "Your three o'clock meeting moved to Thursday afternoon."
+        };
+
         public bool AutoDemo => autoDemo;
 
         private readonly AvatarMode[] modes =
@@ -50,6 +58,11 @@ namespace PersonalAssistant.Avatar
             lastStage = -1;
         }
 
+        public void DisableAutoDemo()
+        {
+            autoDemo = false;
+        }
+
         public void SelectMode(AvatarMode mode, AvatarEmotion emotion)
         {
             autoDemo = false;
@@ -63,11 +76,12 @@ namespace PersonalAssistant.Avatar
         {
             AssistantResponse response = new()
             {
-                responseId = $"prototype-{++mockResponseSequence}",
-                text = "Hello! I'm Milo. How can I help you today?",
+                responseId = $"prototype-{mockResponseSequence + 1}",
+                text = MockResponses[mockResponseSequence % MockResponses.Length],
                 emotion = AvatarEmotion.Excited.ToString(),
                 intensity = 0.72f
             };
+            mockResponseSequence++;
             string json = JsonUtility.ToJson(response);
             if (!AndroidAssistantResponseBridge.Deliver(avatar.gameObject, json))
                 avatar.ApplyAssistantResponseJson(json);
