@@ -1,0 +1,21 @@
+id: coding-pull-request
+name: Isolated coding pull request
+kind: agent
+description: Uses a coding agent in an isolated Git worktree, pushes a dedicated branch, and opens a draft GitHub pull request for human review.
+provides:
+  - coding
+  - repository_analysis
+  - shell_execution
+  - testing
+  - pull_request_creation
+availability:
+  enabled: true
+  concurrency: 1
+execution:
+  adapter: coding-pull-request
+  timeout_seconds: 1800
+risk:
+  default_level: 2
+  destructive_actions_require_approval: true
+routing:
+  priority: 60

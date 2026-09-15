@@ -28,6 +28,17 @@ class SpeechRequest(BaseModel):
     emotion: Literal["Warm", "Curious", "Excited", "Concerned", "Neutral"] = "Warm"
 
 
+class PullRequestApprovalRequest(BaseModel):
+    decision: Literal["approve", "reject"]
+    expected_head_sha: str | None = Field(
+        default=None,
+        min_length=40,
+        max_length=64,
+        pattern=r"^[0-9a-f]+$",
+    )
+    merge_method: Literal["merge", "squash", "rebase"] = "squash"
+
+
 class TaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

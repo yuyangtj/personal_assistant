@@ -8,9 +8,11 @@ from collections.abc import Mapping
 from app.capabilities import CapabilityRegistry
 from app.config import Settings
 from app.execution import ConversationExecutor, Executor, FakeExecutor
+from app.execution.coding import CodexCliRunner, CodingPullRequestExecutor
 from app.execution.fake import ExecutionCancelled
 from app.integrations.chat import ChatClient
 from app.integrations.fallback import FallbackChatClient, FallbackManagerModelClient
+from app.integrations.github import GitHubClient
 from app.integrations.kimi import KimiChatClient, KimiManagerModelClient
 from app.integrations.minimax import MiniMaxChatClient, MiniMaxManagerModelClient
 from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
@@ -24,6 +26,44 @@ logger = logging.getLogger(__name__)
 
 class ExecutorAdapterNotFoundError(LookupError):
     pass
+
+
+def build_coding_executor(settings: Settings) -> CodingPullRequestExecutor | None:
+    """Builds the opt-in isolated coding-to-draft-PR workflow."""
+    if not settings.code_agent_enabled:
+        return None
+    missing = [
+        name
+        for name, value in (
+            ("ASSISTANT_CODE_REPOSITORY_PATH", settings.code_repository_path),
+            ("ASSISTANT_GITHUB_REPOSITORY", settings.github_repository),
+            ("ASSISTANT_GITHUB_TOKEN", settings.github_token),
+        )
+        if not value
+    ]
+    if missing:
+        raise ValueError("Coding agent requires: " + ", ".join(missing))
+    assert settings.code_repository_path is not None
+    assert settings.github_repository is not None
+    assert settings.github_token is not None
+    github = GitHubClient(
+        token=settings.github_token,
+        base_url=settings.github_api_base_url,
+    )
+    return CodingPullRequestExecutor(
+        repository_path=settings.code_repository_path,
+        worktree_root=settings.code_worktree_root,
+        github_repository=settings.github_repository,
+        github=github,
+        agent=CodexCliRunner(
+            executable=settings.code_agent_executable,
+            model=settings.code_agent_model,
+        ),
+        base_branch=settings.github_base_branch,
+        remote=settings.github_remote,
+        timeout_seconds=settings.code_agent_timeout_seconds,
+        draft_pull_requests=settings.github_draft_pull_requests,
+    )
 
 
 def _provider_order(primary: str, fallback: str | None) -> tuple[str, ...]:
@@ -239,6 +279,20 @@ class TaskWorker:
                 return True
             if not result.output or not result.output.get("summary"):
                 raise ValueError("Executor produced no summary")
+            approval = result.output.get("approval_request")
+            if isinstance(approval, dict):
+                artifacts = result.output.get("artifacts")
+                self.service.request_approval(
+                    task.id,
+                    execution_id,
+                    artifacts=(
+                        [artifact for artifact in artifacts if isinstance(artifact, dict)]
+                        if isinstance(artifacts, list)
+                        else []
+                    ),
+                    approval=approval,
+                )
+                return True
             reply = result.output.get("reply") or result.output["summary"]
             self.service.complete_task(
                 task.id,
@@ -291,6 +345,10 @@ def main() -> None:
             "%s conversation credentials are not set; conversation falls back to fake",
             settings.conversation_model_provider,
         )
+    coding_executor = build_coding_executor(settings)
+    if coding_executor is not None:
+        executors[coding_executor.id] = coding_executor
+        logger.info("Coding pull-request agent enabled for %s", settings.github_repository)
     # Only capabilities whose adapter is installed in this worker can be selected.
     registry = CapabilityRegistry.from_directory(
         settings.capabilities_directory
@@ -317,6 +375,8 @@ def main() -> None:
             conversation_executor.client.close()
         if isinstance(manager, ModelAssistedManager):
             manager.analyzer.client.close()
+        if coding_executor is not None:
+            coding_executor.github.close()
         database.dispose()
 
 

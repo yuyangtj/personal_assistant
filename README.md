@@ -22,12 +22,14 @@ agent, tool, approval, and Slack integrations.
 - Analyze tasks through a provider-neutral, strictly validated manager-model contract.
 - Retry malformed model output once without persisting raw responses.
 - Keep capability selection deterministic after model inference.
+- Run coding changes in isolated Git worktrees and publish dedicated draft pull requests.
+- Require an exact-head-SHA approval before the GitHub merge operation.
 
 The fake executor remains as a credential-free fallback, and a scripted client
 exercises the manager inference boundary in tests. Kimi and MiniMax conversational
-execution and opt-in manager analysis are implemented. The separate Kimi Code
-capability is still represented by a disabled manifest, so its CLI cannot run before
-the adapter and worktree sandbox are tested.
+execution and opt-in manager analysis are implemented. A Codex-backed coding-to-draft-PR
+adapter is implemented as an opt-in runtime capability. The separate Kimi Code
+capability remains disabled until its CLI runner is implemented and tested.
 
 The before-and-after architecture diagrams are in
 [`docs/architecture.md`](docs/architecture.md).
@@ -75,8 +77,8 @@ curl -X POST http://localhost:8000/tasks \
   }'
 ```
 
-That example currently fails safely because only the disabled Kimi manifest
-provides `repository_analysis`. No fallback executor silently receives work it
+That example routes to the coding PR adapter only when its operator configuration is
+enabled. Otherwise it fails safely; no fallback executor silently receives work it
 cannot perform.
 
 ## Run locally
@@ -110,11 +112,25 @@ Docker Compose backend.
 
 ## Current boundaries
 
-There is no coding-agent, Slack, or general tool integration yet. Kimi or MiniMax can
-independently provide conversational execution and manager analysis. Manager analysis
-is opt-in; the production worker keeps deterministic routing by default. Kimi Code
-remains a separate disabled capability until its executor and isolated Git-worktree
-sandbox are implemented and tested.
+There is no Slack or general tool integration yet. Kimi or MiniMax can independently
+provide conversational execution and manager analysis. Manager analysis is opt-in; the
+production worker keeps deterministic routing by default. The Codex CLI coding adapter
+is also opt-in and targets one operator-configured repository. Kimi Code remains a
+separate disabled provider until its CLI runner is implemented and tested.
+
+## Coding agent and GitHub review workflow
+
+The `coding-pull-request` capability implements the first real agent workflow. It fetches
+the configured base branch, creates an isolated worktree and `assistant/task-...` branch,
+runs Codex with workspace-only write access, validates and commits the result, pushes the
+branch, and opens a draft pull request. The task then pauses in `waiting_for_approval`.
+
+Merge is intentionally not a manager capability. After human review and marking the PR
+ready, `POST /tasks/{task_id}/pull-request-approval` requires the exact reviewed head SHA
+and a separate `X-Assistant-Approval-Token`, then asks GitHub to merge. A changed SHA,
+draft PR, closed PR, failed protection rule, or missing credential leaves the task
+unmerged. Configuration and examples are in
+[`docs/coding-pull-request-workflow.md`](docs/coding-pull-request-workflow.md).
 
 ## Optional manager-model analysis
 

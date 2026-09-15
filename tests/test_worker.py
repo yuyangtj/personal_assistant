@@ -9,13 +9,19 @@ import pytest
 from app.capabilities import CapabilityRegistry
 from app.config import Settings
 from app.domain.enums import TaskStatus
+from app.execution.base import ExecutionResult
 from app.execution.fake import FakeExecutor
 from app.integrations.fallback import FallbackChatClient, FallbackManagerModelClient
 from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
 from app.manager.model import ScriptedManagerModelClient, ValidatedManagerModelAdapter
 from app.persistence.database import Database
 from app.service import TaskService
-from app.worker import TaskWorker, build_conversation_executor, build_manager
+from app.worker import (
+    TaskWorker,
+    build_coding_executor,
+    build_conversation_executor,
+    build_manager,
+)
 
 
 def make_worker(
@@ -183,6 +189,37 @@ def test_runtime_manager_rejects_unknown_provider() -> None:
             Settings(manager_model_enabled=True, manager_model_provider="unknown"),
             registry,
         )
+
+
+def test_runtime_coding_agent_is_opt_in_and_requires_scoped_configuration() -> None:
+    assert build_coding_executor(Settings()) is None
+
+    with pytest.raises(ValueError, match="ASSISTANT_CODE_REPOSITORY_PATH"):
+        build_coding_executor(Settings(code_agent_enabled=True))
+
+
+def test_runtime_builds_configured_coding_pull_request_executor(tmp_path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    executor = build_coding_executor(
+        Settings(
+            code_agent_enabled=True,
+            code_repository_path=repository,
+            code_worktree_root=tmp_path / "worktrees",
+            code_agent_executable="/opt/codex",
+            code_agent_model="coding-model",
+            github_token="github-test",
+            github_repository="acme/widget",
+            github_base_branch="develop",
+        )
+    )
+
+    assert executor is not None
+    assert executor.repository_path == repository
+    assert executor.base_branch == "develop"
+    assert executor.agent.executable == "/opt/codex"
+    assert executor.agent.model == "coding-model"
+    executor.github.close()
 
 
 def test_worker_completes_task_and_records_ordered_events(service: TaskService) -> None:
@@ -382,3 +419,41 @@ def test_worker_records_final_analysis_failure_without_raw_output(
     assert failure.payload["attempts"] == 2
     assert failure.payload["reason"] == "response was not valid JSON"
     assert "secret malformed output" not in str(failure.payload)
+
+
+def test_worker_pauses_coding_task_for_pull_request_merge_approval(
+    service: TaskService,
+) -> None:
+    class ApprovalExecutor:
+        id = "coding-pull-request"
+
+        def execute(self, **_kwargs) -> ExecutionResult:
+            return ExecutionResult(
+                output={
+                    "summary": "Implemented the change",
+                    "artifacts": [{"type": "github_pull_request", "number": 17}],
+                    "approval_request": {
+                        "type": "github_pull_request_merge",
+                        "repository": "acme/widget",
+                        "number": 17,
+                        "url": "https://github.com/acme/widget/pull/17",
+                        "expected_head_sha": "a" * 40,
+                        "draft": True,
+                    },
+                }
+            )
+
+    task = service.create_task(
+        request="Implement a feature",
+        required_capabilities=["pull_request_creation"],
+    )
+    worker = make_worker(
+        service,
+        executors={"coding-pull-request": ApprovalExecutor()},  # type: ignore[dict-item]
+    )
+
+    assert worker.run_once() is True
+    assert service.get_task(task.id).status == TaskStatus.WAITING_FOR_APPROVAL.value
+    event_types = [event.event_type for event in service.list_events(task.id)]
+    assert event_types[-2:] == ["ARTIFACT_CREATED", "APPROVAL_REQUESTED"]
+    assert "TASK_COMPLETED" not in event_types

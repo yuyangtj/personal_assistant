@@ -32,6 +32,19 @@ class Settings:
     gemini_tts_voice: str = "Achird"
     gemini_tts_timeout_seconds: float = 30.0
     gemini_tts_cache_entries: int = 128
+    code_agent_enabled: bool = False
+    code_repository_path: Path | None = None
+    code_worktree_root: Path = Path("/tmp/personal-assistant-worktrees")
+    code_agent_executable: str = "codex"
+    code_agent_model: str | None = None
+    code_agent_timeout_seconds: int = 1800
+    github_token: str | None = None
+    github_api_base_url: str = "https://api.github.com"
+    github_repository: str | None = None
+    github_base_branch: str = "main"
+    github_remote: str = "origin"
+    github_draft_pull_requests: bool = True
+    approval_token: str | None = None
     conversation_model_provider: str = "kimi"
     conversation_model_fallback_provider: str | None = "auto"
     conversation_model_base_url: str | None = None
@@ -130,6 +143,45 @@ class Settings:
                     str(defaults.gemini_tts_cache_entries),
                 )
             ),
+            code_agent_enabled=_as_bool(
+                os.getenv("ASSISTANT_CODE_AGENT_ENABLED", str(defaults.code_agent_enabled))
+            ),
+            code_repository_path=(
+                Path(value).expanduser()
+                if (value := os.getenv("ASSISTANT_CODE_REPOSITORY_PATH"))
+                else None
+            ),
+            code_worktree_root=Path(
+                os.getenv("ASSISTANT_CODE_WORKTREE_ROOT", str(defaults.code_worktree_root))
+            ).expanduser(),
+            code_agent_executable=os.getenv(
+                "ASSISTANT_CODE_AGENT_EXECUTABLE", defaults.code_agent_executable
+            ),
+            code_agent_model=os.getenv("ASSISTANT_CODE_AGENT_MODEL") or None,
+            code_agent_timeout_seconds=int(
+                os.getenv(
+                    "ASSISTANT_CODE_AGENT_TIMEOUT_SECONDS",
+                    str(defaults.code_agent_timeout_seconds),
+                )
+            ),
+            github_token=os.getenv("ASSISTANT_GITHUB_TOKEN")
+            or os.getenv("GITHUB_TOKEN")
+            or None,
+            github_api_base_url=os.getenv(
+                "ASSISTANT_GITHUB_API_BASE_URL", defaults.github_api_base_url
+            ),
+            github_repository=os.getenv("ASSISTANT_GITHUB_REPOSITORY") or None,
+            github_base_branch=os.getenv(
+                "ASSISTANT_GITHUB_BASE_BRANCH", defaults.github_base_branch
+            ),
+            github_remote=os.getenv("ASSISTANT_GITHUB_REMOTE", defaults.github_remote),
+            github_draft_pull_requests=_as_bool(
+                os.getenv(
+                    "ASSISTANT_GITHUB_DRAFT_PULL_REQUESTS",
+                    str(defaults.github_draft_pull_requests),
+                )
+            ),
+            approval_token=os.getenv("ASSISTANT_APPROVAL_TOKEN") or None,
             conversation_model_provider=os.getenv(
                 "ASSISTANT_CONVERSATION_MODEL_PROVIDER",
                 defaults.conversation_model_provider,

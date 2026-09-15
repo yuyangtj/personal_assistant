@@ -127,9 +127,10 @@ def test_validated_adapter_returns_analysis_and_usage() -> None:
     assert client.requests[0].response_schema["properties"]["required_capabilities"][
         "items"
     ]["enum"] == [
-        "coding",
-        "conversation",
-        "repository_analysis",
+            "coding",
+            "conversation",
+            "pull_request_creation",
+            "repository_analysis",
         "shell_execution",
         "task_execution",
         "testing",

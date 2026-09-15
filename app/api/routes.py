@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -13,6 +14,7 @@ from app.api.schemas import (
     EventListResponse,
     EventResponse,
     HealthResponse,
+    PullRequestApprovalRequest,
     SpeechRequest,
     TaskListResponse,
     TaskResponse,
@@ -20,7 +22,13 @@ from app.api.schemas import (
 from app.capabilities.models import CapabilityKind
 from app.domain.enums import TaskStatus
 from app.integrations.chat import ProviderError
-from app.service import TaskNotFoundError, TaskService
+from app.integrations.github import GitHubError
+from app.service import (
+    ApprovalConflictError,
+    ApprovalNotFoundError,
+    TaskNotFoundError,
+    TaskService,
+)
 
 router = APIRouter()
 
@@ -52,6 +60,121 @@ def synthesize_speech(body: SpeechRequest, request: Request) -> Response:
             "X-Speech-Cache": "hit" if result.cache_hit else "miss",
         },
     )
+
+
+@router.post(
+    "/tasks/{task_id}/pull-request-approval",
+    response_model=TaskResponse,
+)
+def decide_pull_request_approval(
+    task_id: str,
+    body: PullRequestApprovalRequest,
+    request: Request,
+) -> TaskResponse:
+    configured_token = request.app.state.approval_token
+    supplied_token = request.headers.get("X-Assistant-Approval-Token")
+    if not configured_token:
+        raise HTTPException(status_code=503, detail="Approval authorization is not configured")
+    if not supplied_token or not hmac.compare_digest(supplied_token, configured_token):
+        raise HTTPException(status_code=401, detail="Invalid approval authorization")
+    service = _service(request)
+    if body.decision == "reject":
+        try:
+            return TaskResponse.from_model(service.reject_approval(task_id))
+        except TaskNotFoundError as error:
+            raise HTTPException(status_code=404, detail="Task not found") from error
+        except ApprovalNotFoundError as error:
+            raise HTTPException(
+                status_code=404,
+                detail="Pull request approval not found",
+            ) from error
+        except ApprovalConflictError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    if not body.expected_head_sha:
+        raise HTTPException(status_code=422, detail="expected_head_sha is required for approval")
+    github = request.app.state.github_client
+    if github is None:
+        raise HTTPException(status_code=503, detail="GitHub integration is not configured")
+    try:
+        approval = service.begin_pull_request_approval(
+            task_id,
+            expected_head_sha=body.expected_head_sha,
+        )
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+    except ApprovalNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Pull request approval not found") from error
+    except ApprovalConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    try:
+        repository = str(approval["repository"])
+        number = int(approval["number"])
+        execution_id = str(approval["execution_id"])
+        pull_request = github.get_pull_request(repository=repository, number=number)
+        if pull_request.head_sha != body.expected_head_sha:
+            service.return_to_pull_request_approval(
+                task_id,
+                reason="pull_request_head_changed",
+                replacement_head_sha=pull_request.head_sha,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail="Pull request changed; review the new head SHA before approving",
+            )
+        if pull_request.merged:
+            return TaskResponse.from_model(
+                service.complete_pull_request_merge(
+                    task_id,
+                    execution_id=execution_id,
+                    repository=repository,
+                    number=number,
+                    url=pull_request.url,
+                    merge_sha=pull_request.merge_commit_sha,
+                )
+            )
+        if pull_request.state != "open" or pull_request.draft:
+            reason = "pull_request_is_draft" if pull_request.draft else "pull_request_is_not_open"
+            service.return_to_pull_request_approval(task_id, reason=reason)
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Mark the pull request ready for review before approving merge"
+                    if pull_request.draft
+                    else "Pull request is not open"
+                ),
+            )
+        service.record_pull_request_merge_call(
+            task_id,
+            repository=repository,
+            number=number,
+        )
+        result = github.merge_pull_request(
+            repository=repository,
+            number=number,
+            expected_head_sha=body.expected_head_sha,
+            method=body.merge_method,
+            commit_title=f"Merge assistant task {task_id[:12]}",
+        )
+        if not result.merged:
+            service.return_to_pull_request_approval(task_id, reason="github_declined_merge")
+            raise HTTPException(status_code=409, detail="GitHub did not merge the pull request")
+        return TaskResponse.from_model(
+            service.complete_pull_request_merge(
+                task_id,
+                execution_id=execution_id,
+                repository=repository,
+                number=number,
+                url=pull_request.url,
+                merge_sha=result.sha,
+            )
+        )
+    except HTTPException:
+        raise
+    except (GitHubError, KeyError, TypeError, ValueError) as error:
+        service.return_to_pull_request_approval(task_id, reason="github_request_failed")
+        raise HTTPException(status_code=502, detail="GitHub operation failed") from error
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)

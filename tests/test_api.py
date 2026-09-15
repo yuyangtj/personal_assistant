@@ -1,6 +1,9 @@
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app.integrations.github import GitHubMergeResult, GitHubPullRequest
 from app.integrations.speech import SpeechAudio
+from app.persistence.models import ExecutionModel
 
 
 def test_create_get_list_and_cancel_task(client: TestClient) -> None:
@@ -104,16 +107,19 @@ def test_capabilities_include_enabled_and_planned_adapters(client: TestClient) -
     assert response.status_code == 200
     capabilities = response.json()["capabilities"]
     assert [capability["id"] for capability in capabilities] == [
+        "coding-pull-request",
         "fake-executor",
         "kimi-code",
         "model-conversation",
     ]
     assert capabilities[0]["availability"]["enabled"] is True
-    assert capabilities[1]["availability"]["enabled"] is False
-    assert capabilities[2]["availability"]["enabled"] is True
+    assert capabilities[1]["availability"]["enabled"] is True
+    assert capabilities[2]["availability"]["enabled"] is False
+    assert capabilities[3]["availability"]["enabled"] is True
 
     enabled = client.get("/capabilities", params={"include_disabled": False}).json()
     assert [capability["id"] for capability in enabled["capabilities"]] == [
+        "coding-pull-request",
         "fake-executor",
         "model-conversation",
     ]
@@ -141,3 +147,208 @@ def test_task_rejects_invalid_capability_requirements(client: TestClient) -> Non
     )
     assert response.status_code == 422
     assert "Invalid required capability identifiers" in response.json()["detail"]
+
+
+def _pending_pull_request_task(client: TestClient, *, draft: bool = False) -> tuple[str, str]:
+    client.app.state.approval_token = "approval-secret"
+    service = client.app.state.task_service
+    task = service.create_task(
+        request="Implement a reviewed change",
+        required_capabilities=["pull_request_creation"],
+    )
+    service.claim_next_task(worker_id="test-worker", lease_seconds=30)
+    execution_id = service.start_execution(
+        task.id,
+        capability_id="coding-pull-request",
+        executor_id="coding-pull-request",
+        execution_input={"request": task.original_request},
+    )
+    assert execution_id is not None
+    service.start_validation(task.id, execution_id, output={"summary": "Implemented"})
+    service.request_approval(
+        task.id,
+        execution_id,
+        artifacts=[{"type": "github_pull_request", "number": 17}],
+        approval={
+            "type": "github_pull_request_merge",
+            "repository": "acme/widget",
+            "number": 17,
+            "url": "https://github.com/acme/widget/pull/17",
+            "expected_head_sha": "a" * 40,
+            "draft": draft,
+        },
+    )
+    return task.id, execution_id
+
+
+def test_pull_request_merge_requires_reviewed_sha_and_completes_task(
+    client: TestClient,
+) -> None:
+    task_id, _ = _pending_pull_request_task(client)
+
+    class GitHub:
+        def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
+            return GitHubPullRequest(
+                repository="acme/widget",
+                number=17,
+                url="https://github.com/acme/widget/pull/17",
+                head_branch="assistant/task-123",
+                head_sha="a" * 40,
+                base_branch="main",
+                state="open",
+                draft=False,
+                merged=False,
+            )
+
+        def merge_pull_request(self, **kwargs) -> GitHubMergeResult:
+            assert kwargs["expected_head_sha"] == "a" * 40
+            assert kwargs["method"] == "squash"
+            return GitHubMergeResult(merged=True, sha="b" * 40, message="merged")
+
+    client.app.state.github_client = GitHub()
+    response = client.post(
+        f"/tasks/{task_id}/pull-request-approval",
+        headers={"X-Assistant-Approval-Token": "approval-secret"},
+        json={
+            "decision": "approve",
+            "expected_head_sha": "a" * 40,
+            "merge_method": "squash",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    events = client.get(f"/tasks/{task_id}/events").json()["events"]
+    event_types = [event["event_type"] for event in events]
+    assert "APPROVAL_GRANTED" in event_types
+    assert "TOOL_CALLED" in event_types
+    assert event_types[-1] == "TASK_COMPLETED"
+
+
+def test_pull_request_approval_requires_separate_authorization(client: TestClient) -> None:
+    task_id, _ = _pending_pull_request_task(client)
+
+    response = client.post(
+        f"/tasks/{task_id}/pull-request-approval",
+        json={"decision": "reject"},
+    )
+
+    assert response.status_code == 401
+    assert client.get(f"/tasks/{task_id}").json()["status"] == "waiting_for_approval"
+
+
+def test_pull_request_merge_rejects_stale_review_without_calling_github(
+    client: TestClient,
+) -> None:
+    task_id, _ = _pending_pull_request_task(client)
+
+    class GitHub:
+        def get_pull_request(self, **_kwargs):
+            raise AssertionError("GitHub must not be called for an unrecognized reviewed SHA")
+
+    client.app.state.github_client = GitHub()
+
+    response = client.post(
+        f"/tasks/{task_id}/pull-request-approval",
+        headers={"X-Assistant-Approval-Token": "approval-secret"},
+        json={"decision": "approve", "expected_head_sha": "c" * 40},
+    )
+
+    assert response.status_code == 409
+    assert client.get(f"/tasks/{task_id}").json()["status"] == "waiting_for_approval"
+
+
+def test_pull_request_merge_refreshes_approval_when_remote_head_changed(
+    client: TestClient,
+) -> None:
+    task_id, _ = _pending_pull_request_task(client)
+
+    class GitHub:
+        def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
+            return GitHubPullRequest(
+                repository="acme/widget",
+                number=17,
+                url="https://github.com/acme/widget/pull/17",
+                head_branch="assistant/task-123",
+                head_sha="d" * 40,
+                base_branch="main",
+                state="open",
+                draft=False,
+                merged=False,
+            )
+
+        def merge_pull_request(self, **_kwargs):
+            raise AssertionError("A changed pull request must require fresh approval")
+
+    client.app.state.github_client = GitHub()
+    response = client.post(
+        f"/tasks/{task_id}/pull-request-approval",
+        headers={"X-Assistant-Approval-Token": "approval-secret"},
+        json={"decision": "approve", "expected_head_sha": "a" * 40},
+    )
+
+    assert response.status_code == 409
+    assert client.get(f"/tasks/{task_id}").json()["status"] == "waiting_for_approval"
+    events = client.get(f"/tasks/{task_id}/events").json()["events"]
+    approvals = [
+        event for event in events if event["event_type"] == "APPROVAL_REQUESTED"
+    ]
+    assert len(approvals) == 2
+    assert approvals[-1]["payload"]["expected_head_sha"] == "d" * 40
+
+
+def test_pull_request_merge_refuses_draft_and_reopens_approval(client: TestClient) -> None:
+    task_id, _ = _pending_pull_request_task(client, draft=True)
+
+    class GitHub:
+        def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
+            return GitHubPullRequest(
+                repository="acme/widget",
+                number=17,
+                url="https://github.com/acme/widget/pull/17",
+                head_branch="assistant/task-123",
+                head_sha="a" * 40,
+                base_branch="main",
+                state="open",
+                draft=True,
+                merged=False,
+            )
+
+        def merge_pull_request(self, **_kwargs):
+            raise AssertionError("Draft pull requests must not be merged")
+
+    client.app.state.github_client = GitHub()
+    response = client.post(
+        f"/tasks/{task_id}/pull-request-approval",
+        headers={"X-Assistant-Approval-Token": "approval-secret"},
+        json={"decision": "approve", "expected_head_sha": "a" * 40},
+    )
+
+    assert response.status_code == 409
+    assert "ready for review" in response.json()["detail"]
+    assert client.get(f"/tasks/{task_id}").json()["status"] == "waiting_for_approval"
+
+
+def test_pull_request_rejection_leaves_pr_unmerged_and_cancels_task(
+    client: TestClient,
+) -> None:
+    task_id, execution_id = _pending_pull_request_task(client)
+
+    response = client.post(
+        f"/tasks/{task_id}/pull-request-approval",
+        headers={"X-Assistant-Approval-Token": "approval-secret"},
+        json={"decision": "reject"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    events = client.get(f"/tasks/{task_id}/events").json()["events"]
+    assert events[-3]["event_type"] == "APPROVAL_REJECTED"
+    assert events[-1]["event_type"] == "TASK_CANCELLED"
+    with client.app.state.database.session() as session:
+        execution = session.scalar(
+            select(ExecutionModel).where(ExecutionModel.id == execution_id)
+        )
+        assert execution is not None
+        assert execution.status == "cancelled"
+        assert execution.completed_at is not None

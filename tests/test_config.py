@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.config import Settings
 
 
@@ -14,6 +16,19 @@ def test_manager_model_settings_are_loaded_from_environment(monkeypatch) -> None
     monkeypatch.setenv("ASSISTANT_GEMINI_TTS_VOICE", "Charon")
     monkeypatch.setenv("ASSISTANT_GEMINI_TTS_TIMEOUT_SECONDS", "21")
     monkeypatch.setenv("ASSISTANT_GEMINI_TTS_CACHE_ENTRIES", "64")
+    monkeypatch.setenv("ASSISTANT_CODE_AGENT_ENABLED", "true")
+    monkeypatch.setenv("ASSISTANT_CODE_REPOSITORY_PATH", "/srv/repositories/widget")
+    monkeypatch.setenv("ASSISTANT_CODE_WORKTREE_ROOT", "/srv/worktrees")
+    monkeypatch.setenv("ASSISTANT_CODE_AGENT_EXECUTABLE", "/usr/local/bin/codex")
+    monkeypatch.setenv("ASSISTANT_CODE_AGENT_MODEL", "coding-model")
+    monkeypatch.setenv("ASSISTANT_CODE_AGENT_TIMEOUT_SECONDS", "900")
+    monkeypatch.setenv("GITHUB_TOKEN", "github-test")
+    monkeypatch.setenv("ASSISTANT_GITHUB_API_BASE_URL", "https://github.example/api/v3")
+    monkeypatch.setenv("ASSISTANT_GITHUB_REPOSITORY", "acme/widget")
+    monkeypatch.setenv("ASSISTANT_GITHUB_BASE_BRANCH", "develop")
+    monkeypatch.setenv("ASSISTANT_GITHUB_REMOTE", "upstream")
+    monkeypatch.setenv("ASSISTANT_GITHUB_DRAFT_PULL_REQUESTS", "false")
+    monkeypatch.setenv("ASSISTANT_APPROVAL_TOKEN", "approval-secret")
     monkeypatch.setenv("ASSISTANT_CONVERSATION_MODEL_PROVIDER", "minimax")
     monkeypatch.setenv("ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER", "kimi")
     monkeypatch.setenv("ASSISTANT_CONVERSATION_MODEL_BASE_URL", "https://chat.example/v1")
@@ -39,6 +54,19 @@ def test_manager_model_settings_are_loaded_from_environment(monkeypatch) -> None
     assert settings.gemini_tts_voice == "Charon"
     assert settings.gemini_tts_timeout_seconds == 21
     assert settings.gemini_tts_cache_entries == 64
+    assert settings.code_agent_enabled is True
+    assert settings.code_repository_path == Path("/srv/repositories/widget")
+    assert settings.code_worktree_root == Path("/srv/worktrees")
+    assert settings.code_agent_executable == "/usr/local/bin/codex"
+    assert settings.code_agent_model == "coding-model"
+    assert settings.code_agent_timeout_seconds == 900
+    assert settings.github_token == "github-test"
+    assert settings.github_api_base_url == "https://github.example/api/v3"
+    assert settings.github_repository == "acme/widget"
+    assert settings.github_base_branch == "develop"
+    assert settings.github_remote == "upstream"
+    assert settings.github_draft_pull_requests is False
+    assert settings.approval_token == "approval-secret"
     assert settings.conversation_model_provider == "minimax"
     assert settings.conversation_model_fallback_provider == "kimi"
     assert settings.conversation_model_base_url == "https://chat.example/v1"

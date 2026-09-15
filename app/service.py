@@ -37,6 +37,14 @@ class ExecutionNotFoundError(LookupError):
     pass
 
 
+class ApprovalNotFoundError(LookupError):
+    pass
+
+
+class ApprovalConflictError(ValueError):
+    pass
+
+
 class TaskService:
     def __init__(self, database: Database):
         self.database = database
@@ -320,6 +328,264 @@ class TaskService:
                 {"execution_id": execution_id},
             )
             return True
+
+    def request_approval(
+        self,
+        task_id: str,
+        execution_id: str,
+        *,
+        artifacts: list[dict[str, Any]],
+        approval: dict[str, Any],
+    ) -> TaskModel:
+        """Persists review artifacts and pauses the task before a destructive action."""
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            execution = self._require_execution(session, execution_id)
+            if execution.task_id != task.id:
+                raise ExecutionNotFoundError(execution_id)
+            ensure_transition(task.status, TaskStatus.WAITING_FOR_APPROVAL)
+            for artifact in artifacts:
+                TaskRepository.append_event(session, task, EventType.ARTIFACT_CREATED, artifact)
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.APPROVAL_REQUESTED,
+                {**approval, "execution_id": execution_id},
+            )
+            task.status = TaskStatus.WAITING_FOR_APPROVAL.value
+            task.claimed_by = None
+            task.lease_expires_at = None
+            return task
+
+    def begin_pull_request_approval(
+        self,
+        task_id: str,
+        *,
+        expected_head_sha: str,
+    ) -> dict[str, Any]:
+        """Atomically claims a pending PR merge approval and returns its trusted payload."""
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            if TaskStatus(task.status) != TaskStatus.WAITING_FOR_APPROVAL:
+                raise ApprovalConflictError("Task is not waiting for approval")
+            approval = session.scalar(
+                select(TaskEventModel)
+                .where(TaskEventModel.task_id == task.id)
+                .where(TaskEventModel.event_type == EventType.APPROVAL_REQUESTED.value)
+                .order_by(TaskEventModel.sequence.desc())
+                .limit(1)
+            )
+            if approval is None or approval.payload.get("type") != "github_pull_request_merge":
+                raise ApprovalNotFoundError(task_id)
+            if approval.payload.get("expected_head_sha") != expected_head_sha:
+                raise ApprovalConflictError("Reviewed head SHA does not match the pending approval")
+            ensure_transition(task.status, TaskStatus.EXECUTING)
+            task.status = TaskStatus.EXECUTING.value
+            task.claimed_by = "approval-api"
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.APPROVAL_GRANTED,
+                {
+                    "type": "github_pull_request_merge",
+                    "expected_head_sha": expected_head_sha,
+                },
+            )
+            return dict(approval.payload)
+
+    def return_to_pull_request_approval(
+        self,
+        task_id: str,
+        *,
+        reason: str,
+        replacement_head_sha: str | None = None,
+    ) -> None:
+        """Re-opens the gate after a safe preflight or GitHub failure."""
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            if TaskStatus(task.status) != TaskStatus.EXECUTING:
+                return
+            ensure_transition(task.status, TaskStatus.WAITING)
+            task.status = TaskStatus.WAITING.value
+            ensure_transition(task.status, TaskStatus.WAITING_FOR_APPROVAL)
+            task.status = TaskStatus.WAITING_FOR_APPROVAL.value
+            task.claimed_by = None
+            task.lease_expires_at = None
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.TOOL_RESULT_RECEIVED,
+                {
+                    "tool": "github",
+                    "operation": "merge_pull_request",
+                    "ok": False,
+                    "reason": reason,
+                },
+            )
+            if replacement_head_sha:
+                previous = session.scalar(
+                    select(TaskEventModel)
+                    .where(TaskEventModel.task_id == task.id)
+                    .where(TaskEventModel.event_type == EventType.APPROVAL_REQUESTED.value)
+                    .order_by(TaskEventModel.sequence.desc())
+                    .limit(1)
+                )
+                if previous is not None:
+                    refreshed = dict(previous.payload)
+                    refreshed["expected_head_sha"] = replacement_head_sha
+                    refreshed["reason"] = (
+                        "Pull request head changed; review the new commit before approval"
+                    )
+                    TaskRepository.append_event(
+                        session,
+                        task,
+                        EventType.APPROVAL_REQUESTED,
+                        refreshed,
+                    )
+
+    def record_pull_request_merge_call(self, task_id: str, *, repository: str, number: int) -> None:
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            if TaskStatus(task.status) != TaskStatus.EXECUTING:
+                raise ApprovalConflictError("Approval is no longer active")
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.TOOL_CALLED,
+                {
+                    "tool": "github",
+                    "operation": "merge_pull_request",
+                    "repository": repository,
+                    "number": number,
+                },
+            )
+
+    def complete_pull_request_merge(
+        self,
+        task_id: str,
+        *,
+        execution_id: str,
+        repository: str,
+        number: int,
+        url: str,
+        merge_sha: str | None,
+    ) -> TaskModel:
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            execution = self._require_execution(session, execution_id)
+            if execution.task_id != task.id:
+                raise ExecutionNotFoundError(execution_id)
+            if TaskStatus(task.status) != TaskStatus.EXECUTING:
+                raise ApprovalConflictError("Approval is no longer active")
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.TOOL_RESULT_RECEIVED,
+                {
+                    "tool": "github",
+                    "operation": "merge_pull_request",
+                    "ok": True,
+                    "merge_sha": merge_sha,
+                },
+            )
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.ARTIFACT_CREATED,
+                {
+                    "type": "github_pull_request_merge",
+                    "repository": repository,
+                    "number": number,
+                    "url": url,
+                    "merge_sha": merge_sha,
+                },
+            )
+            ensure_transition(task.status, TaskStatus.VALIDATING)
+            task.status = TaskStatus.VALIDATING.value
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.VALIDATION_SUCCEEDED,
+                {"execution_id": execution_id, "approved_action": "github_pull_request_merge"},
+            )
+            ensure_transition(task.status, TaskStatus.COMPLETED)
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.ASSISTANT_REPLY,
+                _reply_payload(
+                    f"Pull request #{number} was merged successfully.",
+                    emotion="Warm",
+                    intensity=0.7,
+                    outcome="completed",
+                ),
+            )
+            task.status = TaskStatus.COMPLETED.value
+            task.claimed_by = None
+            task.lease_expires_at = None
+            execution.status = ExecutionStatus.SUCCEEDED.value
+            execution.completed_at = datetime.now(UTC)
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.TASK_COMPLETED,
+                {"execution_id": execution_id},
+            )
+            return task
+
+    def reject_approval(self, task_id: str) -> TaskModel:
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            if TaskStatus(task.status) != TaskStatus.WAITING_FOR_APPROVAL:
+                raise ApprovalConflictError("Task is not waiting for approval")
+            approval = session.scalar(
+                select(TaskEventModel)
+                .where(TaskEventModel.task_id == task.id)
+                .where(TaskEventModel.event_type == EventType.APPROVAL_REQUESTED.value)
+                .order_by(TaskEventModel.sequence.desc())
+                .limit(1)
+            )
+            if approval is None or approval.payload.get("type") != "github_pull_request_merge":
+                raise ApprovalNotFoundError(task_id)
+            execution_id = approval.payload.get("execution_id")
+            if not isinstance(execution_id, str):
+                raise ApprovalNotFoundError(task_id)
+            execution = self._require_execution(session, execution_id)
+            if execution.task_id != task.id:
+                raise ExecutionNotFoundError(execution_id)
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.APPROVAL_REJECTED,
+                {
+                    "type": "github_pull_request_merge",
+                    "execution_id": execution_id,
+                },
+            )
+            ensure_transition(task.status, TaskStatus.CANCELLED)
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.ASSISTANT_REPLY,
+                _reply_payload(
+                    "Okay, I left the pull request unmerged.",
+                    emotion="Neutral",
+                    intensity=0.5,
+                    outcome="cancelled",
+                ),
+            )
+            task.cancel_requested = True
+            task.status = TaskStatus.CANCELLED.value
+            task.claimed_by = None
+            task.lease_expires_at = None
+            self._mark_execution_cancelled(execution)
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.TASK_CANCELLED,
+                {"previous_status": TaskStatus.WAITING_FOR_APPROVAL.value},
+            )
+            return task
 
     def complete_task(
         self,

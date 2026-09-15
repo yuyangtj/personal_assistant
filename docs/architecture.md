@@ -43,9 +43,15 @@ flowchart LR
     worker --> adapters{Adapter resolver}
     adapters --> fake[Fake executor enabled]
     adapters --> conversation[Conversation executor]
+    adapters --> coding[Coding PR executor opt-in]
     conversation --> chat{Preferred chat provider}
     chat -->|primary| kimichat[Kimi]
     chat -->|provider failure| minimaxchat[MiniMax fallback]
+    coding --> worktree[Isolated Git worktree]
+    worktree --> codex[Codex CLI]
+    codex --> pr[Draft GitHub pull request]
+    pr --> approval[Exact-SHA human approval]
+    approval --> merge[GitHub merge API]
     adapters -. later .-> kimi[Kimi Code disabled]
     adapters -. later .-> tools[Tool adapters]
 
@@ -60,7 +66,7 @@ flowchart LR
     classDef persistence fill:#dcfce7,stroke:#16a34a,color:#14532d
     classDef later fill:#f3e8ff,stroke:#9333ea,color:#3b0764,stroke-dasharray:5 5
     class client boundary
-    class api,service,worker,fake,conversation,chat,kimichat,minimaxchat,gemini,validation current
+    class api,service,worker,fake,conversation,chat,kimichat,minimaxchat,gemini,validation,coding,worktree,codex,pr,approval,merge current
     class manifests,registry,capapi,manager,adapters new
     class db persistence
     class kimi,tools later
@@ -78,6 +84,12 @@ Gemini is isolated from both model-selection paths. Only the API process receive
 `GEMINI_TTS_API_KEY`; `POST /speech` converts Gemini's raw 24 kHz PCM to WAV and keeps a
 bounded repeat-request cache. The Android client falls back to local TTS whenever this
 optional endpoint is unavailable.
+
+The coding workflow is a registered agent capability, while merge is deliberately
+outside manager routing. A code task publishes a draft PR and enters
+`waiting_for_approval`. The approval API binds consent to the recorded PR and its exact
+head SHA before invoking GitHub. GitHub branch protections remain an independent final
+gate.
 
 ## Manager-model boundary
 
