@@ -39,6 +39,17 @@ class PullRequestApprovalRequest(BaseModel):
     merge_method: Literal["merge", "squash", "rebase"] = "squash"
 
 
+class PendingApprovalResponse(BaseModel):
+    type: Literal["github_pull_request_merge"]
+    repository: str
+    number: int
+    url: str
+    expected_head_sha: str
+    draft: bool
+    execution_id: str
+    reason: str | None = None
+
+
 class TaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

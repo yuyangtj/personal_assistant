@@ -357,6 +357,22 @@ class TaskService:
             task.lease_expires_at = None
             return task
 
+    def get_pending_approval(self, task_id: str) -> dict[str, Any]:
+        with self.database.session() as session:
+            task = self._require_task(session, task_id)
+            if TaskStatus(task.status) != TaskStatus.WAITING_FOR_APPROVAL:
+                raise ApprovalNotFoundError(task_id)
+            approval = session.scalar(
+                select(TaskEventModel)
+                .where(TaskEventModel.task_id == task.id)
+                .where(TaskEventModel.event_type == EventType.APPROVAL_REQUESTED.value)
+                .order_by(TaskEventModel.sequence.desc())
+                .limit(1)
+            )
+            if approval is None:
+                raise ApprovalNotFoundError(task_id)
+            return dict(approval.payload)
+
     def begin_pull_request_approval(
         self,
         task_id: str,
