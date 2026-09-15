@@ -57,7 +57,11 @@ Inspect it using the returned ID:
 ```bash
 curl http://localhost:8000/tasks/TASK_ID
 curl http://localhost:8000/tasks/TASK_ID/events
+curl http://localhost:8000/tasks/TASK_ID/pending-approval
 ```
+
+The pending-approval endpoint returns the latest approval request while the task is
+waiting for approval, or `404` when no approval is pending.
 
 Inspect the capability registry:
 

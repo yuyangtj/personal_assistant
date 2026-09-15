@@ -181,6 +181,38 @@ def _pending_pull_request_task(client: TestClient, *, draft: bool = False) -> tu
     return task.id, execution_id
 
 
+def test_get_pending_approval_returns_latest_typed_payload(client: TestClient) -> None:
+    task_id, execution_id = _pending_pull_request_task(client)
+    service = client.app.state.task_service
+    service.begin_pull_request_approval(task_id, expected_head_sha="a" * 40)
+    service.return_to_pull_request_approval(
+        task_id,
+        reason="pull_request_head_changed",
+        replacement_head_sha="d" * 40,
+    )
+
+    response = client.get(f"/tasks/{task_id}/pending-approval")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "type": "github_pull_request_merge",
+        "repository": "acme/widget",
+        "number": 17,
+        "url": "https://github.com/acme/widget/pull/17",
+        "expected_head_sha": "d" * 40,
+        "draft": False,
+        "execution_id": execution_id,
+        "reason": "Pull request head changed; review the new commit before approval",
+    }
+
+
+def test_get_pending_approval_returns_404_when_none_is_pending(client: TestClient) -> None:
+    created = client.post("/tasks", json={"request": "No approval yet"}).json()
+
+    assert client.get(f"/tasks/{created['id']}/pending-approval").status_code == 404
+    assert client.get("/tasks/missing/pending-approval").status_code == 404
+
+
 def test_pull_request_merge_requires_reviewed_sha_and_completes_task(
     client: TestClient,
 ) -> None:

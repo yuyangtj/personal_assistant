@@ -14,6 +14,7 @@ from app.api.schemas import (
     EventListResponse,
     EventResponse,
     HealthResponse,
+    PendingApprovalResponse,
     PullRequestApprovalRequest,
     SpeechRequest,
     TaskListResponse,
@@ -201,6 +202,20 @@ def list_tasks(
 ) -> TaskListResponse:
     tasks = _service(request).list_tasks(status=task_status, limit=limit)
     return TaskListResponse(tasks=[TaskResponse.from_model(task) for task in tasks])
+
+
+@router.get(
+    "/tasks/{task_id}/pending-approval",
+    response_model=PendingApprovalResponse,
+)
+def get_pending_approval(task_id: str, request: Request) -> PendingApprovalResponse:
+    try:
+        approval = _service(request).get_pending_approval(task_id)
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+    except ApprovalNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Pending approval not found") from error
+    return PendingApprovalResponse.model_validate(approval)
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
