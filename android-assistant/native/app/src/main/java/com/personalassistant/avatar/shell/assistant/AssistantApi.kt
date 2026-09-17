@@ -13,7 +13,45 @@ import org.json.JSONObject
 /** One entry of a task's ordered event stream (`GET /tasks/{id}/events`). */
 data class TaskEvent(val sequence: Int, val type: String, val payload: JSONObject)
 
-class AssistantApiException(message: String, cause: Throwable? = null) : IOException(message, cause)
+/** A merge action that is paused until the user reviews the exact pull-request commit. */
+data class PendingPullRequestApproval(
+    val repository: String,
+    val number: Int,
+    val url: String,
+    val expectedHeadSha: String,
+    val draft: Boolean,
+) {
+    val shortSha: String get() = expectedHeadSha.take(10)
+
+    companion object {
+        fun fromJson(payload: JSONObject): PendingPullRequestApproval? {
+            if (payload.optString("type") != "github_pull_request_merge") return null
+            val repository = payload.optString("repository").trim()
+            val number = payload.optInt("number")
+            val url = payload.optString("url").trim()
+            val sha = payload.optString("expected_head_sha").trim()
+            val validSha = sha.length in setOf(40, 64) && sha.all { it in '0'..'9' || it in 'a'..'f' }
+            val validUrl = runCatching {
+                val parsed = URL(url)
+                parsed.protocol == "https" && parsed.host.equals("github.com", ignoreCase = true)
+            }.getOrDefault(false)
+            if (repository.isEmpty() || number <= 0 || !validUrl || !validSha) return null
+            return PendingPullRequestApproval(
+                repository = repository,
+                number = number,
+                url = url,
+                expectedHeadSha = sha,
+                draft = payload.optBoolean("draft", true),
+            )
+        }
+    }
+}
+
+class AssistantApiException(
+    message: String,
+    cause: Throwable? = null,
+    val statusCode: Int? = null,
+) : IOException(message, cause)
 
 /**
  * Minimal client for the Personal Assistant HTTP API. Blocking I/O runs on [Dispatchers.IO].
@@ -56,6 +94,15 @@ class AssistantApi(baseUrl: String, private val speechCacheDirectory: File) {
         }
     }
 
+    /** Returns the current typed approval, or null when this task is not at an approval gate. */
+    suspend fun pendingApproval(taskId: String): PendingPullRequestApproval? = try {
+        val payload = request("GET", "/tasks/$taskId/pending-approval")
+        PendingPullRequestApproval.fromJson(payload)
+            ?: throw AssistantApiException("Backend returned an invalid approval")
+    } catch (error: AssistantApiException) {
+        if (error.statusCode == 404) null else throw error
+    }
+
     /** Adds a note to the task's event stream, e.g. the outcome of a confirmed phone action. */
     suspend fun addMessage(taskId: String, message: String) {
         request("POST", "/tasks/$taskId/messages", JSONObject().put("message", message))
@@ -65,10 +112,31 @@ class AssistantApi(baseUrl: String, private val speechCacheDirectory: File) {
         request("POST", "/tasks/$taskId/cancel")
     }
 
+    /** Approves or rejects the exact pending PR. The secret is supplied only at call time. */
+    suspend fun decidePullRequestApproval(
+        taskId: String,
+        approvalToken: String,
+        approve: Boolean,
+        expectedHeadSha: String,
+    ) {
+        if (approvalToken.isBlank()) throw AssistantApiException("Approval token is not configured")
+        val body = JSONObject().put("decision", if (approve) "approve" else "reject")
+        if (approve) {
+            body.put("expected_head_sha", expectedHeadSha)
+            body.put("merge_method", "squash")
+        }
+        request(
+            method = "POST",
+            path = "/tasks/$taskId/pull-request-approval",
+            body = body,
+            headers = mapOf("X-Assistant-Approval-Token" to approvalToken),
+        )
+    }
+
     /** Downloads a cloud-generated WAV into app-private cache and returns its canonical path. */
     suspend fun speech(text: String, emotion: String): String = withContext(Dispatchers.IO) {
         if (text.length > MAX_SPEECH_CHARACTERS) {
-            throw@withContext AssistantApiException("Reply is too long for cloud speech")
+            throw AssistantApiException("Reply is too long for cloud speech")
         }
         val body = JSONObject().put("text", text).put("emotion", emotion)
         val connection = open("/speech")
@@ -105,7 +173,12 @@ class AssistantApi(baseUrl: String, private val speechCacheDirectory: File) {
         }
     }
 
-    private suspend fun request(method: String, path: String, body: JSONObject? = null): JSONObject =
+    private suspend fun request(
+        method: String,
+        path: String,
+        body: JSONObject? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): JSONObject =
         withContext(Dispatchers.IO) {
             val connection = open(path)
             try {
@@ -113,6 +186,7 @@ class AssistantApi(baseUrl: String, private val speechCacheDirectory: File) {
                 connection.connectTimeout = 4_000
                 connection.readTimeout = 8_000
                 connection.setRequestProperty("Accept", "application/json")
+                headers.forEach(connection::setRequestProperty)
                 if (body != null) {
                     connection.doOutput = true
                     connection.setRequestProperty("Content-Type", "application/json")
@@ -121,7 +195,16 @@ class AssistantApi(baseUrl: String, private val speechCacheDirectory: File) {
                 val code = connection.responseCode
                 val stream = if (code in 200..299) connection.inputStream else connection.errorStream
                 val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                if (code !in 200..299) throw AssistantApiException("HTTP $code for $method $path")
+                if (code !in 200..299) {
+                    val detail = runCatching { JSONObject(text).optString("detail") }
+                        .getOrNull()
+                        ?.takeIf { it.isNotBlank() }
+                        ?.take(240)
+                    throw AssistantApiException(
+                        detail ?: "HTTP $code for $method $path",
+                        statusCode = code,
+                    )
+                }
                 if (text.isBlank()) JSONObject() else JSONObject(text)
             } catch (error: AssistantApiException) {
                 throw error

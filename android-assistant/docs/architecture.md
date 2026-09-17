@@ -42,6 +42,8 @@ Compose text field ──send──▶ AssistantSession
                                │
    TASK_PLANNING_STARTED/PLAN ─┼─▶ AvatarCommand THINKING · CURIOUS
    EXECUTION_STARTED ──────────┼─▶ AvatarCommand THINKING · NEUTRAL
+   APPROVAL_REQUESTED ─────────┼─▶ Review card · exact SHA · open/approve/reject
+                               │       └─ runtime token encrypted by Android Keystore
    ASSISTANT_REPLY ────────────┼─▶ POST /speech ─▶ cached WAV ─▶ Unity playback + lip-sync
                                │       └─ unavailable/too long ─▶ Android TTS fallback
    TASK_COMPLETED/FAILED/CANCELLED ─▶ stop polling
@@ -60,8 +62,12 @@ MiloHost.onSpeechFinished ─────┴─▶ SUCCESS (handshake) / ERROR /
 - Unity reports speech start and finish back through `MiloHost.Listener`.
 - Settings choose the backend URL (default `http://127.0.0.1:8010` through
   `adb reverse`) and the character (`AvatarRuntime.SetCharacterName`).
-- A task times out after 90 s; six consecutive polling failures, or a failed
-  create call, produce a spoken local error.
+- A normal task times out after 90 s; a task that reaches `APPROVAL_REQUESTED` keeps polling
+  until approval/rejection produces a terminal event. Six consecutive polling failures, or
+  a failed create call, produce a spoken local error.
+- The active task ID and last handled event sequence are persisted. On process recreation,
+  `GET /tasks/{id}/pending-approval` restores the typed review card before event polling
+  resumes, so a long human review does not lose its exact-SHA approval gate.
 
 ## Avatar state contract
 
@@ -105,6 +111,7 @@ The assistant or language model may choose `mode`, `emotion`, and bounded
 | Microphone active | `LISTENING` | `CURIOUS` |
 | Task planning | `THINKING` | `CURIOUS` |
 | Task executing | `THINKING` | `NEUTRAL` |
+| Pull request awaiting review | `IDLE` | `CURIOUS` |
 | Speech playback | `SPEAKING` | Response metadata |
 | Task completed | `SUCCESS` | `WARM` |
 | Task failed | `ERROR` | `CONCERNED` |
@@ -115,6 +122,10 @@ The assistant or language model may choose `mode`, `emotion`, and bounded
   Android system integration.
 - Unity owns only visual presentation and audio-aligned avatar animation.
 - The backend owns task orchestration, tools, approvals, and persistent history.
+- GitHub credentials never enter Android. A separately scoped approval token is provisioned
+  at runtime, encrypted with an Android Keystore AES-GCM key, and sent only when the user
+  taps Approve or Reject. Remote backends must use HTTPS; cleartext is restricted to local
+  development hosts used through ADB reverse.
 - Speech recognition and synthesis are replaceable adapters.
 - Phone actions (timers, alarms, calendar drafts) are proposed by the backend,
   confirmed in native UI, and executed through public Android intents

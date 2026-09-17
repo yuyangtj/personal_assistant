@@ -34,6 +34,10 @@ for task orchestration; the Android application presents and controls it.
   credential-free device demo.
 - The assistant can set timers and alarms and draft calendar events on the phone.
   Each action runs only after the user confirms it (see below).
+- Coding tasks now surface a pull-request review card. The app opens the exact GitHub PR,
+  displays the reviewed commit SHA, and can approve or reject through the backend gate.
+  The approval token is entered at runtime and encrypted with Android Keystore; it is never
+  compiled into the APK or logged.
 
 ## Build sequence
 
@@ -46,7 +50,8 @@ for task orchestration; the Android application presents and controls it.
 7. ~~Add microphone and speech recognition.~~
 8. ~~Confirmed on-phone actions: timers, alarms, and calendar event drafts through public
    Android intents.~~
-9. Optionally expose the assistant as an Android AppFunction (for example
+9. ~~GitHub pull-request review and approval controls backed by exact-SHA verification.~~
+10. Optionally expose the assistant as an Android AppFunction (for example
    `askAssistant`), so approved system agents can call it. AppFunctions work in that
    direction only: calling other apps' functions requires the privileged
    `EXECUTE_APP_FUNCTIONS` permission, which ordinary apps cannot hold, and the
@@ -78,6 +83,36 @@ not hide a character or rig that fails the quality bar.
    adb reverse tcp:8010 tcp:8010
    adb shell am start -n com.personalassistant.avatar.shell/.MainActivity
    ```
+
+4. Open **Settings** in the app and paste `ASSISTANT_APPROVAL_TOKEN` into **Approval
+   token**, then tap **Save**. The value is encrypted using a non-exportable Android
+   Keystore key and stored only in app-private data. To copy the configured value on the
+   Mac without printing it:
+
+   ```shell
+   printf '%s' "$ASSISTANT_APPROVAL_TOKEN" | pbcopy
+   ```
+
+   Use the USB loopback above for local HTTP development. A backend reached over a network
+   must use HTTPS before provisioning this credential.
+
+### Pull-request approvals
+
+When a coding task creates a PR, polling no longer expires after 90 seconds. Instead, the
+app enters **Review needed** and shows the repository, PR number, exact commit SHA, and
+three controls. The active task ID and event cursor are persisted, and the typed
+`pending-approval` endpoint restores the card if Android recreates the app:
+
+- **Open GitHub** opens the validated `https://github.com/...` PR for review and for marking
+  a draft ready.
+- **Approve** sends the exact displayed SHA to the protected backend approval endpoint. The
+  backend checks the live PR state and refuses a draft, closed, or changed PR.
+- **Reject** cancels the task without merging; the PR and branch remain available for
+  inspection.
+
+The GitHub credential remains exclusively on the backend. The Android app holds only the
+separate approval credential, encrypted at rest, and sends it only to the configured
+assistant backend.
 
 ### Phone actions
 

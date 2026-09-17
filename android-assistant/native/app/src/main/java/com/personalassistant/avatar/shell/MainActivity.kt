@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.ViewGroup
@@ -22,6 +23,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.personalassistant.avatar.MiloHost
+import com.personalassistant.avatar.shell.assistant.ApprovalTokenStore
 import com.personalassistant.avatar.shell.assistant.AssistantSession
 import com.personalassistant.avatar.shell.assistant.PhoneActionRunner
 import com.personalassistant.avatar.shell.avatar.AvatarBridge
@@ -58,6 +60,9 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
             avatar = AvatarBridge(),
             preferences = getSharedPreferences("assistant", Context.MODE_PRIVATE),
             speechCacheDirectory = cacheDir,
+            approvalTokens = ApprovalTokenStore(
+                getSharedPreferences("assistant_secure", Context.MODE_PRIVATE),
+            ),
             runAction = PhoneActionRunner(this)::run,
         )
         voice = VoiceInput(this, object : VoiceInput.Listener {
@@ -94,6 +99,10 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
                         onMicrophone = ::toggleListening,
                         onConfirmAction = session::confirmAction,
                         onDismissAction = session::dismissAction,
+                        onOpenPullRequest = ::openPullRequest,
+                        onApprovePullRequest = session::approvePullRequest,
+                        onRejectPullRequest = session::rejectPullRequest,
+                        onApprovalToken = session::updateApprovalToken,
                     )
                 }
             }
@@ -127,6 +136,16 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
         } else {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MICROPHONE)
         }
+    }
+
+    private fun openPullRequest(url: String) {
+        val uri = Uri.parse(url)
+        if (uri.scheme != "https" || !uri.host.equals("github.com", ignoreCase = true)) {
+            session.onVoiceError("The pull request link is invalid.")
+            return
+        }
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+            .onFailure { session.onVoiceError("No browser can open the pull request.") }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

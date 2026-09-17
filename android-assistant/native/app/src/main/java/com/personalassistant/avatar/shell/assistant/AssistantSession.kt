@@ -19,7 +19,17 @@ import kotlinx.coroutines.launch
 
 enum class Connection { CHECKING, ONLINE, OFFLINE }
 
-enum class Activity { READY, LISTENING, SENDING, THINKING, SPEAKING, DONE, FAILED, CANCELLED }
+enum class Activity {
+    READY,
+    LISTENING,
+    SENDING,
+    THINKING,
+    WAITING_FOR_APPROVAL,
+    SPEAKING,
+    DONE,
+    FAILED,
+    CANCELLED,
+}
 
 data class UiState(
     val connection: Connection = Connection.CHECKING,
@@ -33,8 +43,16 @@ data class UiState(
     val voiceLevel: Float = 0f,
     val hint: String? = null,
     val pendingAction: PhoneAction? = null,
+    val pendingApproval: PendingPullRequestApproval? = null,
+    val approvalInFlight: Boolean = false,
+    val hasApprovalToken: Boolean = false,
 ) {
-    val isBusy: Boolean get() = activity == Activity.SENDING || activity == Activity.THINKING || activity == Activity.SPEAKING
+    val isBusy: Boolean
+        get() = activity == Activity.SENDING ||
+            activity == Activity.THINKING ||
+            activity == Activity.SPEAKING ||
+            pendingApproval != null ||
+            approvalInFlight
 }
 
 /**
@@ -46,6 +64,7 @@ class AssistantSession(
     private val avatar: AvatarBridge,
     private val preferences: SharedPreferences,
     private val speechCacheDirectory: File,
+    private val approvalTokens: ApprovalTokenStore,
     private val runAction: (PhoneAction) -> String?,
 ) {
     private val state = MutableStateFlow(
@@ -54,6 +73,7 @@ class AssistantSession(
             character = AvatarCharacter.entries.firstOrNull {
                 it.name == preferences.getString(KEY_CHARACTER, AvatarCharacter.COOL_MAN.name)
             } ?: AvatarCharacter.COOL_MAN,
+            hasApprovalToken = approvalTokens.hasToken(),
         ),
     )
     val uiState: StateFlow<UiState> = state.asStateFlow()
@@ -67,6 +87,7 @@ class AssistantSession(
 
     init {
         checkConnection()
+        restoreActiveTask()
     }
 
     fun checkConnection() {
@@ -106,6 +127,8 @@ class AssistantSession(
                 transcript = null,
                 hint = null,
                 pendingAction = null,
+                pendingApproval = null,
+                approvalInFlight = false,
             )
         }
         avatar.command(AvatarMode.THINKING, AvatarEmotion.CURIOUS, 0.6f)
@@ -119,6 +142,10 @@ class AssistantSession(
                 return@launch
             }
             Log.i(TAG, "NATIVE_TASK_CREATED: id=$taskId chars=${request.length}")
+            preferences.edit()
+                .putString(KEY_ACTIVE_TASK_ID, taskId)
+                .putInt(KEY_ACTIVE_TASK_SEQUENCE, 0)
+                .apply()
             state.update { it.copy(activity = Activity.THINKING, taskId = taskId, connection = Connection.ONLINE) }
             followEvents(taskId)
         }
@@ -232,11 +259,128 @@ class AssistantSession(
         }
     }
 
+    /** Saves a runtime-provisioned secret encrypted by Android Keystore, never in the APK. */
+    fun updateApprovalToken(token: String) {
+        if (token.isBlank()) {
+            approvalTokens.clear()
+            state.update {
+                it.copy(hasApprovalToken = false, hint = "Approval token removed from this device.")
+            }
+            return
+        }
+        runCatching { approvalTokens.save(token) }
+            .onSuccess {
+                state.update {
+                    it.copy(hasApprovalToken = true, hint = "Approval token stored securely.")
+                }
+            }
+            .onFailure { error ->
+                state.update { it.copy(hint = error.message ?: "Could not store approval token.") }
+            }
+    }
+
+    fun approvePullRequest() = decidePullRequest(approve = true)
+
+    fun rejectPullRequest() = decidePullRequest(approve = false)
+
+    private fun decidePullRequest(approve: Boolean) {
+        val approval = state.value.pendingApproval ?: return
+        val taskId = state.value.taskId ?: return
+        val token = approvalTokens.load()
+        if (token.isNullOrBlank()) {
+            state.update {
+                it.copy(hasApprovalToken = false, hint = "Add the approval token in Settings first.")
+            }
+            return
+        }
+        if (state.value.approvalInFlight) return
+        state.update {
+            it.copy(
+                approvalInFlight = true,
+                hint = if (approve) "Checking the reviewed commit with GitHub…" else "Rejecting merge…",
+            )
+        }
+        scope.launch {
+            try {
+                api.decidePullRequestApproval(
+                    taskId = taskId,
+                    approvalToken = token,
+                    approve = approve,
+                    expectedHeadSha = approval.expectedHeadSha,
+                )
+                state.update {
+                    it.copy(
+                        activity = Activity.THINKING,
+                        pendingApproval = null,
+                        approvalInFlight = false,
+                        hint = if (approve) "Merge approved. Confirming the result…" else "Merge rejected.",
+                    )
+                }
+                avatar.command(AvatarMode.THINKING, AvatarEmotion.NEUTRAL, 0.5f)
+            } catch (error: AssistantApiException) {
+                Log.w(TAG, "NATIVE_APPROVAL_FAILED: ${error.message}")
+                state.update {
+                    it.copy(
+                        activity = Activity.WAITING_FOR_APPROVAL,
+                        approvalInFlight = false,
+                        hint = error.message ?: "Approval failed. Review the pull request and try again.",
+                    )
+                }
+                avatar.command(AvatarMode.IDLE, AvatarEmotion.CONCERNED, 0.5f)
+            }
+        }
+    }
+
+    /** Restores a task and its approval card after activity or process recreation. */
+    private fun restoreActiveTask() {
+        val taskId = preferences.getString(KEY_ACTIVE_TASK_ID, null) ?: return
+        if (taskJob?.isActive == true) return
+        state.update { it.copy(activity = Activity.THINKING, taskId = taskId) }
+        taskJob = scope.launch {
+            runCatching { api.pendingApproval(taskId) }
+                .onSuccess { approval ->
+                    if (approval != null) showPendingApproval(approval)
+                }
+                .onFailure { error ->
+                    Log.i(TAG, "NATIVE_APPROVAL_RESTORE_DEFERRED: ${error.message}")
+                }
+            followEvents(taskId)
+        }
+    }
+
+    private fun showPendingApproval(approval: PendingPullRequestApproval) {
+        state.update {
+            it.copy(
+                activity = Activity.WAITING_FOR_APPROVAL,
+                reply = "Pull request #${approval.number} is waiting for your review.",
+                pendingApproval = approval,
+                approvalInFlight = false,
+                hint = if (approval.draft) {
+                    "Open GitHub, review the changes, and mark the PR ready before approving."
+                } else {
+                    "Review the exact commit before approving."
+                },
+            )
+        }
+        avatar.command(AvatarMode.IDLE, AvatarEmotion.CURIOUS, 0.5f)
+    }
+
+    private fun clearActiveTask() {
+        preferences.edit()
+            .remove(KEY_ACTIVE_TASK_ID)
+            .remove(KEY_ACTIVE_TASK_SEQUENCE)
+            .apply()
+    }
+
     private suspend fun followEvents(taskId: String) {
-        var lastSequence = 0
+        var lastSequence = preferences.getInt(KEY_ACTIVE_TASK_SEQUENCE, 0)
         val deadline = System.currentTimeMillis() + TASK_TIMEOUT_MS
         var consecutiveErrors = 0
-        while (System.currentTimeMillis() < deadline) {
+        var approvalObserved = state.value.pendingApproval != null
+        while (
+            System.currentTimeMillis() < deadline ||
+            approvalObserved
+        ) {
             val events = try {
                 api.events(taskId).also { consecutiveErrors = 0 }
             } catch (error: AssistantApiException) {
@@ -250,7 +394,13 @@ class AssistantSession(
             }
             for (event in events.filter { it.sequence > lastSequence }.sortedBy { it.sequence }) {
                 lastSequence = event.sequence
-                if (handleEvent(taskId, event)) return
+                if (event.type == "APPROVAL_REQUESTED") approvalObserved = true
+                val terminal = handleEvent(taskId, event)
+                preferences.edit().putInt(KEY_ACTIVE_TASK_SEQUENCE, lastSequence).apply()
+                if (terminal) {
+                    clearActiveTask()
+                    return
+                }
             }
             delay(POLL_INTERVAL_MS)
         }
@@ -264,11 +414,53 @@ class AssistantSession(
         when (event.type) {
             "TASK_PLANNING_STARTED", "PLAN_CREATED" -> avatar.command(AvatarMode.THINKING, AvatarEmotion.CURIOUS, 0.6f)
             "EXECUTION_STARTED" -> avatar.command(AvatarMode.THINKING, AvatarEmotion.NEUTRAL, 0.55f)
+            "APPROVAL_REQUESTED" -> {
+                val approval = PendingPullRequestApproval.fromJson(event.payload)
+                if (approval == null) {
+                    Log.w(TAG, "NATIVE_APPROVAL_INVALID: task=$taskId seq=${event.sequence}")
+                    return false
+                }
+                showPendingApproval(approval)
+            }
+            "APPROVAL_GRANTED", "TOOL_CALLED" -> {
+                state.update {
+                    it.copy(
+                        activity = Activity.THINKING,
+                        approvalInFlight = true,
+                    )
+                }
+                avatar.command(AvatarMode.THINKING, AvatarEmotion.NEUTRAL, 0.5f)
+            }
+            "TOOL_RESULT_RECEIVED" -> {
+                if (
+                    state.value.pendingApproval != null &&
+                    event.payload.optString("tool") == "github"
+                ) {
+                    val succeeded = event.payload.optBoolean("ok", false)
+                    state.update {
+                        it.copy(
+                            activity = if (succeeded) {
+                                Activity.THINKING
+                            } else {
+                                Activity.WAITING_FOR_APPROVAL
+                            },
+                            approvalInFlight = succeeded,
+                        )
+                    }
+                }
+            }
             "ASSISTANT_REPLY" -> {
                 val text = event.payload.optString("text")
                 pendingOutcome = event.payload.optString("outcome", "completed")
                 val action = PhoneAction.fromJson(event.payload.optJSONObject("action"))
-                state.update { it.copy(reply = text, pendingAction = action) }
+                state.update {
+                    it.copy(
+                        reply = text,
+                        pendingAction = action,
+                        pendingApproval = null,
+                        approvalInFlight = false,
+                    )
+                }
                 if (action != null) Log.i(TAG, "NATIVE_ACTION_PROPOSED: ${action.summary}")
                 if (text.isNotBlank()) {
                     val audioPath = try {
@@ -289,7 +481,12 @@ class AssistantSession(
                     Log.i(TAG, "NATIVE_REPLY_DELIVERED: task=$taskId outcome=$pendingOutcome chars=${text.length}")
                 }
             }
-            "TASK_COMPLETED", "TASK_FAILED", "TASK_CANCELLED" -> return true
+            "TASK_COMPLETED", "TASK_FAILED", "TASK_CANCELLED" -> {
+                state.update {
+                    it.copy(pendingApproval = null, approvalInFlight = false)
+                }
+                return true
+            }
         }
         return false
     }
@@ -305,6 +502,8 @@ class AssistantSession(
         private const val TAG = "MiloNative"
         private const val KEY_BACKEND_URL = "backend_url"
         private const val KEY_CHARACTER = "character"
+        private const val KEY_ACTIVE_TASK_ID = "active_task_id"
+        private const val KEY_ACTIVE_TASK_SEQUENCE = "active_task_sequence"
         private const val POLL_INTERVAL_MS = 500L
         private const val TASK_TIMEOUT_MS = 90_000L
         private const val MAX_REQUEST_CHARACTERS = 2_000

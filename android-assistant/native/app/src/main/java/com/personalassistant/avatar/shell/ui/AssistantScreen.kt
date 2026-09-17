@@ -50,9 +50,11 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.personalassistant.avatar.shell.assistant.Activity
 import com.personalassistant.avatar.shell.assistant.Connection
+import com.personalassistant.avatar.shell.assistant.PendingPullRequestApproval
 import com.personalassistant.avatar.shell.assistant.UiState
 import com.personalassistant.avatar.shell.avatar.AvatarCharacter
 
@@ -73,6 +75,10 @@ fun AssistantScreen(
     onMicrophone: () -> Unit,
     onConfirmAction: () -> Unit,
     onDismissAction: () -> Unit,
+    onOpenPullRequest: (String) -> Unit,
+    onApprovePullRequest: () -> Unit,
+    onRejectPullRequest: () -> Unit,
+    onApprovalToken: (String) -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
 
@@ -90,6 +96,9 @@ fun AssistantScreen(
             onMicrophone = onMicrophone,
             onConfirmAction = onConfirmAction,
             onDismissAction = onDismissAction,
+            onOpenPullRequest = onOpenPullRequest,
+            onApprovePullRequest = onApprovePullRequest,
+            onRejectPullRequest = onRejectPullRequest,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
@@ -101,6 +110,7 @@ fun AssistantScreen(
             onBackendUrl = onBackendUrl,
             onCharacter = onCharacter,
             onTestConnection = onTestConnection,
+            onApprovalToken = onApprovalToken,
         )
     }
 }
@@ -140,6 +150,7 @@ private fun statusLabel(state: UiState): Pair<String, Color> = when {
     state.activity == Activity.LISTENING -> "Listening" to Color(0xFF6FC3FF)
     state.activity == Activity.SENDING -> "Sending" to Color(0xFF6FC3FF)
     state.activity == Activity.THINKING -> "Thinking" to Color(0xFFB48CFF)
+    state.activity == Activity.WAITING_FOR_APPROVAL -> "Review needed" to Color(0xFFFFC857)
     state.activity == Activity.SPEAKING -> "Speaking" to Accent
     state.activity == Activity.DONE -> "Done" to Color(0xFF6BE38A)
     state.activity == Activity.FAILED -> "Problem" to Color(0xFFFF7A70)
@@ -158,6 +169,9 @@ private fun ConversationPanel(
     onMicrophone: () -> Unit,
     onConfirmAction: () -> Unit,
     onDismissAction: () -> Unit,
+    onOpenPullRequest: (String) -> Unit,
+    onApprovePullRequest: () -> Unit,
+    onRejectPullRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var prompt by remember { mutableStateOf("") }
@@ -215,6 +229,17 @@ private fun ConversationPanel(
                 }
             }
         }
+        state.pendingApproval?.let { approval ->
+            Spacer(modifier = Modifier.height(10.dp))
+            PullRequestApprovalCard(
+                approval = approval,
+                tokenConfigured = state.hasApprovalToken,
+                inFlight = state.approvalInFlight,
+                onOpen = { onOpenPullRequest(approval.url) },
+                onApprove = onApprovePullRequest,
+                onReject = onRejectPullRequest,
+            )
+        }
         state.hint?.takeIf { it.isNotBlank() }?.let {
             Spacer(modifier = Modifier.height(4.dp))
             Text(it, color = Color(0xFFFFC38A), style = MaterialTheme.typography.bodySmall)
@@ -253,6 +278,65 @@ private fun ConversationPanel(
         state.character.credit?.let {
             Spacer(modifier = Modifier.height(8.dp))
             Text(it, color = Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.align(Alignment.CenterHorizontally))
+        }
+    }
+}
+
+@Composable
+private fun PullRequestApprovalCard(
+    approval: PendingPullRequestApproval,
+    tokenConfigured: Boolean,
+    inFlight: Boolean,
+    onOpen: () -> Unit,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF172B3A), RoundedCornerShape(16.dp))
+            .border(1.dp, Color(0xFF6FC3FF), RoundedCornerShape(16.dp))
+            .padding(14.dp),
+    ) {
+        Text(
+            "REVIEW REQUIRED",
+            color = Color(0xFF6FC3FF),
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Text(
+            "${approval.repository}  ·  PR #${approval.number}",
+            color = TextPrimary,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            "Commit ${approval.shortSha}  ·  ${if (approval.draft) "Draft" else "Ready"}",
+            color = Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onOpen, enabled = !inFlight) {
+                Text("Open GitHub", color = Color(0xFF6FC3FF))
+            }
+            Button(
+                onClick = onApprove,
+                enabled = tokenConfigured && !inFlight,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF168C87)),
+            ) {
+                Text(if (inFlight) "Checking…" else "Approve", fontWeight = FontWeight.Bold)
+            }
+            OutlinedButton(onClick = onReject, enabled = tokenConfigured && !inFlight) {
+                Text("Reject", color = Color(0xFFFF9C94))
+            }
+        }
+        if (!tokenConfigured) {
+            Text(
+                "Add the approval token in Settings to enable decisions.",
+                color = Color(0xFFFFC38A),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
@@ -309,8 +393,10 @@ private fun SettingsDialog(
     onBackendUrl: (String) -> Unit,
     onCharacter: (AvatarCharacter) -> Unit,
     onTestConnection: () -> Unit,
+    onApprovalToken: (String) -> Unit,
 ) {
     var url by remember { mutableStateOf(state.backendUrl) }
+    var approvalToken by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Assistant settings") },
@@ -328,6 +414,31 @@ private fun SettingsDialog(
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text("Connection: ${state.connection.name.lowercase()}", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = approvalToken,
+                    onValueChange = { approvalToken = it.take(512) },
+                    label = { Text("Approval token") },
+                    placeholder = {
+                        Text(
+                            if (state.hasApprovalToken) {
+                                "Stored securely"
+                            } else {
+                                "Required for PR decisions"
+                            },
+                        )
+                    },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                Text(
+                    "Entered at runtime and encrypted with Android Keystore; never bundled in the APK.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (state.hasApprovalToken) {
+                    TextButton(onClick = { onApprovalToken("") }) {
+                        Text("Forget approval token", color = Color(0xFFFF9C94))
+                    }
+                }
                 Text("Character", fontWeight = FontWeight.Bold)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AvatarCharacter.entries.forEach { character ->
@@ -343,6 +454,7 @@ private fun SettingsDialog(
         confirmButton = {
             TextButton(onClick = {
                 onBackendUrl(url)
+                if (approvalToken.isNotBlank()) onApprovalToken(approvalToken)
                 onDismiss()
             }) { Text("Save") }
         },
