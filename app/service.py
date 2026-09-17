@@ -8,15 +8,31 @@ from sqlalchemy import select
 
 from app.capabilities.models import IDENTIFIER_PATTERN
 from app.domain.enums import EventType, ExecutionStatus, TaskStatus
+from app.domain.proposals import TaskProposal, propose_task
+from app.domain.task_context import build_task_context, render_task_context
 from app.domain.transitions import TERMINAL_STATUSES, ensure_transition
 from app.execution.actions import validate_action
 from app.execution.base import ConversationTurn
 from app.persistence.database import Database
-from app.persistence.models import ExecutionModel, TaskEventModel, TaskModel
-from app.persistence.repository import TaskRepository
+from app.persistence.models import (
+    ChatMessageModel,
+    ChatSessionModel,
+    ExecutionModel,
+    TaskEventModel,
+    TaskModel,
+)
+from app.persistence.repository import ChatMessageRepository, ChatSessionRepository, TaskRepository
 
 
 class TaskNotFoundError(LookupError):
+    pass
+
+
+class ChatSessionNotFoundError(LookupError):
+    pass
+
+
+class ChatMessageNotFoundError(LookupError):
     pass
 
 
@@ -25,12 +41,18 @@ DEFAULT_FAILURE_REPLY = "Sorry, I couldn't finish that request."
 CANCELLED_REPLY = "Okay, I've stopped working on that."
 REPLY_EMOTIONS = {"Warm", "Curious", "Excited", "Concerned", "Neutral"}
 MAX_HISTORY_TURNS = 6
+DEFAULT_CHAT_TITLE = "New conversation"
 
 
 def _reply_payload(text: str, *, emotion: str, intensity: float, outcome: str) -> dict[str, Any]:
     """User-facing speech for clients such as the Android avatar."""
     normalized = " ".join(text.split())[:MAX_REPLY_CHARACTERS]
     return {"text": normalized, "emotion": emotion, "intensity": intensity, "outcome": outcome}
+
+
+def _chat_title(request: str) -> str:
+    normalized = " ".join(request.split())
+    return normalized if len(normalized) <= 80 else normalized[:77].rstrip() + "…"
 
 
 class ExecutionNotFoundError(LookupError):
@@ -56,6 +78,9 @@ class TaskService:
         goal: str | None = None,
         required_capabilities: list[str] | None = None,
         source_context: dict[str, Any] | None = None,
+        chat_session_id: str | None = None,
+        origin_message_id: str | None = None,
+        parent_task_id: str | None = None,
         external_source: str | None = None,
         external_key: str | None = None,
     ) -> TaskModel:
@@ -64,6 +89,8 @@ class TaskService:
             raise ValueError("Task request cannot be empty")
         if (external_source is None) != (external_key is None):
             raise ValueError("external_source and external_key must be supplied together")
+        if origin_message_id is not None and chat_session_id is None:
+            raise ValueError("origin_message_id requires a chat_session_id")
         normalized_capabilities = list(dict.fromkeys(required_capabilities or []))
         if len(normalized_capabilities) != len(required_capabilities or []):
             raise ValueError("required_capabilities must not contain duplicates")
@@ -85,17 +112,56 @@ class TaskService:
                 if existing is not None:
                     return existing
 
+            chat_session = None
+            origin_message = None
+            normalized_context = dict(source_context or {})
+            if chat_session_id is not None:
+                chat_session = ChatSessionRepository.get(session, chat_session_id)
+                if chat_session is None or chat_session.archived:
+                    raise ChatSessionNotFoundError(chat_session_id)
+                normalized_context["conversation_id"] = chat_session.id
+            if origin_message_id is not None:
+                origin_message = session.get(ChatMessageModel, origin_message_id)
+                if origin_message is None or origin_message.chat_session_id != chat_session_id:
+                    raise ChatMessageNotFoundError(origin_message_id)
+                if origin_message.linked_task_id is not None:
+                    # One message launches one task; a repeated confirmation is a no-op.
+                    existing_task = TaskRepository.get(session, origin_message.linked_task_id)
+                    if existing_task is not None:
+                        return existing_task
+            if parent_task_id is not None and TaskRepository.get(session, parent_task_id) is None:
+                raise TaskNotFoundError(parent_task_id)
+
             task = TaskModel(
                 id=str(uuid4()),
                 original_request=normalized_request,
                 current_goal=(goal or normalized_request).strip(),
                 status=TaskStatus.CREATED.value,
                 required_capabilities=normalized_capabilities,
-                source_context=source_context or {},
+                source_context=normalized_context,
+                chat_session_id=chat_session_id,
+                parent_task_id=parent_task_id,
                 external_source=external_source,
                 external_key=external_key,
             )
+            if chat_session is not None:
+                if chat_session.title == DEFAULT_CHAT_TITLE:
+                    chat_session.title = _chat_title(normalized_request)
+                chat_session.updated_at = datetime.now(UTC)
             session.add(task)
+            session.flush()
+            if origin_message is not None:
+                origin_message.linked_task_id = task.id
+                task.origin_message_id = origin_message.id
+            elif chat_session is not None:
+                origin = ChatMessageRepository.append(
+                    session,
+                    chat_session_id=chat_session.id,
+                    role="user",
+                    content=normalized_request,
+                    linked_task_id=task.id,
+                )
+                task.origin_message_id = origin.id
             TaskRepository.append_event(
                 session,
                 task,
@@ -109,6 +175,232 @@ class TaskService:
             )
             session.flush()
             return task
+
+    def create_chat_session(self, *, title: str | None = None) -> ChatSessionModel:
+        normalized_title = (title or DEFAULT_CHAT_TITLE).strip()
+        if not normalized_title:
+            normalized_title = DEFAULT_CHAT_TITLE
+        if len(normalized_title) > 160:
+            raise ValueError("Chat session title cannot exceed 160 characters")
+        with self.database.session() as session, session.begin():
+            chat_session = ChatSessionModel(
+                id=str(uuid4()),
+                title=normalized_title,
+                archived=False,
+            )
+            session.add(chat_session)
+            session.flush()
+            return chat_session
+
+    def get_chat_session(self, chat_session_id: str) -> ChatSessionModel:
+        with self.database.session() as session:
+            chat_session = ChatSessionRepository.get(session, chat_session_id)
+            if chat_session is None:
+                raise ChatSessionNotFoundError(chat_session_id)
+            return chat_session
+
+    def list_chat_sessions(self, *, limit: int = 100) -> list[ChatSessionModel]:
+        with self.database.session() as session:
+            return ChatSessionRepository.list(session, limit=limit)
+
+    def list_chat_session_tasks(
+        self,
+        chat_session_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[TaskModel]:
+        with self.database.session() as session:
+            if ChatSessionRepository.get(session, chat_session_id) is None:
+                raise ChatSessionNotFoundError(chat_session_id)
+            return TaskRepository.list(
+                session,
+                chat_session_id=chat_session_id,
+                limit=limit,
+            )
+
+    def list_chat_messages(
+        self,
+        chat_session_id: str,
+        *,
+        limit: int = 500,
+    ) -> list[ChatMessageModel]:
+        with self.database.session() as session:
+            if ChatSessionRepository.get(session, chat_session_id) is None:
+                raise ChatSessionNotFoundError(chat_session_id)
+            return ChatMessageRepository.list(session, chat_session_id, limit=limit)
+
+    def append_chat_message(
+        self,
+        chat_session_id: str,
+        *,
+        content: str,
+        role: str = "user",
+    ) -> tuple[ChatMessageModel, TaskProposal | None]:
+        """Record a turn of conversation. No task is launched and nothing is executed.
+
+        Returns the stored message and, for user turns that read as a request for work,
+        a proposal the client can offer as "create a task?". The proposal is advisory:
+        only :meth:`create_task_from_message` actually starts work.
+        """
+        normalized_content = content.strip()
+        if not normalized_content:
+            raise ValueError("Message content cannot be empty")
+        if role not in {"user", "assistant", "system"}:
+            raise ValueError(f"Unsupported chat message role: {role}")
+
+        with self.database.session() as session, session.begin():
+            chat_session = ChatSessionRepository.get(session, chat_session_id)
+            if chat_session is None or chat_session.archived:
+                raise ChatSessionNotFoundError(chat_session_id)
+            message = ChatMessageRepository.append(
+                session,
+                chat_session_id=chat_session.id,
+                role=role,
+                content=normalized_content,
+            )
+            if role == "user" and chat_session.title == DEFAULT_CHAT_TITLE:
+                chat_session.title = _chat_title(normalized_content)
+            chat_session.updated_at = datetime.now(UTC)
+            session.flush()
+            proposal = propose_task(normalized_content) if role == "user" else None
+            return message, proposal
+
+    def create_task_from_message(
+        self,
+        chat_session_id: str,
+        message_id: str,
+        *,
+        goal: str | None = None,
+        required_capabilities: list[str] | None = None,
+        source_context: dict[str, Any] | None = None,
+    ) -> TaskModel:
+        """Launch work from a message the user already sent, on their explicit confirmation."""
+        with self.database.session() as session:
+            if ChatSessionRepository.get(session, chat_session_id) is None:
+                raise ChatSessionNotFoundError(chat_session_id)
+            message = session.get(ChatMessageModel, message_id)
+            if message is None or message.chat_session_id != chat_session_id:
+                raise ChatMessageNotFoundError(message_id)
+            if message.role != "user":
+                raise ValueError("Only a user message can launch a task")
+            if message.linked_task_id is not None:
+                existing = TaskRepository.get(session, message.linked_task_id)
+                if existing is not None:
+                    return existing
+            content = message.content
+
+        return self.create_task(
+            request=content,
+            goal=goal,
+            required_capabilities=required_capabilities,
+            source_context=source_context,
+            chat_session_id=chat_session_id,
+            origin_message_id=message_id,
+        )
+
+    def task_context(self, task_id: str) -> dict[str, Any]:
+        """The curated, whitelisted summary of a task — safe to put in a model prompt."""
+        with self.database.session() as session:
+            task = self._require_task(session, task_id)
+            events = TaskRepository.list_events(session, task.id)
+            return build_task_context(task, events)
+
+    def create_follow_up_task(
+        self,
+        task_id: str,
+        *,
+        request: str,
+        goal: str | None = None,
+        required_capabilities: list[str] | None = None,
+        source_context: dict[str, Any] | None = None,
+    ) -> TaskModel:
+        """A new task that continues an earlier one, carrying only its curated context."""
+        with self.database.session() as session:
+            parent = self._require_task(session, task_id)
+            events = TaskRepository.list_events(session, parent.id)
+            context = build_task_context(parent, events)
+            chat_session_id = parent.chat_session_id
+
+        return self.create_task(
+            request=request,
+            goal=goal,
+            required_capabilities=required_capabilities,
+            source_context={**(source_context or {}), "parent_task": context},
+            chat_session_id=chat_session_id,
+            parent_task_id=task_id,
+        )
+
+    def ensure_task_chat_session(self, task_id: str) -> ChatSessionModel:
+        """Open the task's conversation for discussion, backfilling one for older tasks.
+
+        Entering from Task Details posts a reference to the task — its status and curated
+        result — so the next turn has the context without copying the event stream in.
+        """
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            if task.chat_session_id:
+                existing = ChatSessionRepository.get(session, task.chat_session_id)
+                if existing is not None:
+                    self._reference_task(session, existing, task)
+                    return existing
+
+            chat_session = ChatSessionModel(
+                id=str(uuid4()),
+                title=_chat_title(task.original_request),
+                archived=False,
+            )
+            session.add(chat_session)
+            session.flush()
+            task.chat_session_id = chat_session.id
+            context = dict(task.source_context or {})
+            context["conversation_id"] = chat_session.id
+            task.source_context = context
+            origin = ChatMessageRepository.append(
+                session,
+                chat_session_id=chat_session.id,
+                role="user",
+                content=task.original_request,
+                linked_task_id=task.id,
+            )
+            task.origin_message_id = origin.id
+            reply = session.scalar(
+                select(TaskEventModel.payload)
+                .where(TaskEventModel.task_id == task.id)
+                .where(TaskEventModel.event_type == EventType.ASSISTANT_REPLY.value)
+                .order_by(TaskEventModel.sequence.desc())
+                .limit(1)
+            )
+            if reply and reply.get("text"):
+                ChatMessageRepository.append(
+                    session,
+                    chat_session_id=chat_session.id,
+                    role="assistant",
+                    content=str(reply["text"]),
+                    linked_task_id=task.id,
+                )
+            self._reference_task(session, chat_session, task)
+            return chat_session
+
+    @staticmethod
+    def _reference_task(
+        session,
+        chat_session: ChatSessionModel,
+        task: TaskModel,
+    ) -> None:
+        """Post the task's curated snapshot, unless the transcript already ends with it."""
+        context = build_task_context(task, TaskRepository.list_events(session, task.id))
+        content = f"Discussing task: {render_task_context(context)}"
+        latest = ChatMessageRepository.latest(session, chat_session.id)
+        if latest is not None and latest.role == "system" and latest.content == content:
+            return
+        ChatMessageRepository.append(
+            session,
+            chat_session_id=chat_session.id,
+            role="system",
+            content=content,
+            linked_task_id=task.id,
+        )
+        chat_session.updated_at = datetime.now(UTC)
 
     def get_task(self, task_id: str) -> TaskModel:
         with self.database.session() as session:
@@ -133,23 +425,27 @@ class TaskService:
         *,
         limit: int = MAX_HISTORY_TURNS,
     ) -> list[ConversationTurn]:
-        """Earlier completed turns sharing the task's `source_context.conversation_id`."""
+        """Earlier completed turns sharing the task's persistent chat session."""
         conversation_id = (task.source_context or {}).get("conversation_id")
-        if not conversation_id:
+        if not task.chat_session_id and not conversation_id:
             return []
         with self.database.session() as session:
-            recent = session.scalars(
+            statement = (
                 select(TaskModel)
                 .where(TaskModel.status == TaskStatus.COMPLETED.value)
                 .where(TaskModel.created_at <= task.created_at)
                 .where(TaskModel.id != task.id)
-                .where(
+                .order_by(TaskModel.created_at.desc())
+                .limit(limit)
+            )
+            if task.chat_session_id:
+                statement = statement.where(TaskModel.chat_session_id == task.chat_session_id)
+            else:
+                statement = statement.where(
                     TaskModel.source_context["conversation_id"].as_string()
                     == str(conversation_id)
                 )
-                .order_by(TaskModel.created_at.desc())
-                .limit(limit)
-            ).all()
+            recent = session.scalars(statement).all()
             turns: list[ConversationTurn] = []
             for previous in recent:
                 reply = session.scalar(
@@ -525,10 +821,9 @@ class TaskService:
                 {"execution_id": execution_id, "approved_action": "github_pull_request_merge"},
             )
             ensure_transition(task.status, TaskStatus.COMPLETED)
-            TaskRepository.append_event(
+            self._record_assistant_reply(
                 session,
                 task,
-                EventType.ASSISTANT_REPLY,
                 _reply_payload(
                     f"Pull request #{number} was merged successfully.",
                     emotion="Warm",
@@ -579,10 +874,9 @@ class TaskService:
                 },
             )
             ensure_transition(task.status, TaskStatus.CANCELLED)
-            TaskRepository.append_event(
+            self._record_assistant_reply(
                 session,
                 task,
-                EventType.ASSISTANT_REPLY,
                 _reply_payload(
                     "Okay, I left the pull request unmerged.",
                     emotion="Neutral",
@@ -627,10 +921,9 @@ class TaskService:
             )
             ensure_transition(task.status, TaskStatus.COMPLETED)
             if reply and reply.strip():
-                TaskRepository.append_event(
+                self._record_assistant_reply(
                     session,
                     task,
-                    EventType.ASSISTANT_REPLY,
                     {
                         **_reply_payload(
                             reply,
@@ -674,10 +967,9 @@ class TaskService:
             if TaskStatus(task.status) in TERMINAL_STATUSES:
                 return
             ensure_transition(task.status, TaskStatus.FAILED)
-            TaskRepository.append_event(
+            self._record_assistant_reply(
                 session,
                 task,
-                EventType.ASSISTANT_REPLY,
                 _reply_payload(reply, emotion="Concerned", intensity=0.6, outcome="failed"),
             )
             task.status = TaskStatus.FAILED.value
@@ -697,10 +989,9 @@ class TaskService:
             if current_status in TERMINAL_STATUSES:
                 return task
             ensure_transition(current_status, TaskStatus.CANCELLED)
-            TaskRepository.append_event(
+            self._record_assistant_reply(
                 session,
                 task,
-                EventType.ASSISTANT_REPLY,
                 _reply_payload(
                     CANCELLED_REPLY, emotion="Neutral", intensity=0.5, outcome="cancelled"
                 ),
@@ -741,6 +1032,27 @@ class TaskService:
                 EventType.USER_MESSAGE_RECEIVED,
                 {"message": normalized_message},
             )
+
+    @staticmethod
+    def _record_assistant_reply(
+        session,
+        task: TaskModel,
+        payload: dict[str, Any],
+    ) -> None:
+        TaskRepository.append_event(session, task, EventType.ASSISTANT_REPLY, payload)
+        text = str(payload.get("text", "")).strip()
+        if not task.chat_session_id or not text:
+            return
+        ChatMessageRepository.append(
+            session,
+            chat_session_id=task.chat_session_id,
+            role="assistant",
+            content=text,
+            linked_task_id=task.id,
+        )
+        chat_session = ChatSessionRepository.get(session, task.chat_session_id)
+        if chat_session is not None:
+            chat_session.updated_at = datetime.now(UTC)
 
     @staticmethod
     def _require_task(session, task_id: str, *, for_update: bool = False) -> TaskModel:

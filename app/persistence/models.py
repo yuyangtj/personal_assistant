@@ -25,6 +25,40 @@ class Base(DeclarativeBase):
     pass
 
 
+class ChatSessionModel(Base):
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class ChatMessageModel(Base):
+    __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("ix_chat_messages_session_created", "chat_session_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    chat_session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    linked_task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
 class TaskModel(Base):
     __tablename__ = "tasks"
     __table_args__ = (
@@ -39,6 +73,15 @@ class TaskModel(Base):
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     required_capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     source_context: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    chat_session_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("chat_sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    origin_message_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    parent_task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     external_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     external_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     claimed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)

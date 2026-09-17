@@ -189,6 +189,33 @@ def test_worker_answers_with_model_and_remembers_the_conversation(service: TaskS
     assert service.get_task(other.id).status == TaskStatus.COMPLETED.value
 
 
+def test_worker_resumes_a_persistent_chat_session(service: TaskService) -> None:
+    client = RecordingChatClient(
+        [
+            '{"reply":"Your project is called Milo.","emotion":"Warm"}',
+            '{"reply":"Yes, Milo.","emotion":"Warm"}',
+        ]
+    )
+    worker = _conversation_worker(service, client)
+    chat = service.create_chat_session()
+
+    first = service.create_task(
+        request="Remember that my project is called Milo",
+        chat_session_id=chat.id,
+    )
+    assert worker.run_once() is True
+    follow_up = service.create_task(
+        request="What is the project called?",
+        chat_session_id=chat.id,
+    )
+    assert worker.run_once() is True
+
+    messages = [(message.role, message.content) for message in client.calls[1]]
+    assert ("user", first.original_request) in messages
+    assert ("assistant", json.dumps({"reply": "Your project is called Milo."})) in messages
+    assert service.get_task(follow_up.id).chat_session_id == chat.id
+
+
 def test_conversation_history_is_not_displaced_by_unrelated_tasks(
     service: TaskService,
 ) -> None:

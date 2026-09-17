@@ -2,12 +2,83 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from app.domain.enums import EventType, TaskStatus
-from app.persistence.models import TaskEventModel, TaskModel
+from app.persistence.models import (
+    ChatMessageModel,
+    ChatSessionModel,
+    TaskEventModel,
+    TaskModel,
+    utc_now,
+)
+
+
+class ChatSessionRepository:
+    @staticmethod
+    def get(session: Session, chat_session_id: str) -> ChatSessionModel | None:
+        return session.get(ChatSessionModel, chat_session_id)
+
+    @staticmethod
+    def list(session: Session, *, limit: int = 100) -> list[ChatSessionModel]:
+        return list(
+            session.scalars(
+                select(ChatSessionModel)
+                .where(ChatSessionModel.archived.is_(False))
+                .order_by(ChatSessionModel.updated_at.desc())
+                .limit(limit)
+            )
+        )
+
+
+class ChatMessageRepository:
+    @staticmethod
+    def list(
+        session: Session,
+        chat_session_id: str,
+        *,
+        limit: int = 500,
+    ) -> list[ChatMessageModel]:
+        return list(
+            session.scalars(
+                select(ChatMessageModel)
+                .where(ChatMessageModel.chat_session_id == chat_session_id)
+                .order_by(ChatMessageModel.created_at, ChatMessageModel.id)
+                .limit(limit)
+            )
+        )
+
+    @staticmethod
+    def latest(session: Session, chat_session_id: str) -> ChatMessageModel | None:
+        return session.scalar(
+            select(ChatMessageModel)
+            .where(ChatMessageModel.chat_session_id == chat_session_id)
+            .order_by(ChatMessageModel.created_at.desc(), ChatMessageModel.id.desc())
+            .limit(1)
+        )
+
+    @staticmethod
+    def append(
+        session: Session,
+        *,
+        chat_session_id: str,
+        role: str,
+        content: str,
+        linked_task_id: str | None = None,
+    ) -> ChatMessageModel:
+        message = ChatMessageModel(
+            id=str(uuid4()),
+            chat_session_id=chat_session_id,
+            role=role,
+            content=content,
+            linked_task_id=linked_task_id,
+            created_at=utc_now(),
+        )
+        session.add(message)
+        return message
 
 
 class TaskRepository:
@@ -34,11 +105,14 @@ class TaskRepository:
         session: Session,
         *,
         status: TaskStatus | None = None,
+        chat_session_id: str | None = None,
         limit: int = 100,
     ) -> list[TaskModel]:
         statement = select(TaskModel)
         if status is not None:
             statement = statement.where(TaskModel.status == status.value)
+        if chat_session_id is not None:
+            statement = statement.where(TaskModel.chat_session_id == chat_session_id)
         statement = statement.order_by(TaskModel.created_at.desc()).limit(limit)
         return list(session.scalars(statement))
 

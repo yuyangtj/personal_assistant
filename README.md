@@ -8,6 +8,7 @@ agent, tool, approval, and Slack integrations.
 
 - Create, inspect, list, annotate, and cancel tasks through HTTP.
 - Persist tasks and immutable, ordered task events in PostgreSQL.
+- Create, list, and resume durable chat sessions whose linked tasks provide model context.
 - Claim queued tasks safely with `FOR UPDATE SKIP LOCKED`.
 - Execute a deterministic fake capability in a separate worker.
 - Enforce task-state transitions in application code.
@@ -40,8 +41,8 @@ The before-and-after architecture diagrams are in
 docker compose up --build
 ```
 
-This starts PostgreSQL, applies `migrations/001_initial.sql`, and runs the API and
-worker. The API is available at <http://localhost:8000>; interactive documentation
+This starts PostgreSQL, applies the ordered SQL files in `migrations/`, and runs the API
+and worker. The API is available at <http://localhost:8000>; interactive documentation
 is at <http://localhost:8000/docs>.
 
 Create a task:
@@ -51,6 +52,65 @@ curl -X POST http://localhost:8000/tasks \
   -H 'content-type: application/json' \
   -d '{"request":"Research PostgreSQL hosting"}'
 ```
+
+Create a persistent conversation and attach tasks to it:
+
+```bash
+CHAT_ID=$(curl -s -X POST http://localhost:8000/chat-sessions \
+  -H 'content-type: application/json' -d '{}' | jq -r .id)
+curl -X POST http://localhost:8000/tasks \
+  -H 'content-type: application/json' \
+  -d "{\"request\":\"Remember that my project is Milo\",\"chat_session_id\":\"$CHAT_ID\"}"
+curl http://localhost:8000/chat-sessions
+curl http://localhost:8000/chat-sessions/$CHAT_ID/tasks
+```
+
+## Chats and tasks
+
+Chats are where you think and communicate; tasks are work launched from them. The two are
+linked by id, never by copying content, so task status is never duplicated or stale and
+the task event stream stays authoritative.
+
+Talking in a chat launches nothing. Posting a message stores the turn and, when it reads
+as a request for work, returns a `proposal` the client offers as "create a task?":
+
+```bash
+MESSAGE=$(curl -s -X POST http://localhost:8000/chat-sessions/$CHAT_ID/messages \
+  -H 'content-type: application/json' \
+  -d '{"content":"Add authentication to the API"}')
+echo "$MESSAGE" | jq .proposal
+```
+
+A proposal is advisory. Work starts only when the message is confirmed, which links the
+task to the message it came from (`origin_message_id`):
+
+```bash
+MESSAGE_ID=$(echo "$MESSAGE" | jq -r .message.id)
+curl -X POST http://localhost:8000/chat-sessions/$CHAT_ID/messages/$MESSAGE_ID/task \
+  -H 'content-type: application/json' -d '{}'
+```
+
+Confirming the same message twice returns the original task rather than starting the work
+again. A proposal marked `consequential` — anything touching a repository or a deployment
+— is the case clients must confirm before a conversation launches costly work.
+
+Going the other way, `POST /tasks/TASK_ID/chat-session` opens a task's conversation
+(backfilling one for older tasks) and posts a reference to the task: its status, result
+and artifacts. A follow-up continues the work as a new task that records its
+`parent_task_id`:
+
+```bash
+curl http://localhost:8000/tasks/TASK_ID/context
+curl -X POST http://localhost:8000/tasks/TASK_ID/follow-up \
+  -H 'content-type: application/json' \
+  -d '{"request":"Finish the Android part"}'
+```
+
+`GET /tasks/TASK_ID/context` is the curated view that follow-up prompts and chat
+references are built from: the original request, goal, status, final answer, validation
+verdict, artifact and pull-request references, and the failure message. Polling events,
+raw tool responses, diffs, execution inputs and token usage stay in the event stream and
+never reach a model prompt. Attach anything more by hand.
 
 Inspect it using the returned ID:
 
