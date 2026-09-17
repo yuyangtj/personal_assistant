@@ -38,6 +38,22 @@ for task orchestration; the Android application presents and controls it.
   displays the reviewed commit SHA, and can approve or reject through the backend gate.
   The approval token is entered at runtime and encrypted with Android Keystore; it is never
   compiled into the APK or logged.
+- A native Task Center lists backend work by status, highlights review gates, refreshes live,
+  and presents a human-readable event timeline. Task details support cancellation and the
+  same exact-SHA pull-request decisions without leaving the dashboard.
+- Task details lead with a Result card: final answer, agent summary, validation state,
+  provider/model usage, coding tests and notes, and linked artifacts. The exact structured
+  executor output remains available through an expandable, selectable diagnostics view.
+- Conversations are persistent backend records rather than app-launch-only identifiers. The
+  Chats tab starts a new conversation, lists saved conversations, resumes one after an app
+  restart, and keeps future conversational tasks linked to its earlier turns.
+- The Chats tab opens a full transcript: every stored turn, with live task cards for the
+  work launched from it. Talking starts nothing on its own — when a message asks for work
+  that would change code or infrastructure, the transcript offers a "Create task?" card and
+  waits for confirmation. Any earlier message can be turned into a task later.
+- Task details open their conversation with "Discuss in chat", which posts a reference to
+  the task (status, result, artifacts) into the transcript, so a follow-up can ask why it
+  failed or start the next task without retyping the context.
 
 ## Build sequence
 
@@ -51,7 +67,12 @@ for task orchestration; the Android application presents and controls it.
 8. ~~Confirmed on-phone actions: timers, alarms, and calendar event drafts through public
    Android intents.~~
 9. ~~GitHub pull-request review and approval controls backed by exact-SHA verification.~~
-10. Optionally expose the assistant as an Android AppFunction (for example
+10. ~~Task Center with status filters, live task details, event timelines, cancellation, and
+    approval actions.~~
+11. ~~Persistent chat sessions with New conversation and resume controls.~~
+12. ~~Chat transcripts with live task cards, confirmation before consequential work, and
+    Discuss-in-chat follow-ups from task details.~~
+13. Optionally expose the assistant as an Android AppFunction (for example
    `askAssistant`), so approved system agents can call it. AppFunctions work in that
    direction only: calling other apps' functions requires the privileged
    `EXECUTE_APP_FUNCTIONS` permission, which ordinary apps cannot hold, and the

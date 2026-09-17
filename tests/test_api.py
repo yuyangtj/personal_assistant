@@ -52,6 +52,103 @@ def test_external_key_makes_creation_idempotent(client: TestClient) -> None:
     assert len(client.get("/tasks").json()["tasks"]) == 1
 
 
+def test_chat_session_can_be_created_listed_resumed_and_populated(client: TestClient) -> None:
+    created = client.post("/chat-sessions", json={})
+    assert created.status_code == 201
+    chat = created.json()
+    assert chat["title"] == "New conversation"
+    assert chat["archived"] is False
+
+    first = client.post(
+        "/tasks",
+        json={"request": "Plan my afternoon", "chat_session_id": chat["id"]},
+    )
+    second = client.post(
+        "/tasks",
+        json={"request": "Make it less busy", "chat_session_id": chat["id"]},
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["chat_session_id"] == chat["id"]
+    assert first.json()["source_context"]["conversation_id"] == chat["id"]
+
+    resumed = client.get(f"/chat-sessions/{chat['id']}")
+    assert resumed.status_code == 200
+    assert resumed.json()["title"] == "Plan my afternoon"
+
+    sessions = client.get("/chat-sessions").json()["sessions"]
+    assert [session["id"] for session in sessions] == [chat["id"]]
+
+    tasks = client.get(f"/chat-sessions/{chat['id']}/tasks").json()["tasks"]
+    assert [task["id"] for task in tasks] == [second.json()["id"], first.json()["id"]]
+
+    messages = client.get(f"/chat-sessions/{chat['id']}/messages").json()["messages"]
+    assert [(message["role"], message["content"]) for message in messages] == [
+        ("user", "Plan my afternoon"),
+        ("user", "Make it less busy"),
+    ]
+    assert messages[0]["linked_task_id"] == first.json()["id"]
+    assert first.json()["origin_message_id"] == messages[0]["id"]
+
+
+def test_chat_transcript_records_the_assistant_reply(client: TestClient) -> None:
+    chat = client.post("/chat-sessions", json={}).json()
+    task = client.post(
+        "/tasks",
+        json={"request": "Stop this", "chat_session_id": chat["id"]},
+    ).json()
+
+    cancelled = client.post(f"/tasks/{task['id']}/cancel")
+
+    assert cancelled.status_code == 200
+    messages = client.get(f"/chat-sessions/{chat['id']}/messages").json()["messages"]
+    assert [(message["role"], message["content"]) for message in messages] == [
+        ("user", "Stop this"),
+        ("assistant", "Okay, I've stopped working on that."),
+    ]
+    assert all(message["linked_task_id"] == task["id"] for message in messages)
+
+
+def test_existing_task_can_open_a_backfilled_chat(client: TestClient) -> None:
+    task = client.post("/tasks", json={"request": "Explain the result"}).json()
+    client.post(f"/tasks/{task['id']}/cancel")
+
+    first = client.post(f"/tasks/{task['id']}/chat-session")
+    second = client.post(f"/tasks/{task['id']}/chat-session")
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == second.json()["id"]
+    messages = client.get(
+        f"/chat-sessions/{first.json()['id']}/messages"
+    ).json()["messages"]
+    assert [(message["role"], message["content"]) for message in messages] == [
+        ("user", "Explain the result"),
+        ("assistant", "Okay, I've stopped working on that."),
+        (
+            "system",
+            'Discussing task: Task "Explain the result"\n'
+            "Status: cancelled\n"
+            "Result: Okay, I've stopped working on that.",
+        ),
+    ]
+    # Re-entering Discuss does not stack duplicate references.
+    assert sum(message["role"] == "system" for message in messages) == 1
+    assert all(message["linked_task_id"] == task["id"] for message in messages)
+
+
+def test_task_rejects_unknown_chat_session(client: TestClient) -> None:
+    response = client.post(
+        "/tasks",
+        json={
+            "request": "Continue this conversation",
+            "chat_session_id": "00000000-0000-0000-0000-000000000000",
+        },
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Chat session not found"
+
+
 def test_missing_task_returns_404(client: TestClient) -> None:
     assert client.get("/tasks/missing").status_code == 404
     assert client.post("/tasks/missing/cancel").status_code == 404

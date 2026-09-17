@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from time import monotonic
 from typing import Any
 
+from app.domain.task_context import render_task_context
 from app.execution.actions import alarm_matches_next_occurrence, validate_action
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
@@ -97,6 +98,16 @@ class ConversationExecutor:
         context: Mapping[str, Any],
     ) -> list[ChatMessage]:
         messages = [ChatMessage("system", f"{SYSTEM_PROMPT}\n{self._clock(context)}")]
+        parent = context.get("parent_task")
+        if isinstance(parent, dict):
+            # A curated snapshot assembled by the backend, never raw task output.
+            messages.append(
+                ChatMessage(
+                    "system",
+                    "This request follows up on earlier work. Trusted summary:\n"
+                    f"{render_task_context(parent)}",
+                )
+            )
         for turn in history:
             messages.append(ChatMessage("user", turn.request))
             messages.append(ChatMessage("assistant", json.dumps({"reply": turn.reply})))

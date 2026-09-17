@@ -103,6 +103,22 @@ class MainActivity : UnityPlayerActivity(), LifecycleOwner, SavedStateRegistryOw
                         onApprovePullRequest = session::approvePullRequest,
                         onRejectPullRequest = session::rejectPullRequest,
                         onApprovalToken = session::updateApprovalToken,
+                        onRefreshTasks = session::refreshTasks,
+                        onRefreshTaskDetails = session::refreshTaskDetails,
+                        onOpenTask = session::openTaskDetails,
+                        onCloseTask = session::closeTaskDetails,
+                        onCancelTaskFromCenter = session::cancelTaskFromCenter,
+                        onApproveTaskCenterPullRequest = session::approveTaskCenterPullRequest,
+                        onRejectTaskCenterPullRequest = session::rejectTaskCenterPullRequest,
+                        onRefreshChats = session::refreshChatSessions,
+                        onNewChat = session::startNewChat,
+                        onResumeChat = session::resumeChat,
+                        onRefreshThread = session::refreshActiveChat,
+                        onSendChatMessage = session::sendChatMessage,
+                        onCreateTaskFromMessage = session::createTaskFromChatMessage,
+                        onConfirmProposal = session::confirmTaskProposal,
+                        onDismissProposal = session::dismissTaskProposal,
+                        onDiscussTask = session::discussTask,
                     )
                 }
             }

@@ -68,6 +68,30 @@ MiloHost.onSpeechFinished ─────┴─▶ SUCCESS (handshake) / ERROR /
 - The active task ID and last handled event sequence are persisted. On process recreation,
   `GET /tasks/{id}/pending-approval` restores the typed review card before event polling
   resumes, so a long human review does not lose its exact-SHA approval gate.
+- The Compose Task Center uses `GET /tasks`, `GET /tasks/{id}`, and the existing ordered event
+  stream as a read model. It refreshes the visible list or detail every three seconds, keeps
+  technical payloads behind human-readable timeline labels, and reuses the protected cancel
+  and exact-SHA approval operations for actions initiated from task details.
+- A client-side result projection combines `EXECUTION_OUTPUT_RECEIVED`, `ASSISTANT_REPLY`,
+  validation, failure, and artifact events. This gives users a stable Result card without
+  adding a second mutable result record; the immutable event stream remains the source of
+  truth and the original structured agent output can be expanded for diagnostics.
+- The Chats tab reads durable `chat_sessions` records. Android persists only the selected
+  session ID, revalidates it against the backend on launch, and sends it with each new task.
+  The backend uses explicit task-to-session linkage for conversation history while retaining
+  the older `source_context.conversation_id` path for backward compatibility.
+- Chat and tasks are linked by ID, never by copying content. A transcript message carries
+  `linked_task_id` and renders a task card that reads the live task record, so task status
+  is never duplicated into the conversation and cannot go stale.
+- Typing in a transcript calls `POST /chat-sessions/{id}/messages`, which stores the turn
+  and launches nothing. Ordinary conversation then flows straight to a task for a reply;
+  a turn the backend flags as `consequential` stops as a proposal card until the user taps
+  Create task. That tap is the only path from a conversation into costly work.
+- `Discuss in chat` in task details calls `POST /tasks/{id}/chat-session`, which opens the
+  task's conversation and posts a reference to it. Follow-up work uses
+  `POST /tasks/{id}/follow-up`, recording `parent_task_id` and carrying only the curated
+  `GET /tasks/{id}/context` snapshot — request, status, result, validation, artifacts and
+  failure message. Polling events, raw tool output and diffs stay in Task Details.
 
 ## Avatar state contract
 

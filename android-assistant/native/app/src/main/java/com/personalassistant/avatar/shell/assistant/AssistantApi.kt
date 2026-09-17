@@ -10,8 +10,114 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** Compact task representation used by the native task center. */
+data class AssistantTask(
+    val id: String,
+    val request: String,
+    val goal: String,
+    val status: String,
+    val requiredCapabilities: List<String>,
+    val chatSessionId: String?,
+    val claimedBy: String?,
+    val createdAt: String,
+    val updatedAt: String,
+) {
+    val needsAttention: Boolean get() = status == "waiting_for_approval"
+    val isTerminal: Boolean get() = status in setOf("completed", "failed", "cancelled")
+    val canCancel: Boolean get() = !isTerminal && !needsAttention
+
+    companion object {
+        fun fromJson(payload: JSONObject): AssistantTask {
+            val capabilities = payload.optJSONArray("required_capabilities") ?: JSONArray()
+            return AssistantTask(
+                id = payload.getString("id"),
+                request = payload.optString("original_request"),
+                goal = payload.optString("current_goal"),
+                status = payload.optString("status"),
+                requiredCapabilities = List(capabilities.length()) { capabilities.getString(it) },
+                chatSessionId = payload.opt("chat_session_id")
+                    ?.takeUnless { it == JSONObject.NULL }
+                    ?.toString(),
+                claimedBy = payload.opt("claimed_by")
+                    ?.takeUnless { it == JSONObject.NULL }
+                    ?.toString()
+                    ?.takeIf { it.isNotBlank() },
+                createdAt = payload.optString("created_at"),
+                updatedAt = payload.optString("updated_at"),
+            )
+        }
+    }
+}
+
+data class ChatSession(
+    val id: String,
+    val title: String,
+    val createdAt: String,
+    val updatedAt: String,
+) {
+    companion object {
+        fun fromJson(payload: JSONObject): ChatSession = ChatSession(
+            id = payload.getString("id"),
+            title = payload.optString("title", "New conversation"),
+            createdAt = payload.optString("created_at"),
+            updatedAt = payload.optString("updated_at"),
+        )
+    }
+}
+
+data class ChatMessage(
+    val id: String,
+    val role: String,
+    val content: String,
+    val linkedTaskId: String?,
+    val createdAt: String,
+) {
+    companion object {
+        fun fromJson(payload: JSONObject): ChatMessage = ChatMessage(
+            id = payload.getString("id"),
+            role = payload.optString("role"),
+            content = payload.optString("content"),
+            linkedTaskId = payload.opt("linked_task_id")
+                ?.takeUnless { it == JSONObject.NULL }
+                ?.toString(),
+            createdAt = payload.optString("created_at"),
+        )
+    }
+}
+
+/**
+ * A task the backend suggests for a message, which only runs once the user confirms it.
+ * [consequential] marks work that changes code or infrastructure.
+ */
+data class TaskProposal(
+    val reason: String,
+    val suggestedGoal: String,
+    val requiredCapabilities: List<String>,
+    val consequential: Boolean,
+) {
+    companion object {
+        fun fromJson(payload: JSONObject): TaskProposal {
+            val capabilities = payload.optJSONArray("required_capabilities") ?: JSONArray()
+            return TaskProposal(
+                reason = payload.optString("reason"),
+                suggestedGoal = payload.optString("suggested_goal"),
+                requiredCapabilities = List(capabilities.length()) { capabilities.getString(it) },
+                consequential = payload.optBoolean("consequential", true),
+            )
+        }
+    }
+}
+
+/** The stored chat turn plus the task, if any, the backend would propose for it. */
+data class PostedChatMessage(val message: ChatMessage, val proposal: TaskProposal?)
+
 /** One entry of a task's ordered event stream (`GET /tasks/{id}/events`). */
-data class TaskEvent(val sequence: Int, val type: String, val payload: JSONObject)
+data class TaskEvent(
+    val sequence: Int,
+    val type: String,
+    val payload: JSONObject,
+    val createdAt: String,
+)
 
 /** A merge action that is paused until the user reviews the exact pull-request commit. */
 data class PendingPullRequestApproval(
@@ -66,31 +172,125 @@ class AssistantApi(baseUrl: String, private val speechCacheDirectory: File) {
     }
 
     /**
-     * Creates a task. [clientKey] makes retries idempotent; [conversationId] lets the backend
-     * include earlier turns of the same conversation as context.
+     * Creates a task. [clientKey] makes retries idempotent; [chatSessionId] lets the backend
+     * include earlier turns of the persistent conversation as context.
      */
-    suspend fun createTask(request: String, clientKey: String, conversationId: String): String {
+    suspend fun createTask(request: String, clientKey: String, chatSessionId: String): String {
         val now = java.time.ZonedDateTime.now()
         val body = JSONObject()
             .put("request", request)
             .put("external_source", "android")
             .put("external_key", clientKey)
+            .put("chat_session_id", chatSessionId)
             .put(
                 "source_context",
                 JSONObject()
                     .put("client", "android-avatar")
-                    .put("conversation_id", conversationId)
                     .put("local_time", now.withNano(0).toOffsetDateTime().toString())
                     .put("timezone", now.zone.id),
             )
         return request("POST", "/tasks", body).getString("id")
     }
 
+    suspend fun createChatSession(): ChatSession =
+        ChatSession.fromJson(request("POST", "/chat-sessions", JSONObject()))
+
+    suspend fun chatSessions(limit: Int = 100): List<ChatSession> {
+        val sessions = request(
+            "GET",
+            "/chat-sessions?limit=${limit.coerceIn(1, 500)}",
+        ).getJSONArray("sessions")
+        return List(sessions.length()) { index -> ChatSession.fromJson(sessions.getJSONObject(index)) }
+    }
+
+    suspend fun chatSessionTasks(chatSessionId: String, limit: Int = 100): List<AssistantTask> {
+        val tasks = request(
+            "GET",
+            "/chat-sessions/$chatSessionId/tasks?limit=${limit.coerceIn(1, 500)}",
+        ).getJSONArray("tasks")
+        return List(tasks.length()) { index -> AssistantTask.fromJson(tasks.getJSONObject(index)) }
+    }
+
+    suspend fun chatMessages(chatSessionId: String, limit: Int = 500): List<ChatMessage> {
+        val messages = request(
+            "GET",
+            "/chat-sessions/$chatSessionId/messages?limit=${limit.coerceIn(1, 500)}",
+        ).getJSONArray("messages")
+        return List(messages.length()) { index -> ChatMessage.fromJson(messages.getJSONObject(index)) }
+    }
+
+    /** Records a turn of conversation. This never launches work on its own. */
+    suspend fun postChatMessage(chatSessionId: String, content: String): PostedChatMessage {
+        val payload = request(
+            "POST",
+            "/chat-sessions/$chatSessionId/messages",
+            JSONObject().put("content", content),
+        )
+        return PostedChatMessage(
+            message = ChatMessage.fromJson(payload.getJSONObject("message")),
+            proposal = payload.optJSONObject("proposal")?.let(TaskProposal::fromJson),
+        )
+    }
+
+    /** Confirms a proposal: launches the work the message asked for. */
+    suspend fun createTaskFromMessage(
+        chatSessionId: String,
+        messageId: String,
+        goal: String? = null,
+        requiredCapabilities: List<String> = emptyList(),
+    ): AssistantTask {
+        val now = java.time.ZonedDateTime.now()
+        val body = JSONObject()
+            .put("required_capabilities", JSONArray(requiredCapabilities))
+            .put(
+                "source_context",
+                JSONObject()
+                    .put("client", "android-avatar")
+                    .put("local_time", now.withNano(0).toOffsetDateTime().toString())
+                    .put("timezone", now.zone.id),
+            )
+        goal?.takeIf { it.isNotBlank() }?.let { body.put("goal", it) }
+        return AssistantTask.fromJson(
+            request("POST", "/chat-sessions/$chatSessionId/messages/$messageId/task", body),
+        )
+    }
+
+    /** Starts a new task that continues an earlier one, carrying only its curated context. */
+    suspend fun createFollowUpTask(taskId: String, request: String): AssistantTask {
+        val now = java.time.ZonedDateTime.now()
+        val body = JSONObject()
+            .put("request", request)
+            .put(
+                "source_context",
+                JSONObject()
+                    .put("client", "android-avatar")
+                    .put("local_time", now.withNano(0).toOffsetDateTime().toString())
+                    .put("timezone", now.zone.id),
+            )
+        return AssistantTask.fromJson(request("POST", "/tasks/$taskId/follow-up", body))
+    }
+
+    suspend fun ensureTaskChatSession(taskId: String): ChatSession =
+        ChatSession.fromJson(request("POST", "/tasks/$taskId/chat-session"))
+
+    suspend fun tasks(limit: Int = 100): List<AssistantTask> {
+        val tasks = request("GET", "/tasks?limit=${limit.coerceIn(1, 500)}").getJSONArray("tasks")
+        return List(tasks.length()) { index -> AssistantTask.fromJson(tasks.getJSONObject(index)) }
+    }
+
+    suspend fun task(taskId: String): AssistantTask =
+        AssistantTask.fromJson(request("GET", "/tasks/$taskId"))
+
     suspend fun events(taskId: String): List<TaskEvent> {
         val events: JSONArray = request("GET", "/tasks/$taskId/events").getJSONArray("events")
         return List(events.length()) { index ->
             val event = events.getJSONObject(index)
-            TaskEvent(event.getInt("sequence"), event.getString("event_type"), event.optJSONObject("payload") ?: JSONObject())
+            TaskEvent(
+                sequence = event.getInt("sequence"),
+                type = event.getString("event_type"),
+                payload = event.optJSONObject("payload") ?: JSONObject(),
+                createdAt = event.optString("created_at"),
+            )
         }
     }
 

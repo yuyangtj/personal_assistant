@@ -32,6 +32,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,7 @@ import com.personalassistant.avatar.shell.assistant.Connection
 import com.personalassistant.avatar.shell.assistant.PendingPullRequestApproval
 import com.personalassistant.avatar.shell.assistant.UiState
 import com.personalassistant.avatar.shell.avatar.AvatarCharacter
+import kotlinx.coroutines.delay
 
 private val Panel = Color(0xE60A171C)
 private val Accent = Color(0xFF49D9C6)
@@ -79,26 +81,125 @@ fun AssistantScreen(
     onApprovePullRequest: () -> Unit,
     onRejectPullRequest: () -> Unit,
     onApprovalToken: (String) -> Unit,
+    onRefreshTasks: () -> Unit,
+    onRefreshTaskDetails: () -> Unit,
+    onOpenTask: (String) -> Unit,
+    onCloseTask: () -> Unit,
+    onCancelTaskFromCenter: () -> Unit,
+    onApproveTaskCenterPullRequest: () -> Unit,
+    onRejectTaskCenterPullRequest: () -> Unit,
+    onRefreshChats: () -> Unit,
+    onNewChat: () -> Unit,
+    onResumeChat: (String) -> Unit,
+    onRefreshThread: () -> Unit,
+    onSendChatMessage: (String) -> Unit,
+    onCreateTaskFromMessage: (String) -> Unit,
+    onConfirmProposal: () -> Unit,
+    onDismissProposal: () -> Unit,
+    onDiscussTask: (String) -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
+    var section by remember { mutableStateOf(AssistantSection.ASSISTANT) }
+    var threadOpen by remember { mutableStateOf(false) }
+    val openChat = state.chatSession.takeIf { threadOpen }
+
+    LaunchedEffect(section, threadOpen, state.taskCenter.selectedTask?.id) {
+        when {
+            section == AssistantSection.ASSISTANT -> Unit
+            // An open transcript polls so its embedded task cards stay live.
+            section == AssistantSection.CHATS && threadOpen -> while (true) {
+                delay(TASK_REFRESH_INTERVAL_MS)
+                onRefreshThread()
+            }
+            section == AssistantSection.CHATS -> onRefreshChats()
+            else -> while (true) {
+                if (state.taskCenter.selectedTask == null) onRefreshTasks() else onRefreshTaskDetails()
+                delay(TASK_REFRESH_INTERVAL_MS)
+            }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        StatusBar(
-            state = state,
-            onSettings = { showSettings = true },
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
-        ConversationPanel(
-            state = state,
-            onSend = onSend,
-            onCancel = onCancel,
-            voiceAvailable = voiceAvailable,
-            onMicrophone = onMicrophone,
-            onConfirmAction = onConfirmAction,
-            onDismissAction = onDismissAction,
-            onOpenPullRequest = onOpenPullRequest,
-            onApprovePullRequest = onApprovePullRequest,
-            onRejectPullRequest = onRejectPullRequest,
+        when (section) {
+            AssistantSection.ASSISTANT -> {
+                StatusBar(
+                    state = state,
+                    onSettings = { showSettings = true },
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+                ConversationPanel(
+                    state = state,
+                    onSend = onSend,
+                    onCancel = onCancel,
+                    voiceAvailable = voiceAvailable,
+                    onMicrophone = onMicrophone,
+                    onConfirmAction = onConfirmAction,
+                    onDismissAction = onDismissAction,
+                    onOpenPullRequest = onOpenPullRequest,
+                    onApprovePullRequest = onApprovePullRequest,
+                    onRejectPullRequest = onRejectPullRequest,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 60.dp),
+                )
+            }
+            AssistantSection.TASKS -> TaskCenterScreen(
+                state = state.taskCenter,
+                hasApprovalToken = state.hasApprovalToken,
+                onRefresh = onRefreshTasks,
+                onRefreshDetails = onRefreshTaskDetails,
+                onOpenTask = onOpenTask,
+                onCloseTask = onCloseTask,
+                onCancelTask = onCancelTaskFromCenter,
+                onOpenPullRequest = onOpenPullRequest,
+                onApprovePullRequest = onApproveTaskCenterPullRequest,
+                onRejectPullRequest = onRejectTaskCenterPullRequest,
+                onDiscussTask = { taskId ->
+                    onDiscussTask(taskId)
+                    onCloseTask()
+                    section = AssistantSection.CHATS
+                    threadOpen = true
+                },
+            )
+            AssistantSection.CHATS -> if (openChat != null) {
+                ChatThreadScreen(
+                    chat = openChat,
+                    state = state.chatCenter,
+                    assistantName = state.character.label,
+                    isBusy = state.isBusy,
+                    onBack = { threadOpen = false },
+                    onRefresh = onRefreshThread,
+                    onSend = onSendChatMessage,
+                    onOpenTask = { taskId ->
+                        onOpenTask(taskId)
+                        section = AssistantSection.TASKS
+                    },
+                    onCreateTask = onCreateTaskFromMessage,
+                    onConfirmProposal = onConfirmProposal,
+                    onDismissProposal = onDismissProposal,
+                )
+            } else {
+                ChatSessionsScreen(
+                    state = state.chatCenter,
+                    activeChatSessionId = state.chatSession?.id,
+                    onRefresh = onRefreshChats,
+                    onNewChat = {
+                        onNewChat()
+                        threadOpen = true
+                    },
+                    onResumeChat = { chatSessionId ->
+                        onResumeChat(chatSessionId)
+                        threadOpen = true
+                    },
+                )
+            }
+        }
+        AssistantNavigation(
+            section = section,
+            attentionCount = state.taskCenter.tasks.count { it.needsAttention },
+            onSection = { next ->
+                section = next
+                if (next == AssistantSection.TASKS) onRefreshTasks()
+                if (next == AssistantSection.CHATS) onRefreshChats()
+            },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
@@ -112,6 +213,51 @@ fun AssistantScreen(
             onTestConnection = onTestConnection,
             onApprovalToken = onApprovalToken,
         )
+    }
+}
+
+private enum class AssistantSection { ASSISTANT, CHATS, TASKS }
+
+private const val TASK_REFRESH_INTERVAL_MS = 3_000L
+
+@Composable
+private fun AssistantNavigation(
+    section: AssistantSection,
+    attentionCount: Int,
+    onSection: (AssistantSection) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color(0xFF0A171C))
+            .navigationBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        AssistantSection.entries.forEach { item ->
+            val selected = item == section
+            val label = when (item) {
+                AssistantSection.ASSISTANT -> "Assistant"
+                AssistantSection.CHATS -> "Chats"
+                AssistantSection.TASKS -> if (attentionCount > 0) "Tasks · $attentionCount" else "Tasks"
+            }
+            TextButton(
+                onClick = { onSection(item) },
+                modifier = Modifier
+                    .weight(1f)
+                    .background(
+                        if (selected) Color(0xFF17343A) else Color.Transparent,
+                        RoundedCornerShape(16.dp),
+                    ),
+            ) {
+                Text(
+                    label,
+                    color = if (selected) Accent else Muted,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                )
+            }
+        }
     }
 }
 
@@ -195,6 +341,17 @@ private fun ConversationPanel(
             .imePadding()
             .padding(horizontal = 20.dp, vertical = 16.dp),
     ) {
+        state.chatSession?.let { chat ->
+            Text("CONVERSATION", color = Muted, style = MaterialTheme.typography.labelSmall)
+            Text(
+                chat.title,
+                color = Accent,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
         state.lastRequest?.let {
             Text("YOU", color = Muted, style = MaterialTheme.typography.labelSmall)
             Text(it, color = TextPrimary, maxLines = 2, style = MaterialTheme.typography.bodyMedium)

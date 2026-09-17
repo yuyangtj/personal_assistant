@@ -9,15 +9,26 @@ from sqlalchemy import text
 
 from app.api.schemas import (
     AddMessageRequest,
+    AppendChatMessageRequest,
+    AppendChatMessageResponse,
     CapabilityListResponse,
+    ChatMessageListResponse,
+    ChatMessageResponse,
+    ChatSessionListResponse,
+    ChatSessionResponse,
+    CreateChatSessionRequest,
+    CreateTaskFromMessageRequest,
     CreateTaskRequest,
     EventListResponse,
     EventResponse,
+    FollowUpTaskRequest,
     HealthResponse,
     PendingApprovalResponse,
     PullRequestApprovalRequest,
     SpeechRequest,
+    TaskContextResponse,
     TaskListResponse,
+    TaskProposalResponse,
     TaskResponse,
 )
 from app.capabilities.models import CapabilityKind
@@ -27,6 +38,8 @@ from app.integrations.github import GitHubError
 from app.service import (
     ApprovalConflictError,
     ApprovalNotFoundError,
+    ChatMessageNotFoundError,
+    ChatSessionNotFoundError,
     TaskNotFoundError,
     TaskService,
 )
@@ -36,6 +49,147 @@ router = APIRouter()
 
 def _service(request: Request) -> TaskService:
     return request.app.state.task_service
+
+
+@router.post(
+    "/chat-sessions",
+    response_model=ChatSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_chat_session(
+    body: CreateChatSessionRequest,
+    request: Request,
+) -> ChatSessionResponse:
+    try:
+        return ChatSessionResponse.model_validate(
+            _service(request).create_chat_session(title=body.title)
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.get("/chat-sessions", response_model=ChatSessionListResponse)
+def list_chat_sessions(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> ChatSessionListResponse:
+    sessions = _service(request).list_chat_sessions(limit=limit)
+    return ChatSessionListResponse(
+        sessions=[ChatSessionResponse.model_validate(chat) for chat in sessions]
+    )
+
+
+@router.get("/chat-sessions/{chat_session_id}", response_model=ChatSessionResponse)
+def get_chat_session(chat_session_id: str, request: Request) -> ChatSessionResponse:
+    try:
+        return ChatSessionResponse.model_validate(
+            _service(request).get_chat_session(chat_session_id)
+        )
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+
+
+@router.get("/chat-sessions/{chat_session_id}/tasks", response_model=TaskListResponse)
+def list_chat_session_tasks(
+    chat_session_id: str,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> TaskListResponse:
+    try:
+        tasks = _service(request).list_chat_session_tasks(chat_session_id, limit=limit)
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+    return TaskListResponse(tasks=[TaskResponse.from_model(task) for task in tasks])
+
+
+@router.get(
+    "/chat-sessions/{chat_session_id}/messages",
+    response_model=ChatMessageListResponse,
+)
+def list_chat_session_messages(
+    chat_session_id: str,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=500)] = 500,
+) -> ChatMessageListResponse:
+    try:
+        messages = _service(request).list_chat_messages(chat_session_id, limit=limit)
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+    return ChatMessageListResponse(
+        messages=[ChatMessageResponse.from_model(message) for message in messages]
+    )
+
+
+@router.post(
+    "/chat-sessions/{chat_session_id}/messages",
+    response_model=AppendChatMessageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def append_chat_message(
+    chat_session_id: str,
+    body: AppendChatMessageRequest,
+    request: Request,
+) -> AppendChatMessageResponse:
+    """Record what the user said. Nothing is executed until a task is confirmed."""
+    try:
+        message, proposal = _service(request).append_chat_message(
+            chat_session_id,
+            content=body.content,
+        )
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return AppendChatMessageResponse(
+        message=ChatMessageResponse.from_model(message),
+        proposal=(
+            TaskProposalResponse.model_validate(proposal.as_dict())
+            if proposal is not None
+            else None
+        ),
+    )
+
+
+@router.post(
+    "/chat-sessions/{chat_session_id}/messages/{message_id}/task",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_task_from_chat_message(
+    chat_session_id: str,
+    message_id: str,
+    body: CreateTaskFromMessageRequest,
+    request: Request,
+) -> TaskResponse:
+    """Launch the work a chat message asked for, on the user's explicit confirmation."""
+    try:
+        task = _service(request).create_task_from_message(
+            chat_session_id,
+            message_id,
+            goal=body.goal,
+            required_capabilities=body.required_capabilities,
+            source_context=body.source_context,
+        )
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+    except ChatMessageNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat message not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return TaskResponse.from_model(task)
+
+
+@router.post(
+    "/tasks/{task_id}/chat-session",
+    response_model=ChatSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def ensure_task_chat_session(task_id: str, request: Request) -> ChatSessionResponse:
+    try:
+        chat_session = _service(request).ensure_task_chat_session(task_id)
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+    return ChatSessionResponse.model_validate(chat_session)
 
 
 @router.post("/speech", response_class=Response)
@@ -186,9 +340,12 @@ def create_task(body: CreateTaskRequest, request: Request) -> TaskResponse:
             goal=body.goal,
             required_capabilities=body.required_capabilities,
             source_context=body.source_context,
+            chat_session_id=body.chat_session_id,
             external_source=body.external_source,
             external_key=body.external_key,
         )
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return TaskResponse.from_model(task)
@@ -224,6 +381,43 @@ def get_task(task_id: str, request: Request) -> TaskResponse:
         return TaskResponse.from_model(_service(request).get_task(task_id))
     except TaskNotFoundError as error:
         raise HTTPException(status_code=404, detail="Task not found") from error
+
+
+@router.get("/tasks/{task_id}/context", response_model=TaskContextResponse)
+def get_task_context(task_id: str, request: Request) -> TaskContextResponse:
+    """The curated summary a follow-up conversation is given, without the event stream."""
+    try:
+        return TaskContextResponse.model_validate(_service(request).task_context(task_id))
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+
+
+@router.post(
+    "/tasks/{task_id}/follow-up",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_follow_up_task(
+    task_id: str,
+    body: FollowUpTaskRequest,
+    request: Request,
+) -> TaskResponse:
+    """A new task continuing an earlier one, carrying only its curated context."""
+    try:
+        task = _service(request).create_follow_up_task(
+            task_id,
+            request=body.request,
+            goal=body.goal,
+            required_capabilities=body.required_capabilities,
+            source_context=body.source_context,
+        )
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return TaskResponse.from_model(task)
 
 
 @router.get("/tasks/{task_id}/events", response_model=EventListResponse)
