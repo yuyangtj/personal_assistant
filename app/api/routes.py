@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hmac
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy import text
 
 from app.api.schemas import (
@@ -45,6 +46,8 @@ from app.service import (
 )
 
 router = APIRouter()
+
+WEB_INDEX = Path(__file__).resolve().parents[1] / "web" / "index.html"
 
 
 def _service(request: Request) -> TaskService:
@@ -443,6 +446,19 @@ def cancel_task(task_id: str, request: Request) -> TaskResponse:
         return TaskResponse.from_model(_service(request).cancel_task(task_id))
     except TaskNotFoundError as error:
         raise HTTPException(status_code=404, detail="Task not found") from error
+
+
+@router.get("/ui", include_in_schema=False)
+def web_console() -> FileResponse:
+    """A local console for exercising the chat and task flow from a browser."""
+    if not WEB_INDEX.is_file():
+        raise HTTPException(status_code=404, detail="Web console is not installed")
+    return FileResponse(WEB_INDEX, media_type="text/html")
+
+
+@router.get("/", include_in_schema=False)
+def web_console_root() -> RedirectResponse:
+    return RedirectResponse(url="/ui", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @router.get("/health", response_model=HealthResponse)

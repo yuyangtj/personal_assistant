@@ -45,6 +45,12 @@ This starts PostgreSQL, applies the ordered SQL files in `migrations/`, and runs
 and worker. The API is available at <http://localhost:8000>; interactive documentation
 is at <http://localhost:8000/docs>.
 
+The built-in browser console is available at <http://localhost:8000/>. To publish that
+console on a remote server with automatic HTTPS, login protection, and private backend
+containers, use the Phase 1 deployment in
+[`docs/remote-hosting.md`](docs/remote-hosting.md). Remote Android connectivity is kept
+as a separate Phase 2.
+
 Create a task:
 
 ```bash

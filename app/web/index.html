@@ -1,0 +1,321 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assistant Console</title>
+<style>
+  :root {
+    --bg: #071116; --surface: #102127; --raised: #16303a; --user: #145e5a;
+    --accent: #49d9c6; --text: #e6f1f2; --muted: #9fb4b8;
+    --danger: #ff8e86; --warn: #ffc46b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    height: 100vh; display: grid; grid-template-columns: 260px 1fr 340px;
+  }
+  @media (max-width: 900px) { body { grid-template-columns: 1fr; height: auto; } }
+  aside, main, section.detail { height: 100vh; overflow-y: auto; }
+  @media (max-width: 900px) { aside, main, section.detail { height: auto; max-height: 70vh; } }
+  aside { border-right: 1px solid #1d3540; padding: 14px; }
+  section.detail { border-left: 1px solid #1d3540; padding: 14px; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  button {
+    font: inherit; border: 0; border-radius: 8px; padding: 7px 12px;
+    background: #168c87; color: #fff; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--accent); padding: 6px 8px; }
+  button.quiet { background: #23404b; color: var(--text); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .chat-item {
+    padding: 9px 10px; border-radius: 9px; cursor: pointer; margin-bottom: 4px;
+    border: 1px solid transparent; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chat-item:hover { background: var(--surface); }
+  .chat-item.active { background: var(--surface); border-color: #2b4d59; }
+  .chat-item .when { color: var(--muted); font-size: 11px; }
+  main { display: flex; flex-direction: column; padding: 14px; gap: 10px; }
+  #transcript { flex: 1; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  .msg { max-width: 82%; }
+  .msg .who { color: var(--muted); font-size: 11px; letter-spacing: .06em; margin-bottom: 3px; }
+  .bubble { padding: 11px 13px; border-radius: 16px; background: var(--surface); white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; }
+  .msg.user .bubble { background: var(--user); }
+  .msg.system { align-self: center; max-width: 100%; width: 100%; }
+  .msg.system .bubble { background: var(--raised); color: var(--muted); font-size: 12.5px; border-radius: 10px; }
+  .taskcard {
+    margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: #00000033;
+    display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12.5px;
+  }
+  .taskcard:hover { background: #00000055; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+  .dot.run { background: var(--warn); animation: pulse 1.1s infinite; }
+  .dot.fail { background: var(--danger); }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .grow { flex: 1; }
+  .proposal { border: 1px solid #2b4d59; background: var(--raised); border-radius: 12px; padding: 13px; }
+  .proposal .why { color: var(--muted); font-size: 12.5px; }
+  .proposal .goal { margin: 7px 0; }
+  .badge {
+    display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 999px;
+    background: #3a2c14; color: var(--warn); margin-left: 6px;
+  }
+  form { display: flex; gap: 8px; }
+  textarea {
+    flex: 1; resize: none; background: var(--surface); color: var(--text);
+    border: 1px solid #23404b; border-radius: 10px; padding: 10px; font: inherit;
+  }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .kv { display: grid; grid-template-columns: 96px 1fr; gap: 3px 8px; font-size: 12.5px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-word; }
+  pre {
+    background: #000; border-radius: 8px; padding: 10px; overflow-x: auto;
+    font-size: 11.5px; color: #cfe; max-height: 260px;
+  }
+  .ev { font-size: 11.5px; color: var(--muted); border-left: 2px solid #23404b; padding: 2px 0 2px 8px; }
+  .err { color: var(--danger); font-size: 12.5px; }
+  .empty { color: var(--muted); text-align: center; margin-top: 40px; }
+  a { color: var(--accent); }
+</style>
+
+<aside>
+  <h1>Conversations</h1>
+  <div class="sub">Chat is free. Tasks are confirmed.</div>
+  <div class="row"><button id="new-chat">New conversation</button>
+    <button class="ghost" id="reload-chats">Refresh</button></div>
+  <div id="chat-list" style="margin-top:12px"></div>
+</aside>
+
+<main>
+  <div class="row"><h1 id="chat-title" class="grow">No conversation open</h1>
+    <span id="status" class="sub" style="margin:0"></span></div>
+  <div id="transcript"><div class="empty">Start or pick a conversation on the left.</div></div>
+  <div id="proposal-slot"></div>
+  <div id="error" class="err"></div>
+  <form id="composer">
+    <textarea id="input" rows="2" placeholder="Say something — this stores a message and runs nothing on its own…"></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+</main>
+
+<section class="detail">
+  <div class="row"><h1 class="grow">Task</h1><button class="ghost" id="close-task">Close</button></div>
+  <div id="task-detail"><div class="sub">Select a task card in the transcript.</div></div>
+</section>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { chats: [], chatId: null, messages: [], tasks: [], proposal: null,
+                proposalFor: null, taskId: null, busy: false, timer: null };
+
+async function api(path, options) {
+  const res = await fetch(path, {
+    headers: { "content-type": "application/json" }, ...options,
+  });
+  if (!res.ok) {
+    let detail = res.status + " " + res.statusText;
+    try { const body = await res.json(); if (body.detail) detail = body.detail; } catch (_) {}
+    throw new Error(detail);
+  }
+  return res.status === 204 ? null : res.json();
+}
+function fail(error) { $("error").textContent = error.message || String(error); }
+function clearError() { $("error").textContent = ""; }
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const label = (s) => String(s || "").replace(/_/g, " ");
+const active = (t) => !["completed", "failed", "cancelled"].includes(t.status);
+
+async function loadChats() {
+  try {
+    state.chats = (await api("/chat-sessions")).sessions;
+    $("chat-list").innerHTML = state.chats.map((c) => `
+      <div class="chat-item ${c.id === state.chatId ? "active" : ""}" data-chat="${c.id}">
+        <div>${esc(c.title)}</div>
+        <div class="when">${new Date(c.updated_at).toLocaleString()}</div>
+      </div>`).join("") || `<div class="sub">No conversations yet.</div>`;
+    clearError();
+  } catch (e) { fail(e); }
+}
+
+async function openChat(id) {
+  state.chatId = id; state.proposal = null; state.proposalFor = null;
+  await Promise.all([loadChats(), refreshTranscript()]);
+}
+
+async function refreshTranscript() {
+  if (!state.chatId) return;
+  try {
+    const [msgs, tasks] = await Promise.all([
+      api(`/chat-sessions/${state.chatId}/messages`),
+      api(`/chat-sessions/${state.chatId}/tasks`),
+    ]);
+    state.messages = msgs.messages; state.tasks = tasks.tasks;
+    const chat = state.chats.find((c) => c.id === state.chatId);
+    $("chat-title").textContent = chat ? chat.title : "Conversation";
+    renderTranscript();
+    // Keep polling only while something is actually running.
+    const running = state.tasks.some(active);
+    $("status").textContent = running ? "task running…" : "";
+    clearInterval(state.timer);
+    if (running) state.timer = setInterval(refreshTranscript, 2000);
+    if (state.taskId) renderTask(state.taskId);
+    clearError();
+  } catch (e) { fail(e); }
+}
+
+function renderTranscript() {
+  const byId = Object.fromEntries(state.tasks.map((t) => [t.id, t]));
+  const atBottom = $("transcript").scrollHeight - $("transcript").scrollTop
+    - $("transcript").clientHeight < 80;
+  $("transcript").innerHTML = state.messages.map((m) => {
+    const task = m.linked_task_id ? byId[m.linked_task_id] : null;
+    const who = m.role === "user" ? "YOU" : m.role === "system" ? "TASK REFERENCE" : "ASSISTANT";
+    const canCreate = m.role === "user" && !m.linked_task_id;
+    return `<div class="msg ${m.role}">
+      <div class="who">${who}</div>
+      <div class="bubble">${esc(m.content)}
+        ${canCreate ? `<div style="margin-top:6px">
+          <button class="ghost" data-create="${m.id}">Create task</button></div>` : ""}
+        ${task ? `<div class="taskcard" data-task="${task.id}">
+          <span class="dot ${active(task) ? "run" : task.status === "failed" ? "fail" : ""}"></span>
+          <span class="grow">Task · ${esc(label(task.status))}</span><span>View ›</span>
+        </div>` : ""}
+      </div></div>`;
+  }).join("") || `<div class="empty">No messages yet.</div>`;
+  if (atBottom) $("transcript").scrollTop = $("transcript").scrollHeight;
+  renderProposal();
+}
+
+function renderProposal() {
+  if (!state.proposal) { $("proposal-slot").innerHTML = ""; return; }
+  const p = state.proposal;
+  $("proposal-slot").innerHTML = `<div class="proposal">
+    <strong>Create a task?</strong>${p.consequential ? `<span class="badge">consequential</span>` : ""}
+    <div class="why">${esc(p.reason)}</div>
+    <div class="goal">${esc(p.suggested_goal)}</div>
+    ${p.required_capabilities.length ? `<div class="why">Needs: ${esc(p.required_capabilities.join(", "))}</div>` : ""}
+    <div class="row" style="margin-top:10px">
+      <button id="confirm">Create task</button>
+      <button class="quiet" id="decline">Not now</button></div></div>`;
+  $("confirm").onclick = () => createTask(state.proposalFor, p);
+  $("decline").onclick = () => { state.proposal = null; renderProposal(); };
+}
+
+async function send(text) {
+  state.busy = true; $("send").disabled = true;
+  try {
+    if (!state.chatId) { state.chatId = (await api("/chat-sessions", { method: "POST", body: "{}" })).id; }
+    const posted = await api(`/chat-sessions/${state.chatId}/messages`, {
+      method: "POST", body: JSON.stringify({ content: text }),
+    });
+    state.proposal = posted.proposal; state.proposalFor = posted.message.id;
+    await refreshTranscript();
+    // Ordinary conversation runs straight through; consequential work waits for a tap.
+    if (!posted.proposal || !posted.proposal.consequential) {
+      state.proposal = null;
+      await createTask(posted.message.id, posted.proposal);
+    }
+  } catch (e) { fail(e); }
+  finally { state.busy = false; $("send").disabled = false; }
+}
+
+async function createTask(messageId, proposal) {
+  state.proposal = null;
+  try {
+    const body = {
+      required_capabilities: proposal ? proposal.required_capabilities : [],
+      source_context: { client: "web-console",
+        local_time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+    };
+    if (proposal && proposal.suggested_goal) body.goal = proposal.suggested_goal;
+    const task = await api(`/chat-sessions/${state.chatId}/messages/${messageId}/task`,
+      { method: "POST", body: JSON.stringify(body) });
+    state.taskId = task.id;
+    await refreshTranscript();
+  } catch (e) { fail(e); }
+}
+
+async function renderTask(id) {
+  state.taskId = id;
+  try {
+    const [task, ctx, events] = await Promise.all([
+      api(`/tasks/${id}`), api(`/tasks/${id}/context`), api(`/tasks/${id}/events`),
+    ]);
+    $("task-detail").innerHTML = `
+      <dl class="kv">
+        <dt>Status</dt><dd>${esc(label(task.status))}</dd>
+        <dt>Request</dt><dd>${esc(task.original_request)}</dd>
+        <dt>Goal</dt><dd>${esc(task.current_goal)}</dd>
+        <dt>Needs</dt><dd>${esc(task.required_capabilities.join(", ") || "—")}</dd>
+        <dt>Origin msg</dt><dd>${task.origin_message_id ? esc(task.origin_message_id.slice(0, 8)) : "—"}</dd>
+        <dt>Parent</dt><dd>${task.parent_task_id ? esc(task.parent_task_id.slice(0, 8)) : "—"}</dd>
+      </dl>
+      <div class="row" style="margin-top:10px">
+        ${active(task) ? `<button class="quiet" id="cancel-task">Cancel</button>` : ""}
+        <button class="ghost" id="discuss">Discuss in chat</button></div>
+      <h2>Curated context</h2>
+      <div class="sub">Exactly what a follow-up prompt is given.</div>
+      <pre>${esc(JSON.stringify(ctx, null, 2))}</pre>
+      <h2>Follow-up task</h2>
+      <form id="followup-form"><textarea id="followup" rows="2"
+        placeholder="Continue this work…"></textarea><button type="submit">Start</button></form>
+      <h2>Events (${events.events.length})</h2>
+      ${events.events.map((e) => `<div class="ev">${e.sequence}. ${esc(e.event_type)}</div>`).join("")}`;
+    const cancel = $("cancel-task");
+    if (cancel) cancel.onclick = async () => {
+      try { await api(`/tasks/${id}/cancel`, { method: "POST" }); await refreshTranscript(); }
+      catch (e) { fail(e); }
+    };
+    $("discuss").onclick = async () => {
+      try {
+        const chat = await api(`/tasks/${id}/chat-session`, { method: "POST" });
+        await openChat(chat.id);
+      } catch (e) { fail(e); }
+    };
+    $("followup-form").onsubmit = async (ev) => {
+      ev.preventDefault();
+      const text = $("followup").value.trim();
+      if (!text) return;
+      try {
+        const task = await api(`/tasks/${id}/follow-up`,
+          { method: "POST", body: JSON.stringify({ request: text }) });
+        $("followup").value = "";
+        if (task.chat_session_id) await openChat(task.chat_session_id);
+        await renderTask(task.id);
+      } catch (e) { fail(e); }
+    };
+  } catch (e) { fail(e); }
+}
+
+document.addEventListener("click", (e) => {
+  const chat = e.target.closest("[data-chat]");
+  if (chat) return openChat(chat.dataset.chat);
+  const task = e.target.closest("[data-task]");
+  if (task) return renderTask(task.dataset.task);
+  const create = e.target.closest("[data-create]");
+  if (create) return createTask(create.dataset.create, null);
+});
+$("composer").onsubmit = (e) => {
+  e.preventDefault();
+  const text = $("input").value.trim();
+  if (!text || state.busy) return;
+  $("input").value = ""; clearError(); send(text);
+};
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); }
+});
+$("new-chat").onclick = async () => {
+  try { const c = await api("/chat-sessions", { method: "POST", body: "{}" }); await openChat(c.id); }
+  catch (e) { fail(e); }
+};
+$("reload-chats").onclick = loadChats;
+$("close-task").onclick = () => {
+  state.taskId = null;
+  $("task-detail").innerHTML = `<div class="sub">Select a task card in the transcript.</div>`;
+};
+loadChats();
+</script>

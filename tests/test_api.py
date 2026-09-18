@@ -481,3 +481,18 @@ def test_pull_request_rejection_leaves_pr_unmerged_and_cancels_task(
         assert execution is not None
         assert execution.status == "cancelled"
         assert execution.completed_at is not None
+
+
+def test_web_console_is_served(client: TestClient) -> None:
+    response = client.get("/ui")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "<title>Assistant Console</title>" in response.text
+
+
+def test_root_redirects_to_web_console(client: TestClient) -> None:
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/ui"
