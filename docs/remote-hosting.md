@@ -61,6 +61,27 @@ docker compose --env-file .env.remote -f compose.remote.yaml pull
 docker compose --env-file .env.remote -f compose.remote.yaml up -d --build
 ```
 
+After the first deployment, use the checked-in redeploy script. It pulls `origin/main`,
+sets MiniMax as the primary conversation provider, validates configuration, creates a
+timestamped PostgreSQL backup when the database is already running, rebuilds the stack,
+and waits for the API health check:
+
+```bash
+./scripts/redeploy-remote.sh
+```
+
+MiniMax is the default. To deliberately switch the primary provider while retaining
+automatic fallback, pass `kimi` or `minimax`:
+
+```bash
+./scripts/redeploy-remote.sh kimi
+./scripts/redeploy-remote.sh minimax
+```
+
+On a server that predates this script, obtain it once with `git pull --ff-only origin
+main`, then use the script for subsequent deployments. Backups are written to the
+Git-ignored `backups/` directory with permissions restricted to the current user.
+
 The ordered SQL migrations are idempotent and run before each API/worker rollout.
 PostgreSQL and Caddy certificate state live in named Docker volumes.
 

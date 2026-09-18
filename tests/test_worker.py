@@ -43,7 +43,7 @@ def make_worker(
     )
 
 
-def test_runtime_conversation_uses_kimi_by_default() -> None:
+def test_runtime_conversation_uses_kimi_when_minimax_is_not_configured() -> None:
     executor = build_conversation_executor(Settings(kimi_api_key="sk-test"))
 
     assert executor is not None
@@ -79,7 +79,7 @@ def test_runtime_conversation_builds_preferred_provider_chain() -> None:
 
     assert executor is not None
     assert isinstance(executor.client, FallbackChatClient)
-    assert [client.provider for client in executor.client.clients] == ["kimi", "minimax"]
+    assert [client.provider for client in executor.client.clients] == ["minimax", "kimi"]
     executor.client.close()
 
 

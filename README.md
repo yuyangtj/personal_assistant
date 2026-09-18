@@ -229,13 +229,13 @@ one to infer capabilities and one to execute the selected capability. Those call
 may use different providers. Provider, model, latency, attempts, and token usage are
 recorded with the task analysis.
 
-For example, to analyze with MiniMax M3 while keeping the default Kimi conversation
+For example, to analyze with Kimi while keeping the default MiniMax conversation
 provider:
 
 ```bash
 ASSISTANT_MANAGER_MODEL_ENABLED=true \
-ASSISTANT_MANAGER_MODEL_PROVIDER=minimax \
-ASSISTANT_MANAGER_MODEL=MiniMax-M3 \
+ASSISTANT_MANAGER_MODEL_PROVIDER=kimi \
+ASSISTANT_MANAGER_MODEL=kimi-for-coding-highspeed \
 docker compose up --build
 ```
 
@@ -249,7 +249,7 @@ selected (`CapabilityRegistry.restricted_to_adapters`).
 
 | Variable | Default |
 | --- | --- |
-| `ASSISTANT_CONVERSATION_MODEL_PROVIDER` | `kimi` (`kimi` or `minimax`) |
+| `ASSISTANT_CONVERSATION_MODEL_PROVIDER` | `minimax` (`kimi` or `minimax`) |
 | `ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER` | `auto` (the other routine provider) |
 | `ASSISTANT_CONVERSATION_MODEL_BASE_URL` | unset; use the selected provider's URL |
 | `ASSISTANT_CONVERSATION_MODEL` | unset; use the selected provider's model |

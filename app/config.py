@@ -45,7 +45,7 @@ class Settings:
     github_remote: str = "origin"
     github_draft_pull_requests: bool = True
     approval_token: str | None = None
-    conversation_model_provider: str = "kimi"
+    conversation_model_provider: str = "minimax"
     conversation_model_fallback_provider: str | None = "auto"
     conversation_model_base_url: str | None = None
     conversation_model_name: str | None = None
