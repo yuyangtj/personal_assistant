@@ -1,0 +1,18 @@
+id: repository-onboarding
+name: Repository onboarding
+description: Propose and validate a new repository before adding it to the trusted registry.
+required_inputs:
+  - github_repository
+stages:
+  - id: inspect
+    name: Inspect repository metadata and access
+    kind: validation
+  - id: propose
+    name: Create registry change pull request
+    kind: agent
+  - id: approve_registry
+    name: Approve registry and permission scope
+    kind: approval
+  - id: activate
+    name: Activate operator-managed checkout
+    kind: trusted_action

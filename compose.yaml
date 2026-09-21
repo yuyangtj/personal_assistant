@@ -37,6 +37,10 @@ services:
     environment:
       ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:assistant@postgres:5432/assistant
       ASSISTANT_CAPABILITIES_DIRECTORY: /service/capabilities
+      ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
+      ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
+      ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH: ${ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH:-}
+      ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH: ${ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH:-}
       # Gemini is deliberately exposed only to the API's speech endpoint, never the worker.
       GEMINI_TTS_API_KEY: ${GEMINI_TTS_API_KEY:-}
       ASSISTANT_GEMINI_TTS_BASE_URL: ${ASSISTANT_GEMINI_TTS_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
@@ -60,6 +64,11 @@ services:
     environment:
       ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:assistant@postgres:5432/assistant
       ASSISTANT_CAPABILITIES_DIRECTORY: /service/capabilities
+      ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
+      ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
+      ASSISTANT_DEFAULT_REPOSITORY_ID: ${ASSISTANT_DEFAULT_REPOSITORY_ID:-personal-assistant}
+      ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH: ${ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH:-}
+      ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH: ${ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH:-}
       ASSISTANT_WORKER_ID: worker-compose
       # Read from the host environment; never commit keys to this file.
       KIMI_API_KEY: ${KIMI_API_KEY:-}

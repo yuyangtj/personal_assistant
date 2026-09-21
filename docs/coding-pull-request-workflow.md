@@ -21,8 +21,9 @@ flowchart LR
     merge --> complete[Complete task + audit events]
 ```
 
-- Repository path, GitHub repository, base branch, and remote are operator configuration;
-  task input cannot redirect the agent to another repository.
+- Repository path, GitHub repository, base branch, and remote come from the operator-owned
+  repository registry. Task input may select a registered ID but cannot redirect the agent
+  to an arbitrary repository or filesystem path.
 - Coding runners receive a reduced environment and run non-interactively. The task prompt
   forbids publishing or merging; the trusted host owns the intended commit, push, PR, and
   merge path. Run third-party CLIs under an OS/container sandbox in production because
@@ -53,15 +54,28 @@ Codex authentication, and Git push credentials:
 
 ```shell
 export ASSISTANT_CODE_AGENT_ENABLED=true
-export ASSISTANT_CODE_REPOSITORY_PATH=/absolute/path/to/repository
+export ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH=/absolute/path/to/personal_assistant
+export ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH=/absolute/path/to/analytics-agent-playground
+export ASSISTANT_DEFAULT_REPOSITORY_ID=personal-assistant
 export ASSISTANT_CODE_WORKTREE_ROOT=/absolute/path/to/temporary-worktrees
-export ASSISTANT_GITHUB_REPOSITORY=owner/repository
 export ASSISTANT_GITHUB_TOKEN=github-token
 export ASSISTANT_APPROVAL_TOKEN=separate-long-random-secret
 export ASSISTANT_GITHUB_BASE_BRANCH=main
 export ASSISTANT_CODE_AGENT_PROVIDERS=kimi,minimax-claude,codex
 uv run python -m app.worker
 ```
+
+Repository definitions live in `repositories/*.yaml`. Each manifest fixes the GitHub
+`owner/repository`, base branch, remote name, aliases, and the environment variable that
+supplies its local checkout path. Adding a repository therefore has two explicit parts:
+
+1. Add and review its YAML manifest.
+2. Clone it on the worker host and set that manifest's `path_env` variable.
+
+The initial registry contains `personal-assistant` and `analytics-agent-playground`.
+`ASSISTANT_CODE_REPOSITORY_PATH` and `ASSISTANT_GITHUB_REPOSITORY` remain compatible with
+the original single-repository personal-assistant setup, but the per-repository path
+variables are preferred.
 
 Kimi Code and Codex reuse their respective CLI authentication. The MiniMax Claude Code
 runner receives `MINIMAX_API_KEY` as `ANTHROPIC_AUTH_TOKEN` and uses
@@ -105,6 +119,7 @@ curl -X POST http://localhost:8000/tasks \
   -H 'content-type: application/json' \
   -d '{
     "request":"Add validation for the profile endpoint and test it",
+    "repository_id":"analytics-agent-playground",
     "required_capabilities":["coding","pull_request_creation"]
   }'
 ```

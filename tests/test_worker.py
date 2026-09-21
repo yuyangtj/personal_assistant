@@ -194,7 +194,7 @@ def test_runtime_manager_rejects_unknown_provider() -> None:
 def test_runtime_coding_agent_is_opt_in_and_requires_scoped_configuration() -> None:
     assert build_coding_executor(Settings()) is None
 
-    with pytest.raises(ValueError, match="ASSISTANT_CODE_REPOSITORY_PATH"):
+    with pytest.raises(ValueError, match="ASSISTANT_GITHUB_TOKEN"):
         build_coding_executor(Settings(code_agent_enabled=True))
 
 
@@ -216,10 +216,11 @@ def test_runtime_builds_configured_coding_pull_request_executor(tmp_path) -> Non
     )
 
     assert executor is not None
-    assert executor.repository_path == repository
-    assert executor.base_branch == "develop"
-    assert executor.agent.runners[0].executable == "/opt/codex"
-    assert executor.agent.runners[0].model == "coding-model"
+    repository_executor = executor.executors["personal-assistant"]
+    assert repository_executor.repository_path == repository
+    assert repository_executor.base_branch == "develop"
+    assert repository_executor.agent.runners[0].executable == "/opt/codex"
+    assert repository_executor.agent.runners[0].model == "coding-model"
     executor.github.close()
 
 

@@ -322,6 +322,58 @@ class FallbackCodeAgentRunner:
         raise CodingAgentError(f"Coding runner chain exhausted: {detail}")
 
 
+class RepositoryCodingExecutor:
+    """Routes coding work to a trusted, preconfigured repository executor."""
+
+    id = "coding-pull-request"
+
+    def __init__(
+        self,
+        executors: Mapping[str, CodingPullRequestExecutor],
+        *,
+        default_repository_id: str | None = None,
+    ):
+        if not executors:
+            raise ValueError("At least one configured repository is required")
+        self.executors = dict(executors)
+        self.github = next(iter(self.executors.values())).github
+        if default_repository_id is not None and default_repository_id not in self.executors:
+            raise ValueError(f"Default repository is not configured: {default_repository_id}")
+        self.default_repository_id = default_repository_id
+
+    def execute(
+        self,
+        *,
+        task_id: str,
+        request: str,
+        is_cancelled: Callable[[], bool],
+        history: Sequence[ConversationTurn] = (),
+        context: Mapping[str, Any] | None = None,
+    ) -> ExecutionResult:
+        repository_id = str((context or {}).get("repository_id") or "").strip().lower()
+        if not repository_id:
+            repository_id = self.default_repository_id or ""
+        if not repository_id and len(self.executors) == 1:
+            repository_id = next(iter(self.executors))
+        executor = self.executors.get(repository_id)
+        if executor is None:
+            available = ", ".join(sorted(self.executors))
+            if repository_id:
+                raise CodingAgentError(
+                    f"Repository is not configured for coding: {repository_id}. "
+                    f"Available: {available}"
+                )
+            raise CodingAgentError(f"A repository_id is required. Available: {available}")
+        result = executor.execute(
+            task_id=task_id,
+            request=request,
+            is_cancelled=is_cancelled,
+            history=history,
+            context=context,
+        )
+        return ExecutionResult(output={**result.output, "repository_id": repository_id})
+
+
 class CodingPullRequestExecutor:
     """Runs a code agent in an isolated worktree and publishes a draft pull request."""
 

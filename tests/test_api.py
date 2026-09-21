@@ -37,6 +37,113 @@ def test_create_get_list_and_cancel_task(client: TestClient) -> None:
     assert events[1]["payload"]["text"] == "Okay, I've stopped working on that."
 
 
+def test_repositories_are_listed_and_task_accepts_trusted_repository(client: TestClient) -> None:
+    repositories = client.get("/repositories")
+
+    assert repositories.status_code == 200
+    assert [item["id"] for item in repositories.json()["repositories"]] == [
+        "analytics-agent-playground",
+        "personal-assistant",
+    ]
+
+    created = client.post(
+        "/tasks",
+        json={"request": "Implement the metric", "repository_id": "analytics"},
+    )
+    assert created.status_code == 201
+    assert created.json()["source_context"]["repository_id"] == "analytics-agent-playground"
+
+    rejected = client.post(
+        "/tasks",
+        json={"request": "Implement something", "repository_id": "unknown"},
+    )
+    assert rejected.status_code == 422
+
+
+def test_workflow_run_requires_explicit_authorized_decision(client: TestClient) -> None:
+    client.app.state.approval_token = "workflow-approval-secret"
+
+    workflows = client.get("/workflows")
+    assert workflows.status_code == 200
+    assert {item["id"] for item in workflows.json()["workflows"]} == {
+        "assistant-deployment",
+        "coding-change",
+        "repository-onboarding",
+    }
+
+    created = client.post(
+        "/workflow-runs",
+        json={
+            "workflow_id": "coding-change",
+            "input": {
+                "repository_id": "analytics",
+                "request": "Add a retention example",
+            },
+        },
+    )
+    assert created.status_code == 201
+    run = created.json()
+    assert run["status"] == "proposed"
+    assert run["input"]["repository_id"] == "analytics-agent-playground"
+    assert run["current_stage"] is None
+
+    unauthorized = client.post(
+        f"/workflow-runs/{run['id']}/decision",
+        json={"decision": "approve"},
+    )
+    assert unauthorized.status_code == 401
+
+    approved = client.post(
+        f"/workflow-runs/{run['id']}/decision",
+        headers={"X-Assistant-Approval-Token": "workflow-approval-secret"},
+        json={"decision": "approve"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["current_stage"] == "implement"
+
+    events = client.get(f"/workflow-runs/{run['id']}/events")
+    assert [event["event_type"] for event in events.json()["events"]] == [
+        "WORKFLOW_PROPOSED",
+        "WORKFLOW_APPROVED",
+    ]
+
+    duplicate = client.post(
+        f"/workflow-runs/{run['id']}/decision",
+        headers={"X-Assistant-Approval-Token": "workflow-approval-secret"},
+        json={"decision": "approve"},
+    )
+    assert duplicate.status_code == 409
+
+
+def test_workflow_run_validates_registered_repository_and_required_inputs(
+    client: TestClient,
+) -> None:
+    missing = client.post(
+        "/workflow-runs",
+        json={"workflow_id": "coding-change", "input": {"repository_id": "analytics"}},
+    )
+    assert missing.status_code == 422
+
+    unknown_repository = client.post(
+        "/workflow-runs",
+        json={
+            "workflow_id": "coding-change",
+            "input": {"repository_id": "not-trusted", "request": "Change it"},
+        },
+    )
+    assert unknown_repository.status_code == 422
+
+    malformed_onboarding = client.post(
+        "/workflow-runs",
+        json={
+            "workflow_id": "repository-onboarding",
+            "input": {"github_repository": "https://github.com/owner/repo"},
+        },
+    )
+    assert malformed_onboarding.status_code == 422
+
+
 def test_external_key_makes_creation_idempotent(client: TestClient) -> None:
     payload = {
         "request": "Handle a Slack message",

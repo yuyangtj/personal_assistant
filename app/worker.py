@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import threading
 from collections.abc import Mapping
+from pathlib import Path
 
 from app.capabilities import CapabilityRegistry
 from app.config import Settings
@@ -15,6 +17,7 @@ from app.execution.coding import (
     CodingPullRequestExecutor,
     FallbackCodeAgentRunner,
     KimiCodeCliRunner,
+    RepositoryCodingExecutor,
 )
 from app.execution.fake import ExecutionCancelled
 from app.integrations.chat import ChatClient
@@ -26,6 +29,7 @@ from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
 from app.manager.decisions import DelegateDecision, FailDecision
 from app.manager.model import ManagerModelClient, ValidatedManagerModelAdapter
 from app.persistence.database import Database
+from app.repositories import RepositoryRegistry
 from app.service import TaskService
 
 logger = logging.getLogger(__name__)
@@ -35,44 +39,67 @@ class ExecutorAdapterNotFoundError(LookupError):
     pass
 
 
-def build_coding_executor(settings: Settings) -> CodingPullRequestExecutor | None:
+def build_coding_executor(settings: Settings) -> RepositoryCodingExecutor | None:
     """Builds the opt-in isolated coding-to-draft-PR workflow."""
     if not settings.code_agent_enabled:
         return None
-    missing = [
-        name
-        for name, value in (
-            ("ASSISTANT_CODE_REPOSITORY_PATH", settings.code_repository_path),
-            ("ASSISTANT_GITHUB_REPOSITORY", settings.github_repository),
-            ("ASSISTANT_GITHUB_TOKEN", settings.github_token),
-        )
-        if not value
-    ]
-    if missing:
-        raise ValueError("Coding agent requires: " + ", ".join(missing))
-    assert settings.code_repository_path is not None
-    assert settings.github_repository is not None
-    assert settings.github_token is not None
+    if not settings.github_token:
+        raise ValueError("Coding agent requires: ASSISTANT_GITHUB_TOKEN")
     github = GitHubClient(
         token=settings.github_token,
         base_url=settings.github_api_base_url,
     )
     runners = _build_code_agent_runners(settings)
-    return CodingPullRequestExecutor(
-        repository_path=settings.code_repository_path,
-        worktree_root=settings.code_worktree_root,
-        github_repository=settings.github_repository,
-        github=github,
-        agent=FallbackCodeAgentRunner(
-            runners,
-            rate_limit_cooldown_seconds=settings.code_agent_rate_limit_cooldown_seconds,
-            quota_cooldown_seconds=settings.code_agent_quota_cooldown_seconds,
-        ),
-        base_branch=settings.github_base_branch,
-        remote=settings.github_remote,
-        timeout_seconds=settings.code_agent_timeout_seconds,
-        draft_pull_requests=settings.github_draft_pull_requests,
+    agent = FallbackCodeAgentRunner(
+        runners,
+        rate_limit_cooldown_seconds=settings.code_agent_rate_limit_cooldown_seconds,
+        quota_cooldown_seconds=settings.code_agent_quota_cooldown_seconds,
     )
+    registry = RepositoryRegistry.from_directory(settings.repositories_directory)
+    executors: dict[str, CodingPullRequestExecutor] = {}
+    for manifest in registry.list():
+        configured_path = os.getenv(manifest.path_env)
+        if manifest.id == "personal-assistant" and settings.code_repository_path is not None:
+            repository_path = settings.code_repository_path
+        elif configured_path:
+            repository_path = Path(configured_path).expanduser()
+        else:
+            continue
+        github_repository = (
+            settings.github_repository
+            if manifest.id == "personal-assistant" and settings.github_repository
+            else manifest.github_repository
+        )
+        base_branch = (
+            settings.github_base_branch
+            if manifest.id == "personal-assistant" and settings.code_repository_path is not None
+            else manifest.base_branch
+        )
+        remote = (
+            settings.github_remote
+            if manifest.id == "personal-assistant" and settings.code_repository_path is not None
+            else manifest.remote
+        )
+        executors[manifest.id] = CodingPullRequestExecutor(
+            repository_path=repository_path,
+            worktree_root=settings.code_worktree_root / manifest.id,
+            github_repository=github_repository,
+            github=github,
+            agent=agent,
+            base_branch=base_branch,
+            remote=remote,
+            timeout_seconds=settings.code_agent_timeout_seconds,
+            draft_pull_requests=settings.github_draft_pull_requests,
+        )
+    if not executors:
+        expected = ", ".join(manifest.path_env for manifest in registry.list())
+        github.close()
+        raise ValueError("Coding agent requires a configured repository path: " + expected)
+    configured_default = settings.default_repository_id
+    if configured_default is None:
+        default = registry.default()
+        configured_default = default.id if default and default.id in executors else None
+    return RepositoryCodingExecutor(executors, default_repository_id=configured_default)
 
 
 def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
@@ -403,7 +430,10 @@ def main() -> None:
     coding_executor = build_coding_executor(settings)
     if coding_executor is not None:
         executors[coding_executor.id] = coding_executor
-        logger.info("Coding pull-request agent enabled for %s", settings.github_repository)
+        logger.info(
+            "Coding pull-request agent enabled for repositories: %s",
+            ", ".join(sorted(coding_executor.executors)),
+        )
     # Only capabilities whose adapter is installed in this worker can be selected.
     registry = CapabilityRegistry.from_directory(
         settings.capabilities_directory

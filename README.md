@@ -24,6 +24,8 @@ agent, tool, approval, and Slack integrations.
 - Retry malformed model output once without persisting raw responses.
 - Keep capability selection deterministic after model inference.
 - Run coding changes in isolated Git worktrees and publish dedicated draft pull requests.
+- Select coding targets from a trusted multi-repository registry rather than task-supplied paths.
+- Persist controlled workflow proposals and authenticated approval decisions with an audit log.
 - Require an exact-head-SHA approval before the GitHub merge operation.
 
 The fake executor remains as a credential-free fallback, and a scripted client
@@ -34,6 +36,8 @@ capability remains disabled until its CLI runner is implemented and tested.
 
 The before-and-after architecture diagrams are in
 [`docs/architecture.md`](docs/architecture.md).
+The model-versus-authority boundary and workflow APIs are described in
+[`docs/controlled-workflows.md`](docs/controlled-workflows.md).
 
 ## Run with Docker
 
@@ -134,6 +138,25 @@ Inspect the capability registry:
 ```bash
 curl http://localhost:8000/capabilities
 curl 'http://localhost:8000/capabilities?include_disabled=false'
+```
+
+Inspect the repository registry:
+
+```bash
+curl http://localhost:8000/repositories
+```
+
+The built-in UI presents these repositories when creating a task. API callers select one
+by its stable ID (or registered alias):
+
+```bash
+curl -X POST http://localhost:8000/tasks \
+  -H 'content-type: application/json' \
+  -d '{
+    "request":"Add a cohort-retention example and tests",
+    "repository_id":"analytics-agent-playground",
+    "required_capabilities":["coding","pull_request_creation"]
+  }'
 ```
 
 A caller may request capabilities without naming an executor:

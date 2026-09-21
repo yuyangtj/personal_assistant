@@ -7,13 +7,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.capabilities.models import CapabilityManifest
 from app.domain.enums import EventType, TaskStatus
-from app.persistence.models import ChatMessageModel, TaskEventModel, TaskModel
+from app.persistence.models import (
+    ChatMessageModel,
+    TaskEventModel,
+    TaskModel,
+    WorkflowRunEventModel,
+    WorkflowRunModel,
+)
+from app.workflows.models import WorkflowManifest, WorkflowRunStatus
 
 
 class CreateTaskRequest(BaseModel):
     request: str = Field(min_length=1, max_length=20_000)
     goal: str | None = Field(default=None, min_length=1, max_length=20_000)
     required_capabilities: list[str] = Field(default_factory=list, max_length=20)
+    repository_id: str | None = Field(default=None, min_length=1, max_length=120)
     source_context: dict[str, Any] = Field(default_factory=dict)
     chat_session_id: str | None = Field(default=None, min_length=36, max_length=36)
     external_source: str | None = Field(default=None, max_length=32)
@@ -35,6 +43,7 @@ class CreateTaskFromMessageRequest(BaseModel):
 
     goal: str | None = Field(default=None, min_length=1, max_length=20_000)
     required_capabilities: list[str] = Field(default_factory=list, max_length=20)
+    repository_id: str | None = Field(default=None, min_length=1, max_length=120)
     source_context: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -42,6 +51,7 @@ class FollowUpTaskRequest(BaseModel):
     request: str = Field(min_length=1, max_length=20_000)
     goal: str | None = Field(default=None, min_length=1, max_length=20_000)
     required_capabilities: list[str] = Field(default_factory=list, max_length=20)
+    repository_id: str | None = Field(default=None, min_length=1, max_length=120)
     source_context: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -211,3 +221,84 @@ class HealthResponse(BaseModel):
 
 class CapabilityListResponse(BaseModel):
     capabilities: list[CapabilityManifest]
+
+
+class RepositoryResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    aliases: list[str]
+    github_repository: str
+    base_branch: str
+    default: bool
+    configured: bool
+
+
+class RepositoryListResponse(BaseModel):
+    repositories: list[RepositoryResponse]
+
+
+class WorkflowListResponse(BaseModel):
+    workflows: list[WorkflowManifest]
+
+
+class CreateWorkflowRunRequest(BaseModel):
+    workflow_id: str = Field(min_length=1, max_length=128)
+    input: dict[str, Any] = Field(default_factory=dict)
+    chat_session_id: str | None = Field(default=None, min_length=36, max_length=36)
+    task_id: str | None = Field(default=None, min_length=36, max_length=36)
+
+
+class WorkflowDecisionRequest(BaseModel):
+    decision: Literal["approve", "reject"]
+
+
+class WorkflowRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    workflow_id: str
+    status: WorkflowRunStatus
+    input: dict[str, Any]
+    current_stage: str | None
+    chat_session_id: str | None
+    task_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_model(cls, run: WorkflowRunModel) -> WorkflowRunResponse:
+        return cls(
+            id=run.id,
+            workflow_id=run.workflow_id,
+            status=WorkflowRunStatus(run.status),
+            input=run.workflow_input,
+            current_stage=run.current_stage,
+            chat_session_id=run.chat_session_id,
+            task_id=run.task_id,
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+        )
+
+
+class WorkflowRunListResponse(BaseModel):
+    runs: list[WorkflowRunResponse]
+
+
+class WorkflowRunEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    workflow_run_id: str
+    sequence: int
+    event_type: str
+    payload: dict[str, Any]
+    created_at: datetime
+
+    @classmethod
+    def from_model(cls, event: WorkflowRunEventModel) -> WorkflowRunEventResponse:
+        return cls.model_validate(event)
+
+
+class WorkflowRunEventListResponse(BaseModel):
+    events: list[WorkflowRunEventResponse]

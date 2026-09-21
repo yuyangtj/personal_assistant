@@ -1,0 +1,12 @@
+id: personal-assistant
+name: Personal Assistant
+description: Capability-driven personal assistant backend, web UI, and Android avatar client.
+aliases:
+  - assistant
+  - personal assistant
+github_repository: yuyangtj/personal_assistant
+path_env: ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH
+base_branch: main
+remote: origin
+enabled: true
+default: true
