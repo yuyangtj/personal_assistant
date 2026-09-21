@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -20,17 +21,26 @@ from app.api.schemas import (
     CreateChatSessionRequest,
     CreateTaskFromMessageRequest,
     CreateTaskRequest,
+    CreateWorkflowRunRequest,
     EventListResponse,
     EventResponse,
     FollowUpTaskRequest,
     HealthResponse,
     PendingApprovalResponse,
     PullRequestApprovalRequest,
+    RepositoryListResponse,
+    RepositoryResponse,
     SpeechRequest,
     TaskContextResponse,
     TaskListResponse,
     TaskProposalResponse,
     TaskResponse,
+    WorkflowDecisionRequest,
+    WorkflowListResponse,
+    WorkflowRunEventListResponse,
+    WorkflowRunEventResponse,
+    WorkflowRunListResponse,
+    WorkflowRunResponse,
 )
 from app.capabilities.models import CapabilityKind
 from app.domain.enums import TaskStatus
@@ -44,6 +54,7 @@ from app.service import (
     TaskNotFoundError,
     TaskService,
 )
+from app.workflows import WorkflowRunConflictError, WorkflowRunNotFoundError
 
 router = APIRouter()
 
@@ -52,6 +63,30 @@ WEB_INDEX = Path(__file__).resolve().parents[1] / "web" / "index.html"
 
 def _service(request: Request) -> TaskService:
     return request.app.state.task_service
+
+
+def _require_approval_authorization(request: Request) -> None:
+    configured_token = request.app.state.approval_token
+    supplied_token = request.headers.get("X-Assistant-Approval-Token")
+    if not configured_token:
+        raise HTTPException(status_code=503, detail="Approval authorization is not configured")
+    if not supplied_token or not hmac.compare_digest(supplied_token, configured_token):
+        raise HTTPException(status_code=401, detail="Invalid approval authorization")
+
+
+def _repository_context(
+    request: Request,
+    source_context: dict[str, object],
+    repository_id: str | None,
+) -> dict[str, object]:
+    context = dict(source_context)
+    if repository_id:
+        try:
+            manifest = request.app.state.repository_registry.get(repository_id)
+        except LookupError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        context["repository_id"] = manifest.id
+    return context
 
 
 @router.post(
@@ -171,7 +206,9 @@ def create_task_from_chat_message(
             message_id,
             goal=body.goal,
             required_capabilities=body.required_capabilities,
-            source_context=body.source_context,
+            source_context=_repository_context(
+                request, body.source_context, body.repository_id
+            ),
         )
     except ChatSessionNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error
@@ -229,12 +266,7 @@ def decide_pull_request_approval(
     body: PullRequestApprovalRequest,
     request: Request,
 ) -> TaskResponse:
-    configured_token = request.app.state.approval_token
-    supplied_token = request.headers.get("X-Assistant-Approval-Token")
-    if not configured_token:
-        raise HTTPException(status_code=503, detail="Approval authorization is not configured")
-    if not supplied_token or not hmac.compare_digest(supplied_token, configured_token):
-        raise HTTPException(status_code=401, detail="Invalid approval authorization")
+    _require_approval_authorization(request)
     service = _service(request)
     if body.decision == "reject":
         try:
@@ -342,7 +374,9 @@ def create_task(body: CreateTaskRequest, request: Request) -> TaskResponse:
             request=body.request,
             goal=body.goal,
             required_capabilities=body.required_capabilities,
-            source_context=body.source_context,
+            source_context=_repository_context(
+                request, body.source_context, body.repository_id
+            ),
             chat_session_id=body.chat_session_id,
             external_source=body.external_source,
             external_key=body.external_key,
@@ -412,7 +446,9 @@ def create_follow_up_task(
             request=body.request,
             goal=body.goal,
             required_capabilities=body.required_capabilities,
-            source_context=body.source_context,
+            source_context=_repository_context(
+                request, body.source_context, body.repository_id
+            ),
         )
     except TaskNotFoundError as error:
         raise HTTPException(status_code=404, detail="Task not found") from error
@@ -479,3 +515,109 @@ def list_capabilities(
         include_disabled=include_disabled,
     )
     return CapabilityListResponse(capabilities=capabilities)
+
+
+@router.get("/repositories", response_model=RepositoryListResponse)
+def list_repositories(request: Request) -> RepositoryListResponse:
+    settings = request.app.state.settings
+    repositories = []
+    for manifest in request.app.state.repository_registry.list():
+        configured = bool(os.getenv(manifest.path_env))
+        if manifest.id == "personal-assistant" and settings.code_repository_path is not None:
+            configured = True
+        repositories.append(
+            RepositoryResponse(
+                id=manifest.id,
+                name=manifest.name,
+                description=manifest.description,
+                aliases=list(manifest.aliases),
+                github_repository=manifest.github_repository,
+                base_branch=manifest.base_branch,
+                default=manifest.default,
+                configured=configured,
+            )
+        )
+    return RepositoryListResponse(repositories=repositories)
+
+
+@router.get("/workflows", response_model=WorkflowListResponse)
+def list_workflows(request: Request) -> WorkflowListResponse:
+    return WorkflowListResponse(workflows=request.app.state.workflow_registry.list())
+
+
+@router.post(
+    "/workflow-runs",
+    response_model=WorkflowRunResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_workflow_run(
+    body: CreateWorkflowRunRequest,
+    request: Request,
+) -> WorkflowRunResponse:
+    try:
+        run = request.app.state.workflow_service.create_run(
+            workflow_id=body.workflow_id,
+            workflow_input=body.input,
+            chat_session_id=body.chat_session_id,
+            task_id=body.task_id,
+        )
+    except (LookupError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return WorkflowRunResponse.from_model(run)
+
+
+@router.get("/workflow-runs", response_model=WorkflowRunListResponse)
+def list_workflow_runs(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> WorkflowRunListResponse:
+    runs = request.app.state.workflow_service.list_runs(limit=limit)
+    return WorkflowRunListResponse(runs=[WorkflowRunResponse.from_model(run) for run in runs])
+
+
+@router.get("/workflow-runs/{workflow_run_id}", response_model=WorkflowRunResponse)
+def get_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunResponse:
+    try:
+        run = request.app.state.workflow_service.get_run(workflow_run_id)
+    except WorkflowRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Workflow run not found") from error
+    return WorkflowRunResponse.from_model(run)
+
+
+@router.get(
+    "/workflow-runs/{workflow_run_id}/events",
+    response_model=WorkflowRunEventListResponse,
+)
+def list_workflow_run_events(
+    workflow_run_id: str,
+    request: Request,
+) -> WorkflowRunEventListResponse:
+    try:
+        events = request.app.state.workflow_service.list_events(workflow_run_id)
+    except WorkflowRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Workflow run not found") from error
+    return WorkflowRunEventListResponse(
+        events=[WorkflowRunEventResponse.from_model(event) for event in events]
+    )
+
+
+@router.post(
+    "/workflow-runs/{workflow_run_id}/decision",
+    response_model=WorkflowRunResponse,
+)
+def decide_workflow_run(
+    workflow_run_id: str,
+    body: WorkflowDecisionRequest,
+    request: Request,
+) -> WorkflowRunResponse:
+    _require_approval_authorization(request)
+    try:
+        run = request.app.state.workflow_service.decide(
+            workflow_run_id,
+            approve=body.decision == "approve",
+        )
+    except WorkflowRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Workflow run not found") from error
+    except WorkflowRunConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return WorkflowRunResponse.from_model(run)

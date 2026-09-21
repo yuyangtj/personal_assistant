@@ -18,6 +18,9 @@ class Settings:
     worker_lease_seconds: int = 60
     fake_executor_delay_seconds: float = 0.1
     capabilities_directory: Path = Path("capabilities")
+    repositories_directory: Path = Path("repositories")
+    workflows_directory: Path = Path("workflows")
+    default_repository_id: str | None = None
     kimi_api_key: str | None = None
     kimi_base_url: str = "https://api.kimi.com/coding/v1"
     kimi_model: str = "kimi-for-coding-highspeed"
@@ -101,6 +104,19 @@ class Settings:
                     str(defaults.capabilities_directory),
                 )
             ),
+            repositories_directory=Path(
+                os.getenv(
+                    "ASSISTANT_REPOSITORIES_DIRECTORY",
+                    str(defaults.repositories_directory),
+                )
+            ),
+            workflows_directory=Path(
+                os.getenv(
+                    "ASSISTANT_WORKFLOWS_DIRECTORY",
+                    str(defaults.workflows_directory),
+                )
+            ),
+            default_repository_id=os.getenv("ASSISTANT_DEFAULT_REPOSITORY_ID") or None,
             kimi_api_key=os.getenv("ASSISTANT_KIMI_API_KEY") or os.getenv("KIMI_API_KEY") or None,
             kimi_base_url=os.getenv("ASSISTANT_KIMI_BASE_URL", defaults.kimi_base_url),
             kimi_model=os.getenv("ASSISTANT_KIMI_MODEL", defaults.kimi_model),

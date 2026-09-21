@@ -8,6 +8,8 @@ WORKDIR /service
 COPY pyproject.toml README.md ./
 COPY app ./app
 COPY capabilities ./capabilities
+COPY repositories ./repositories
+COPY workflows ./workflows
 
 RUN pip install --no-cache-dir .
 

@@ -9,7 +9,9 @@ from app.integrations.gemini_tts import GeminiTtsClient
 from app.integrations.github import GitHubClient
 from app.integrations.speech import CachedSpeechSynthesizer
 from app.persistence.database import Database
+from app.repositories import RepositoryRegistry
 from app.service import TaskService
+from app.workflows import WorkflowRegistry, WorkflowService
 
 
 def create_app(
@@ -20,6 +22,10 @@ def create_app(
     registry = capability_registry or CapabilityRegistry.from_directory(
         resolved_settings.capabilities_directory
     )
+    repository_registry = RepositoryRegistry.from_directory(
+        resolved_settings.repositories_directory
+    )
+    workflow_registry = WorkflowRegistry.from_directory(resolved_settings.workflows_directory)
     database = Database(resolved_settings.database_url)
     if resolved_settings.auto_create_schema:
         database.create_schema()
@@ -33,6 +39,13 @@ def create_app(
     application.state.database = database
     application.state.task_service = TaskService(database)
     application.state.capability_registry = registry
+    application.state.repository_registry = repository_registry
+    application.state.workflow_registry = workflow_registry
+    application.state.workflow_service = WorkflowService(
+        database,
+        workflow_registry,
+        repository_registry,
+    )
     application.state.speech_synthesizer = (
         CachedSpeechSynthesizer(
             GeminiTtsClient(

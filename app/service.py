@@ -320,12 +320,17 @@ class TaskService:
             events = TaskRepository.list_events(session, parent.id)
             context = build_task_context(parent, events)
             chat_session_id = parent.chat_session_id
+            parent_repository_id = (parent.source_context or {}).get("repository_id")
+
+        next_source_context = {**(source_context or {}), "parent_task": context}
+        if parent_repository_id and "repository_id" not in next_source_context:
+            next_source_context["repository_id"] = parent_repository_id
 
         return self.create_task(
             request=request,
             goal=goal,
             required_capabilities=required_capabilities,
-            source_context={**(source_context or {}), "parent_task": context},
+            source_context=next_source_context,
             chat_session_id=chat_session_id,
             parent_task_id=task_id,
         )

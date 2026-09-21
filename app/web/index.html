@@ -67,6 +67,10 @@
     flex: 1; resize: none; background: var(--surface); color: var(--text);
     border: 1px solid #23404b; border-radius: 10px; padding: 10px; font: inherit;
   }
+  select {
+    background: var(--surface); color: var(--text); border: 1px solid #23404b;
+    border-radius: 8px; padding: 6px 8px; font: inherit; max-width: 220px;
+  }
   .row { display: flex; gap: 8px; align-items: center; }
   .kv { display: grid; grid-template-columns: 96px 1fr; gap: 3px 8px; font-size: 12.5px; }
   .kv dt { color: var(--muted); }
@@ -91,6 +95,7 @@
 
 <main>
   <div class="row"><h1 id="chat-title" class="grow">No conversation open</h1>
+    <select id="repository" aria-label="Repository"><option value="">No repository</option></select>
     <span id="status" class="sub" style="margin:0"></span></div>
   <div id="transcript"><div class="empty">Start or pick a conversation on the left.</div></div>
   <div id="proposal-slot"></div>
@@ -108,7 +113,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { chats: [], chatId: null, messages: [], tasks: [], proposal: null,
+const state = { chats: [], repositories: [], repositoryId: null, chatId: null, messages: [], tasks: [], proposal: null,
                 proposalFor: null, taskId: null, busy: false, timer: null };
 
 async function api(path, options) {
@@ -138,6 +143,18 @@ async function loadChats() {
         <div class="when">${new Date(c.updated_at).toLocaleString()}</div>
       </div>`).join("") || `<div class="sub">No conversations yet.</div>`;
     clearError();
+  } catch (e) { fail(e); }
+}
+
+async function loadRepositories() {
+  try {
+    state.repositories = (await api("/repositories")).repositories;
+    const defaultRepository = state.repositories.find((repository) => repository.default);
+    state.repositoryId = state.repositoryId || (defaultRepository ? defaultRepository.id : null);
+    $("repository").innerHTML = `<option value="">No repository</option>`
+      + state.repositories.map((repository) => `<option value="${esc(repository.id)}"
+        ${repository.id === state.repositoryId ? "selected" : ""}>
+        ${esc(repository.name)}${repository.configured ? "" : " (not configured)"}</option>`).join("");
   } catch (e) { fail(e); }
 }
 
@@ -228,6 +245,7 @@ async function createTask(messageId, proposal) {
   try {
     const body = {
       required_capabilities: proposal ? proposal.required_capabilities : [],
+      repository_id: state.repositoryId,
       source_context: { client: "web-console",
         local_time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     };
@@ -251,6 +269,7 @@ async function renderTask(id) {
         <dt>Request</dt><dd>${esc(task.original_request)}</dd>
         <dt>Goal</dt><dd>${esc(task.current_goal)}</dd>
         <dt>Needs</dt><dd>${esc(task.required_capabilities.join(", ") || "—")}</dd>
+        <dt>Repository</dt><dd>${esc(task.source_context.repository_id || "—")}</dd>
         <dt>Origin msg</dt><dd>${task.origin_message_id ? esc(task.origin_message_id.slice(0, 8)) : "—"}</dd>
         <dt>Parent</dt><dd>${task.parent_task_id ? esc(task.parent_task_id.slice(0, 8)) : "—"}</dd>
       </dl>
@@ -313,9 +332,10 @@ $("new-chat").onclick = async () => {
   catch (e) { fail(e); }
 };
 $("reload-chats").onclick = loadChats;
+$("repository").onchange = (event) => { state.repositoryId = event.target.value || null; };
 $("close-task").onclick = () => {
   state.taskId = null;
   $("task-detail").innerHTML = `<div class="sub">Select a task card in the transcript.</div>`;
 };
-loadChats();
+Promise.all([loadChats(), loadRepositories()]);
 </script>

@@ -1,0 +1,21 @@
+id: assistant-deployment
+name: Assistant deployment
+description: Deploy an immutable reviewed assistant commit while preserving persistent state.
+required_inputs:
+  - commit_sha
+stages:
+  - id: build
+    name: Build immutable release
+    kind: validation
+  - id: approve_deployment
+    name: Approve production deployment
+    kind: approval
+  - id: migrate
+    name: Apply backward-compatible migrations
+    kind: trusted_action
+  - id: health_check
+    name: Verify release health
+    kind: validation
+  - id: promote
+    name: Promote or roll back release
+    kind: trusted_action

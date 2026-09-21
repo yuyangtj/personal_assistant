@@ -1,0 +1,19 @@
+id: coding-change
+name: Coding change
+description: Implement and validate a change in an already registered repository through a pull request.
+required_inputs:
+  - repository_id
+  - request
+stages:
+  - id: implement
+    name: Implement in isolated worktree
+    kind: agent
+  - id: validate
+    name: Run repository validation
+    kind: validation
+  - id: review
+    name: Review exact pull request head
+    kind: approval
+  - id: merge
+    name: Merge through trusted GitHub adapter
+    kind: trusted_action

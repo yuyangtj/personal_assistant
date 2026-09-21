@@ -8,6 +8,7 @@ from app.execution.coding import (
     CodingAgentError,
     CodingPullRequestExecutor,
     FallbackCodeAgentRunner,
+    RepositoryCodingExecutor,
     _text_report,
 )
 from app.integrations.github import GitHubPullRequest
@@ -151,3 +152,38 @@ def test_text_report_normalizes_kimi_fenced_json() -> None:
     assert report.summary == "Created the requested documentation."
     assert report.tests == ["Documentation-only change; no tests applicable."]
     assert report.notes == ["Files changed: docs/example.md"]
+
+
+def test_repository_coding_executor_routes_by_trusted_repository_id() -> None:
+    calls: list[str] = []
+
+    class Executor:
+        def __init__(self, repository_id: str):
+            self.repository_id = repository_id
+            self.github = object()
+
+        def execute(self, **_kwargs):
+            calls.append(self.repository_id)
+            from app.execution.base import ExecutionResult
+
+            return ExecutionResult(output={"summary": "done"})
+
+    router = RepositoryCodingExecutor(
+        {
+            "personal-assistant": Executor("personal-assistant"),  # type: ignore[dict-item]
+            "analytics-agent-playground": Executor(  # type: ignore[dict-item]
+                "analytics-agent-playground"
+            ),
+        },
+        default_repository_id="personal-assistant",
+    )
+
+    result = router.execute(
+        task_id="task",
+        request="change",
+        is_cancelled=lambda: False,
+        context={"repository_id": "analytics-agent-playground"},
+    )
+
+    assert calls == ["analytics-agent-playground"]
+    assert result.output["repository_id"] == "analytics-agent-playground"
