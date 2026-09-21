@@ -8,7 +8,14 @@ from collections.abc import Mapping
 from app.capabilities import CapabilityRegistry
 from app.config import Settings
 from app.execution import ConversationExecutor, Executor, FakeExecutor
-from app.execution.coding import CodexCliRunner, CodingPullRequestExecutor
+from app.execution.coding import (
+    ClaudeCodeMiniMaxRunner,
+    CodeAgentRunner,
+    CodexCliRunner,
+    CodingPullRequestExecutor,
+    FallbackCodeAgentRunner,
+    KimiCodeCliRunner,
+)
 from app.execution.fake import ExecutionCancelled
 from app.integrations.chat import ChatClient
 from app.integrations.fallback import FallbackChatClient, FallbackManagerModelClient
@@ -50,20 +57,68 @@ def build_coding_executor(settings: Settings) -> CodingPullRequestExecutor | Non
         token=settings.github_token,
         base_url=settings.github_api_base_url,
     )
+    runners = _build_code_agent_runners(settings)
     return CodingPullRequestExecutor(
         repository_path=settings.code_repository_path,
         worktree_root=settings.code_worktree_root,
         github_repository=settings.github_repository,
         github=github,
-        agent=CodexCliRunner(
-            executable=settings.code_agent_executable,
-            model=settings.code_agent_model,
+        agent=FallbackCodeAgentRunner(
+            runners,
+            rate_limit_cooldown_seconds=settings.code_agent_rate_limit_cooldown_seconds,
+            quota_cooldown_seconds=settings.code_agent_quota_cooldown_seconds,
         ),
         base_branch=settings.github_base_branch,
         remote=settings.github_remote,
         timeout_seconds=settings.code_agent_timeout_seconds,
         draft_pull_requests=settings.github_draft_pull_requests,
     )
+
+
+def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
+    providers = tuple(
+        dict.fromkeys(
+            provider.strip().lower()
+            for provider in settings.code_agent_providers.split(",")
+            if provider.strip()
+        )
+    )
+    supported = {"kimi", "minimax-claude", "codex"}
+    unknown = [provider for provider in providers if provider not in supported]
+    if unknown:
+        raise ValueError("Unsupported coding provider: " + ", ".join(unknown))
+    runners: list[CodeAgentRunner] = []
+    for provider in providers:
+        if provider == "kimi":
+            runners.append(
+                KimiCodeCliRunner(
+                    executable=settings.kimi_code_executable,
+                    model=settings.kimi_code_model,
+                )
+            )
+        elif provider == "minimax-claude":
+            if settings.minimax_api_key:
+                runners.append(
+                    ClaudeCodeMiniMaxRunner(
+                        api_key=settings.minimax_api_key,
+                        base_url=settings.minimax_anthropic_base_url,
+                        executable=settings.claude_code_executable,
+                        model=settings.minimax_code_model,
+                    )
+                )
+            else:
+                logger.warning("Skipping MiniMax Claude Code runner: no MiniMax API key")
+        else:
+            runners.append(
+                CodexCliRunner(
+                    executable=settings.code_agent_executable,
+                    model=settings.code_agent_model,
+                )
+            )
+    if not runners:
+        raise ValueError("No configured coding runner is usable")
+    logger.info("Coding runner order: %s", " -> ".join(runner.provider for runner in runners))
+    return runners
 
 
 def _provider_order(primary: str, fallback: str | None) -> tuple[str, ...]:

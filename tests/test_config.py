@@ -6,6 +6,7 @@ from app.config import Settings
 
 
 def test_manager_model_settings_are_loaded_from_environment(monkeypatch) -> None:
+    monkeypatch.delenv("ASSISTANT_GITHUB_TOKEN", raising=False)
     monkeypatch.setenv("MINIMAX_API_KEY", "sk-minimax-test")
     monkeypatch.setenv("ASSISTANT_MINIMAX_BASE_URL", "https://minimax.example/v1")
     monkeypatch.setenv("ASSISTANT_MINIMAX_MODEL", "MiniMax-M3")
@@ -17,10 +18,20 @@ def test_manager_model_settings_are_loaded_from_environment(monkeypatch) -> None
     monkeypatch.setenv("ASSISTANT_GEMINI_TTS_TIMEOUT_SECONDS", "21")
     monkeypatch.setenv("ASSISTANT_GEMINI_TTS_CACHE_ENTRIES", "64")
     monkeypatch.setenv("ASSISTANT_CODE_AGENT_ENABLED", "true")
+    monkeypatch.setenv("ASSISTANT_CODE_AGENT_PROVIDERS", "kimi,minimax-claude,codex")
     monkeypatch.setenv("ASSISTANT_CODE_REPOSITORY_PATH", "/srv/repositories/widget")
     monkeypatch.setenv("ASSISTANT_CODE_WORKTREE_ROOT", "/srv/worktrees")
     monkeypatch.setenv("ASSISTANT_CODE_AGENT_EXECUTABLE", "/usr/local/bin/codex")
     monkeypatch.setenv("ASSISTANT_CODE_AGENT_MODEL", "coding-model")
+    monkeypatch.setenv("ASSISTANT_KIMI_CODE_EXECUTABLE", "/usr/local/bin/kimi")
+    monkeypatch.setenv("ASSISTANT_KIMI_CODE_MODEL", "kimi-code-model")
+    monkeypatch.setenv("ASSISTANT_CLAUDE_CODE_EXECUTABLE", "/usr/local/bin/claude")
+    monkeypatch.setenv(
+        "ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL", "https://minimax.example/anthropic"
+    )
+    monkeypatch.setenv("ASSISTANT_MINIMAX_CODE_MODEL", "MiniMax-M3")
+    monkeypatch.setenv("ASSISTANT_CODE_AGENT_RATE_LIMIT_COOLDOWN_SECONDS", "120")
+    monkeypatch.setenv("ASSISTANT_CODE_AGENT_QUOTA_COOLDOWN_SECONDS", "7200")
     monkeypatch.setenv("ASSISTANT_CODE_AGENT_TIMEOUT_SECONDS", "900")
     monkeypatch.setenv("GITHUB_TOKEN", "github-test")
     monkeypatch.setenv("ASSISTANT_GITHUB_API_BASE_URL", "https://github.example/api/v3")
@@ -55,10 +66,18 @@ def test_manager_model_settings_are_loaded_from_environment(monkeypatch) -> None
     assert settings.gemini_tts_timeout_seconds == 21
     assert settings.gemini_tts_cache_entries == 64
     assert settings.code_agent_enabled is True
+    assert settings.code_agent_providers == "kimi,minimax-claude,codex"
     assert settings.code_repository_path == Path("/srv/repositories/widget")
     assert settings.code_worktree_root == Path("/srv/worktrees")
     assert settings.code_agent_executable == "/usr/local/bin/codex"
     assert settings.code_agent_model == "coding-model"
+    assert settings.kimi_code_executable == "/usr/local/bin/kimi"
+    assert settings.kimi_code_model == "kimi-code-model"
+    assert settings.claude_code_executable == "/usr/local/bin/claude"
+    assert settings.minimax_anthropic_base_url == "https://minimax.example/anthropic"
+    assert settings.minimax_code_model == "MiniMax-M3"
+    assert settings.code_agent_rate_limit_cooldown_seconds == 120
+    assert settings.code_agent_quota_cooldown_seconds == 7200
     assert settings.code_agent_timeout_seconds == 900
     assert settings.github_token == "github-test"
     assert settings.github_api_base_url == "https://github.example/api/v3"

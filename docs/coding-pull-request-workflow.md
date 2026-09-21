@@ -10,8 +10,8 @@ flowchart LR
     manager --> capability[coding-pull-request capability]
     capability --> fetch[Fetch configured base branch]
     fetch --> worktree[Isolated Git worktree + assistant/task branch]
-    worktree --> codex[Codex CLI, workspace-write sandbox]
-    codex --> commit[Host validates diff and commits]
+    worktree --> runners[Kimi Code → MiniMax via Claude Code → Codex]
+    runners --> commit[Host validates diff and commits]
     commit --> push[Push dedicated branch]
     push --> draft[Create draft GitHub PR]
     draft --> wait[Task waits for approval]
@@ -23,9 +23,15 @@ flowchart LR
 
 - Repository path, GitHub repository, base branch, and remote are operator configuration;
   task input cannot redirect the agent to another repository.
-- Codex receives only a reduced environment and runs non-interactively with an ephemeral
-  session and `workspace-write` sandbox. It cannot commit, push, create a PR, or merge;
-  the trusted host owns those operations.
+- Coding runners receive a reduced environment and run non-interactively. The task prompt
+  forbids publishing or merging; the trusted host owns the intended commit, push, PR, and
+  merge path. Run third-party CLIs under an OS/container sandbox in production because
+  their own autonomous shell permissions are broader than Codex's workspace sandbox.
+- Runner order is deterministic. A missing executable, provider failure, rate limit, or
+  exhausted quota advances to the next configured runner. Rate-limited runners are kept
+  on an in-memory cooldown so subsequent tasks do not immediately retry them.
+- Every fallback attempt starts from the original clean worktree. Partial changes from a
+  failed runner are discarded before the next runner starts.
 - The worktree starts from a freshly fetched remote base branch. The original checkout is
   not modified.
 - The host rejects an empty change and runs `git diff --check` before committing.
@@ -53,11 +59,34 @@ export ASSISTANT_GITHUB_REPOSITORY=owner/repository
 export ASSISTANT_GITHUB_TOKEN=github-token
 export ASSISTANT_APPROVAL_TOKEN=separate-long-random-secret
 export ASSISTANT_GITHUB_BASE_BRANCH=main
+export ASSISTANT_CODE_AGENT_PROVIDERS=kimi,minimax-claude,codex
 uv run python -m app.worker
 ```
 
-Codex CLI authentication is independent from `ASSISTANT_GITHUB_TOKEN`. The agent reuses
-the CLI's saved authentication, while the GitHub token is used only by trusted host code.
+Kimi Code and Codex reuse their respective CLI authentication. The MiniMax Claude Code
+runner receives `MINIMAX_API_KEY` as `ANTHROPIC_AUTH_TOKEN` and uses
+`https://api.minimaxi.com/anthropic` by default. Provider credentials are independent
+from `ASSISTANT_GITHUB_TOKEN`, which is used only by trusted host code.
+
+The coding runner settings are:
+
+| Variable | Default |
+| --- | --- |
+| `ASSISTANT_CODE_AGENT_PROVIDERS` | `kimi,minimax-claude,codex` |
+| `ASSISTANT_KIMI_CODE_EXECUTABLE` | `kimi` |
+| `ASSISTANT_KIMI_CODE_MODEL` | CLI default |
+| `ASSISTANT_CLAUDE_CODE_EXECUTABLE` | `claude` |
+| `ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL` | `https://api.minimaxi.com/anthropic` |
+| `ASSISTANT_MINIMAX_CODE_MODEL` | Claude Code/provider default |
+| `ASSISTANT_CODE_AGENT_EXECUTABLE` | `codex` |
+| `ASSISTANT_CODE_AGENT_MODEL` | Codex default |
+| `ASSISTANT_CODE_AGENT_RATE_LIMIT_COOLDOWN_SECONDS` | `300` |
+| `ASSISTANT_CODE_AGENT_QUOTA_COOLDOWN_SECONDS` | `3600` |
+
+The order can be changed or narrowed, for example `minimax-claude,codex`. A provider is
+only a coding runner here; MiniMax remains independently configurable as the manager
+model that infers required capabilities.
+
 For a personal installation, use a fine-grained token scoped to the configured repository.
 It needs **Pull requests: write** to create PRs and **Contents: write** to merge; Git push
 also needs write access through the repository's configured Git credentials. For a shared

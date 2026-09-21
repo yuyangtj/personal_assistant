@@ -3,7 +3,13 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from app.execution.coding import CodeAgentReport, CodingPullRequestExecutor
+from app.execution.coding import (
+    CodeAgentReport,
+    CodingAgentError,
+    CodingPullRequestExecutor,
+    FallbackCodeAgentRunner,
+    _text_report,
+)
 from app.integrations.github import GitHubPullRequest
 
 
@@ -92,3 +98,56 @@ def test_coding_executor_isolates_changes_pushes_branch_and_opens_draft(tmp_path
     assert not (tmp_path / "worktrees" / "12345678-1234-1234-1234-123456789abc").exists()
     assert not (repository / "feature.txt").exists()
     assert github.calls[0]["draft"] is True
+
+
+def test_coding_runner_falls_back_from_quota_limit_with_clean_worktree(tmp_path: Path) -> None:
+    repository, _remote = _repository(tmp_path)
+
+    class LimitedAgent:
+        provider = "limited"
+
+        def run(self, *, worktree: Path, **_kwargs) -> CodeAgentReport:
+            (worktree / "partial.txt").write_text("must not leak\n", encoding="utf-8")
+            raise CodingAgentError("limit reached", category="quota_exhausted")
+
+    class BackupAgent:
+        provider = "backup"
+
+        def run(self, *, worktree: Path, **_kwargs) -> CodeAgentReport:
+            assert not (worktree / "partial.txt").exists()
+            (worktree / "complete.txt").write_text("done\n", encoding="utf-8")
+            return CodeAgentReport(summary="Completed with fallback")
+
+    chain = FallbackCodeAgentRunner([LimitedAgent(), BackupAgent()])
+    report = chain.run(
+        worktree=repository,
+        request="Implement feature",
+        timeout_seconds=60,
+        is_cancelled=lambda: False,
+    )
+
+    assert chain.provider == "backup"
+    assert [attempt.outcome for attempt in chain.attempts] == ["failed", "succeeded"]
+    assert chain.attempts[0].category == "quota_exhausted"
+    assert "limited=failed(quota_exhausted)" in report.notes[-1]
+    assert not (repository / "partial.txt").exists()
+    assert (repository / "complete.txt").exists()
+
+
+def test_text_report_normalizes_kimi_fenced_json() -> None:
+    report = _text_report(
+        """• ```json
+  {
+    "status": "success",
+    "summary": "Created the requested documentation.",
+    "files_changed": ["docs/example.md"],
+    "tests_run": false,
+    "tests_note": "Documentation-only change; no tests applicable."
+  }
+  ```""",
+        "Kimi completed the change",
+    )
+
+    assert report.summary == "Created the requested documentation."
+    assert report.tests == ["Documentation-only change; no tests applicable."]
+    assert report.notes == ["Files changed: docs/example.md"]

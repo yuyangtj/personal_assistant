@@ -184,16 +184,18 @@ Docker Compose backend.
 
 There is no Slack or general tool integration yet. Kimi or MiniMax can independently
 provide conversational execution and manager analysis. Manager analysis is opt-in; the
-production worker keeps deterministic routing by default. The Codex CLI coding adapter
-is also opt-in and targets one operator-configured repository. Kimi Code remains a
-separate disabled provider until its CLI runner is implemented and tested.
+production worker keeps deterministic routing by default. The coding adapter is opt-in,
+targets one operator-configured repository, and can try Kimi Code, Claude Code backed by
+MiniMax, and Codex in a configured order.
 
 ## Coding agent and GitHub review workflow
 
 The `coding-pull-request` capability implements the first real agent workflow. It fetches
 the configured base branch, creates an isolated worktree and `assistant/task-...` branch,
-runs Codex with workspace-only write access, validates and commits the result, pushes the
+runs the first available configured coding runner, validates and commits the result, pushes the
 branch, and opens a draft pull request. The task then pauses in `waiting_for_approval`.
+Quota and rate-limit failures fall back to the next runner after restoring the disposable
+worktree to its clean starting commit.
 
 Merge is intentionally not a manager capability. After human review and marking the PR
 ready, `POST /tasks/{task_id}/pull-request-approval` requires the exact reviewed head SHA

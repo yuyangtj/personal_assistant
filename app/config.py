@@ -33,10 +33,18 @@ class Settings:
     gemini_tts_timeout_seconds: float = 30.0
     gemini_tts_cache_entries: int = 128
     code_agent_enabled: bool = False
+    code_agent_providers: str = "kimi,minimax-claude,codex"
     code_repository_path: Path | None = None
     code_worktree_root: Path = Path("/tmp/personal-assistant-worktrees")
     code_agent_executable: str = "codex"
     code_agent_model: str | None = None
+    kimi_code_executable: str = "kimi"
+    kimi_code_model: str | None = None
+    claude_code_executable: str = "claude"
+    minimax_anthropic_base_url: str = "https://api.minimaxi.com/anthropic"
+    minimax_code_model: str | None = None
+    code_agent_rate_limit_cooldown_seconds: int = 300
+    code_agent_quota_cooldown_seconds: int = 3600
     code_agent_timeout_seconds: int = 1800
     github_token: str | None = None
     github_api_base_url: str = "https://api.github.com"
@@ -146,6 +154,9 @@ class Settings:
             code_agent_enabled=_as_bool(
                 os.getenv("ASSISTANT_CODE_AGENT_ENABLED", str(defaults.code_agent_enabled))
             ),
+            code_agent_providers=os.getenv(
+                "ASSISTANT_CODE_AGENT_PROVIDERS", defaults.code_agent_providers
+            ),
             code_repository_path=(
                 Path(value).expanduser()
                 if (value := os.getenv("ASSISTANT_CODE_REPOSITORY_PATH"))
@@ -158,6 +169,30 @@ class Settings:
                 "ASSISTANT_CODE_AGENT_EXECUTABLE", defaults.code_agent_executable
             ),
             code_agent_model=os.getenv("ASSISTANT_CODE_AGENT_MODEL") or None,
+            kimi_code_executable=os.getenv(
+                "ASSISTANT_KIMI_CODE_EXECUTABLE", defaults.kimi_code_executable
+            ),
+            kimi_code_model=os.getenv("ASSISTANT_KIMI_CODE_MODEL") or None,
+            claude_code_executable=os.getenv(
+                "ASSISTANT_CLAUDE_CODE_EXECUTABLE", defaults.claude_code_executable
+            ),
+            minimax_anthropic_base_url=os.getenv(
+                "ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL",
+                defaults.minimax_anthropic_base_url,
+            ),
+            minimax_code_model=os.getenv("ASSISTANT_MINIMAX_CODE_MODEL") or None,
+            code_agent_rate_limit_cooldown_seconds=int(
+                os.getenv(
+                    "ASSISTANT_CODE_AGENT_RATE_LIMIT_COOLDOWN_SECONDS",
+                    str(defaults.code_agent_rate_limit_cooldown_seconds),
+                )
+            ),
+            code_agent_quota_cooldown_seconds=int(
+                os.getenv(
+                    "ASSISTANT_CODE_AGENT_QUOTA_COOLDOWN_SECONDS",
+                    str(defaults.code_agent_quota_cooldown_seconds),
+                )
+            ),
             code_agent_timeout_seconds=int(
                 os.getenv(
                     "ASSISTANT_CODE_AGENT_TIMEOUT_SECONDS",

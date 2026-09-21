@@ -1,0 +1,201 @@
+direction: down
+
+classes: {
+  current: {
+    style.fill: "#EAF4FF"
+    style.stroke: "#2563EB"
+    style.font-color: "#172033"
+    style.stroke-width: 2
+  }
+  planned: {
+    style.fill: "#FFF7E6"
+    style.stroke: "#D97706"
+    style.font-color: "#3A2A13"
+    style.stroke-dash: 5
+    style.stroke-width: 2
+  }
+  external: {
+    style.fill: "#F5F3FF"
+    style.stroke: "#7C3AED"
+    style.font-color: "#25164A"
+  }
+  data: {
+    style.fill: "#ECFDF5"
+    style.stroke: "#059669"
+    style.font-color: "#12372D"
+  }
+  boundary: {
+    style.fill: "#FFFFFF"
+    style.stroke: "#AAB4C3"
+    style.font-color: "#172033"
+    style.stroke-width: 2
+  }
+}
+
+title: "Personal Assistant — Target Architecture" {
+  shape: text
+  style.font-size: 28
+  style.bold: true
+  style.font-color: "#111827"
+}
+
+clients: "Clients" {
+  class: boundary
+  direction: down
+  web: "Web UI" { class: current }
+  android: "Android assistant" { class: current }
+  voice: "Voice + avatar" { class: current }
+}
+
+assistant: "Assistant platform" {
+  class: boundary
+  direction: down
+
+  api: "API boundary" {
+    class: boundary
+    direction: right
+    chat: "Chat API" { class: current }
+    tasks: "Task API" { class: current }
+    approvals: "Approval API" { class: current }
+  }
+
+  conversation: "Conversation layer" {
+    class: boundary
+    direction: right
+    sessions: "Chat sessions" { class: current }
+    context: "Context builder" { class: current }
+    agent: "Conversation agent" { class: current }
+  }
+
+  orchestration: "Durable task orchestration" {
+    class: boundary
+    direction: right
+    task_store: "Tasks + event log" { class: current }
+    profiler: "Task profiler\nMiniMax manager" { class: current }
+    decision: "Decision engine\nfilter → score → select" { class: current }
+    workflow: "Workflow engine" { class: planned }
+  }
+
+  registries: "Trusted registries" {
+    class: boundary
+    direction: right
+    capabilities: "Capability registry" { class: current }
+    repositories: "Repository registry" { class: planned }
+    runners: "Coding runner registry" { class: current }
+    tools: "Tool + MCP registry" { class: planned }
+  }
+
+  runtime: "Runtime decision state" {
+    class: boundary
+    direction: right
+    quota: "Quota + usage" { class: planned }
+    health: "Availability + cooldowns" { class: current }
+    outcomes: "Success, cost + latency" { class: planned }
+  }
+
+  executors: "Execution adapters" {
+    class: boundary
+    direction: right
+    conversation_exec: "Conversation" { class: current }
+    coding_exec: "Coding PR" { class: current }
+    tool_exec: "Tools" { class: planned }
+    deploy_exec: "Deployment" { class: planned }
+  }
+}
+
+coding: "Isolated coding workflow" {
+  class: boundary
+  direction: down
+  worktree: "Clean Git worktree" { class: current }
+  agents: "Coding runners" {
+    class: boundary
+    direction: right
+    kimi: "1 · Kimi Code" { class: current }
+    minimax: "2 · Claude Code + MiniMax" { class: current }
+    codex: "3 · Codex" { class: current }
+  }
+  validation: "Independent validation" { class: current }
+  draft: "Commit → push → draft PR" { class: current }
+  review: "Human review" { class: current }
+  ready: "Ready for review" { class: planned }
+  merge: "Exact-SHA merge approval" { class: current }
+  deploy: "Deploy + health check + rollback" { class: planned }
+}
+
+knowledge: "Memory + knowledge" {
+  class: boundary
+  direction: down
+  explicit: "Explicitly saved memory" { class: planned }
+  chat_memory: "Conversation summaries" { class: current }
+  task_memory: "Task outcomes" { class: current }
+  retrieval: "Context retrieval" { class: planned }
+}
+
+providers: "External providers" {
+  class: boundary
+  direction: down
+  minimax_api: "MiniMax\nmanager · chat · coding" { class: external }
+  kimi_api: "Kimi\nchat · coding" { class: external }
+  gemini: "Gemini TTS" { class: external }
+  github: "GitHub" { class: external }
+  mcp: "MCP servers" { class: external }
+  search: "Search providers" { class: external }
+}
+
+legend: "Status" {
+  class: boundary
+  direction: right
+  built: "Built / working" { class: current }
+  future: "Next / planned" { class: planned }
+  service: "External service" { class: external }
+}
+
+clients -> assistant.api: "HTTPS"
+
+assistant.api.chat -> assistant.conversation.sessions
+assistant.conversation.sessions -> assistant.conversation.context
+assistant.conversation.context -> assistant.conversation.agent
+assistant.conversation.agent -> assistant.executors.conversation_exec
+assistant.conversation.agent -> assistant.orchestration.task_store: "create after confirmation"
+
+assistant.api.tasks -> assistant.orchestration.task_store
+assistant.orchestration.task_store -> assistant.orchestration.profiler
+assistant.orchestration.profiler -> assistant.orchestration.decision
+assistant.orchestration.decision -> assistant.orchestration.workflow
+
+assistant.registries.capabilities -> assistant.orchestration.decision
+assistant.registries.repositories -> assistant.orchestration.decision
+assistant.registries.runners -> assistant.orchestration.decision
+assistant.runtime.quota -> assistant.orchestration.decision
+assistant.runtime.health -> assistant.orchestration.decision
+assistant.runtime.outcomes -> assistant.orchestration.decision
+
+assistant.orchestration.decision -> assistant.executors.conversation_exec
+assistant.orchestration.decision -> assistant.executors.coding_exec
+assistant.orchestration.decision -> assistant.executors.tool_exec
+assistant.orchestration.decision -> assistant.executors.deploy_exec
+
+assistant.executors.coding_exec -> coding.worktree
+coding.worktree -> coding.agents.kimi
+coding.agents.kimi -> coding.agents.minimax: "limit / failure" { style.stroke-dash: 4 }
+coding.agents.minimax -> coding.agents.codex: "limit / failure" { style.stroke-dash: 4 }
+coding.agents.kimi -> coding.validation
+coding.agents.minimax -> coding.validation
+coding.agents.codex -> coding.validation
+coding.validation -> coding.draft
+coding.draft -> coding.review: "GitHub draft PR"
+coding.review -> coding.ready
+coding.ready -> coding.merge
+assistant.api.approvals -> coding.merge
+coding.merge -> coding.deploy
+coding.deploy -> assistant.executors.deploy_exec
+
+assistant.executors.tool_exec -> assistant.registries.tools
+assistant.executors -> providers: "provider adapters"
+
+knowledge.explicit -> knowledge.retrieval
+knowledge.chat_memory -> knowledge.retrieval
+knowledge.task_memory -> knowledge.retrieval
+knowledge.retrieval -> assistant.conversation.context
+assistant.conversation.sessions -> knowledge.chat_memory
+assistant.orchestration.task_store -> knowledge.task_memory

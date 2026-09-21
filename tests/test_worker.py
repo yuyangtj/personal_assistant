@@ -204,6 +204,7 @@ def test_runtime_builds_configured_coding_pull_request_executor(tmp_path) -> Non
     executor = build_coding_executor(
         Settings(
             code_agent_enabled=True,
+            code_agent_providers="codex",
             code_repository_path=repository,
             code_worktree_root=tmp_path / "worktrees",
             code_agent_executable="/opt/codex",
@@ -217,8 +218,8 @@ def test_runtime_builds_configured_coding_pull_request_executor(tmp_path) -> Non
     assert executor is not None
     assert executor.repository_path == repository
     assert executor.base_branch == "develop"
-    assert executor.agent.executable == "/opt/codex"
-    assert executor.agent.model == "coding-model"
+    assert executor.agent.runners[0].executable == "/opt/codex"
+    assert executor.agent.runners[0].model == "coding-model"
     executor.github.close()
 
 
