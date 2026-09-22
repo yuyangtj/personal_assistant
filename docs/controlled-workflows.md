@@ -17,11 +17,17 @@ code, not model output. Every enabled manifest must contain an explicit approval
 
 ## Current lifecycle
 
-The current foundation supports `proposed → approved` and `proposed → rejected`. It
-stores every transition in `workflow_run_events`. Approval only authorizes the proposal;
-it does **not** execute GitHub, shell, migration, or deployment operations yet. This is
-intentional: each privileged stage will be connected to a narrowly scoped trusted
-executor separately.
+All transitions are stored in `workflow_run_events`. A proposal follows either
+`proposed → rejected` or `proposed → approved → running → completed/failed/cancelled`.
+Approval only authorizes the proposal; an explicit start is still required.
+
+Only `coding-change` currently has a trusted start adapter. Starting it creates exactly
+one idempotent task requiring `coding` and `pull_request_creation`, fixed to the registered
+repository in the approved input. Its workflow stage is synchronized from persisted task
+state: execution maps to `implement`, validation to `validate`, PR approval to `review`,
+and a completed merge to `merge`. While at `review`, marking a draft ready and approving
+its merge remain two distinct, separately audited actions. Repository onboarding and deployment remain proposal-
+only until their narrower executors and rollback rules are implemented.
 
 Create a proposal:
 
@@ -37,6 +43,17 @@ curl -X POST http://localhost:8000/workflow-runs \
   }'
 ```
 
+A consequential coding request can also be proposed directly from its chat message. The
+endpoint is idempotent, keeps the workflow linked to the chat, and links the original
+message to the task only after the approved workflow is explicitly started:
+
+```bash
+curl -X POST \
+  http://localhost:8000/chat-sessions/CHAT_ID/messages/MESSAGE_ID/workflow-run \
+  -H 'content-type: application/json' \
+  -d '{"repository_id":"analytics-agent-playground"}'
+```
+
 Approve it with the separate approval credential:
 
 ```bash
@@ -44,6 +61,19 @@ curl -X POST http://localhost:8000/workflow-runs/WORKFLOW_RUN_ID/decision \
   -H 'content-type: application/json' \
   -H 'X-Assistant-Approval-Token: YOUR_SEPARATE_APPROVAL_SECRET' \
   -d '{"decision":"approve"}'
+```
+
+Then explicitly start the approved coding workflow:
+
+```bash
+curl -X POST http://localhost:8000/workflow-runs/WORKFLOW_RUN_ID/start
+```
+
+The worker synchronizes linked workflow state automatically. The sync endpoint is also
+available for recovery and reconciliation:
+
+```bash
+curl -X POST http://localhost:8000/workflow-runs/WORKFLOW_RUN_ID/sync
 ```
 
 Inspect durable state and the audit trail:
@@ -60,7 +90,7 @@ conversation. Deployments must preserve the database volume and run ordered migr
 
 ## Next execution increment
 
-The next increment should connect only the `coding-change` workflow to the existing
-coding task and PR machinery. Advancing a stage must be conditional on the preceding
-stage's persisted evidence. Repository activation and production deployment remain
-disabled until their own trusted executors, health checks, and rollback behavior exist.
+The next increment should make chat confirmation create a workflow proposal for
+consequential coding requests instead of directly creating a task. Repository activation
+and production deployment remain disabled until their own trusted executors, health
+checks, and rollback behavior exist.

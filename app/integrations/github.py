@@ -23,6 +23,7 @@ class GitHubPullRequest:
     draft: bool
     merged: bool
     merge_commit_sha: str | None = None
+    node_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +104,37 @@ class GitHubClient:
             message=str(response.get("message") or "GitHub returned no merge message"),
         )
 
+    def mark_pull_request_ready_for_review(self, *, node_id: str) -> bool:
+        if not node_id:
+            raise ValueError("A GitHub pull request node id is required")
+        response = self._request(
+            "POST",
+            "/graphql",
+            json={
+                "query": (
+                    "mutation MarkReady($pullRequestId: ID!) { "
+                    "markPullRequestReadyForReview(input: {pullRequestId: $pullRequestId}) { "
+                    "pullRequest { isDraft } } }"
+                ),
+                "variables": {"pullRequestId": node_id},
+            },
+        )
+        if response.get("errors"):
+            raise GitHubError("GitHub rejected the ready-for-review operation")
+        try:
+            data = response["data"]
+            if not isinstance(data, dict):
+                raise TypeError
+            mutation = data["markPullRequestReadyForReview"]
+            if not isinstance(mutation, dict):
+                raise TypeError
+            pull_request = mutation["pullRequest"]
+            if not isinstance(pull_request, dict):
+                raise TypeError
+            return pull_request.get("isDraft") is False
+        except (KeyError, TypeError) as error:
+            raise GitHubError("GitHub returned an unexpected ready-for-review result") from error
+
     def close(self) -> None:
         self._client.close()
 
@@ -155,6 +187,7 @@ def _pull_request_from_json(repository: str, body: dict[str, object]) -> GitHubP
                 if isinstance(body.get("merge_commit_sha"), str)
                 else None
             ),
+            node_id=body.get("node_id") if isinstance(body.get("node_id"), str) else None,
         )
     except (KeyError, TypeError, ValueError) as error:
         raise GitHubError("GitHub returned an unexpected pull request shape") from error

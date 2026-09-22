@@ -17,6 +17,10 @@ class WorkflowStageKind(StrEnum):
 class WorkflowRunStatus(StrEnum):
     PROPOSED = "proposed"
     APPROVED = "approved"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
     REJECTED = "rejected"
 
 

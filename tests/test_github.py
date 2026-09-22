@@ -18,6 +18,7 @@ def _pull_request_json(*, draft: bool = True, merged: bool = False) -> dict[str,
         "draft": draft,
         "merged": merged,
         "merge_commit_sha": "b" * 40 if merged else None,
+        "node_id": "PR_kwDOExample",
     }
 
 
@@ -96,9 +97,7 @@ def test_github_rejects_invalid_repository_names(repository: str) -> None:
 
 
 def test_github_accepts_repository_names_with_dots() -> None:
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(200, json=_pull_request_json())
-    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=_pull_request_json()))
     client = GitHubClient(token="secret", transport=transport)
     try:
         pull_request = client.get_pull_request(repository="acme/widget.py", number=17)
@@ -106,3 +105,24 @@ def test_github_accepts_repository_names_with_dots() -> None:
         client.close()
 
     assert pull_request.repository == "acme/widget.py"
+
+
+def test_github_marks_pull_request_ready_for_review_with_graphql() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        assert request.url.path == "/graphql"
+        return httpx.Response(
+            200,
+            json={"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}}},
+        )
+
+    client = GitHubClient(token="secret", transport=httpx.MockTransport(handler))
+    try:
+        ready = client.mark_pull_request_ready_for_review(node_id="PR_kwDOExample")
+    finally:
+        client.close()
+
+    assert ready is True
+    assert captured["variables"] == {"pullRequestId": "PR_kwDOExample"}

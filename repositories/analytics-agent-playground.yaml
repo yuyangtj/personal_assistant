@@ -8,5 +8,6 @@ github_repository: yuyangtj/analytics-agent-playground
 path_env: ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH
 base_branch: main
 remote: origin
+validation_profile: analytics-agent
 enabled: true
 default: false

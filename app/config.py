@@ -20,6 +20,9 @@ class Settings:
     capabilities_directory: Path = Path("capabilities")
     repositories_directory: Path = Path("repositories")
     workflows_directory: Path = Path("workflows")
+    coding_runners_directory: Path = Path("coding-runners")
+    validation_profiles_directory: Path = Path("validation-profiles")
+    deployment_targets_directory: Path = Path("deployment-targets")
     default_repository_id: str | None = None
     kimi_api_key: str | None = None
     kimi_base_url: str = "https://api.kimi.com/coding/v1"
@@ -114,6 +117,24 @@ class Settings:
                 os.getenv(
                     "ASSISTANT_WORKFLOWS_DIRECTORY",
                     str(defaults.workflows_directory),
+                )
+            ),
+            coding_runners_directory=Path(
+                os.getenv(
+                    "ASSISTANT_CODING_RUNNERS_DIRECTORY",
+                    str(defaults.coding_runners_directory),
+                )
+            ),
+            validation_profiles_directory=Path(
+                os.getenv(
+                    "ASSISTANT_VALIDATION_PROFILES_DIRECTORY",
+                    str(defaults.validation_profiles_directory),
+                )
+            ),
+            deployment_targets_directory=Path(
+                os.getenv(
+                    "ASSISTANT_DEPLOYMENT_TARGETS_DIRECTORY",
+                    str(defaults.deployment_targets_directory),
                 )
             ),
             default_repository_id=os.getenv("ASSISTANT_DEFAULT_REPOSITORY_ID") or None,
@@ -215,9 +236,7 @@ class Settings:
                     str(defaults.code_agent_timeout_seconds),
                 )
             ),
-            github_token=os.getenv("ASSISTANT_GITHUB_TOKEN")
-            or os.getenv("GITHUB_TOKEN")
-            or None,
+            github_token=os.getenv("ASSISTANT_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or None,
             github_api_base_url=os.getenv(
                 "ASSISTANT_GITHUB_API_BASE_URL", defaults.github_api_base_url
             ),
@@ -242,8 +261,7 @@ class Settings:
                 defaults.conversation_model_fallback_provider,
             )
             or None,
-            conversation_model_base_url=os.getenv("ASSISTANT_CONVERSATION_MODEL_BASE_URL")
-            or None,
+            conversation_model_base_url=os.getenv("ASSISTANT_CONVERSATION_MODEL_BASE_URL") or None,
             conversation_model_name=os.getenv("ASSISTANT_CONVERSATION_MODEL") or None,
             conversation_model_timeout_seconds=(
                 float(value)

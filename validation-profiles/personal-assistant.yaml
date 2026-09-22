@@ -1,0 +1,9 @@
+id: personal-assistant
+name: Personal Assistant backend
+steps:
+  - id: lint
+    command: [uv, run, ruff, check, .]
+    timeout_seconds: 300
+  - id: tests
+    command: [uv, run, pytest]
+    timeout_seconds: 900

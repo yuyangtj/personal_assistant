@@ -8,5 +8,6 @@ github_repository: yuyangtj/personal_assistant
 path_env: ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH
 base_branch: main
 remote: origin
+validation_profile: personal-assistant
 enabled: true
 default: true

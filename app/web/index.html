@@ -114,7 +114,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const state = { chats: [], repositories: [], repositoryId: null, chatId: null, messages: [], tasks: [], proposal: null,
-                proposalFor: null, taskId: null, busy: false, timer: null };
+                proposalFor: null, workflowRun: null, taskId: null, busy: false, timer: null };
 
 async function api(path, options) {
   const res = await fetch(path, {
@@ -133,6 +133,13 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const label = (s) => String(s || "").replace(/_/g, " ");
 const active = (t) => !["completed", "failed", "cancelled"].includes(t.status);
+
+async function pendingApproval(taskId) {
+  const res = await fetch(`/tasks/${taskId}/pending-approval`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
 
 async function loadChats() {
   try {
@@ -159,7 +166,7 @@ async function loadRepositories() {
 }
 
 async function openChat(id) {
-  state.chatId = id; state.proposal = null; state.proposalFor = null;
+  state.chatId = id; state.proposal = null; state.proposalFor = null; state.workflowRun = null;
   await Promise.all([loadChats(), refreshTranscript()]);
 }
 
@@ -208,17 +215,29 @@ function renderTranscript() {
 }
 
 function renderProposal() {
+  if (state.workflowRun) {
+    const run = state.workflowRun;
+    $("proposal-slot").innerHTML = `<div class="proposal">
+      <strong>Coding workflow proposed</strong><span class="badge">${esc(run.status)}</span>
+      <div class="why">Run ${esc(run.id.slice(0, 8))} is persisted and waiting for a separately authorized decision.</div>
+      <div class="row" style="margin-top:10px"><button class="quiet" id="dismiss-workflow">Dismiss</button></div></div>`;
+    $("dismiss-workflow").onclick = () => { state.workflowRun = null; renderProposal(); };
+    return;
+  }
   if (!state.proposal) { $("proposal-slot").innerHTML = ""; return; }
   const p = state.proposal;
+  const codingWorkflow = p.consequential && p.required_capabilities.includes("coding");
   $("proposal-slot").innerHTML = `<div class="proposal">
-    <strong>Create a task?</strong>${p.consequential ? `<span class="badge">consequential</span>` : ""}
+    <strong>${codingWorkflow ? "Propose coding workflow?" : "Create a task?"}</strong>${p.consequential ? `<span class="badge">consequential</span>` : ""}
     <div class="why">${esc(p.reason)}</div>
     <div class="goal">${esc(p.suggested_goal)}</div>
     ${p.required_capabilities.length ? `<div class="why">Needs: ${esc(p.required_capabilities.join(", "))}</div>` : ""}
     <div class="row" style="margin-top:10px">
-      <button id="confirm">Create task</button>
+      <button id="confirm">${codingWorkflow ? "Propose workflow" : "Create task"}</button>
       <button class="quiet" id="decline">Not now</button></div></div>`;
-  $("confirm").onclick = () => createTask(state.proposalFor, p);
+  $("confirm").onclick = () => codingWorkflow
+    ? createCodingWorkflow(state.proposalFor)
+    : createTask(state.proposalFor, p);
   $("decline").onclick = () => { state.proposal = null; renderProposal(); };
 }
 
@@ -257,11 +276,23 @@ async function createTask(messageId, proposal) {
   } catch (e) { fail(e); }
 }
 
+async function createCodingWorkflow(messageId) {
+  if (!state.repositoryId) return fail(new Error("Select a registered repository first."));
+  state.proposal = null;
+  try {
+    state.workflowRun = await api(
+      `/chat-sessions/${state.chatId}/messages/${messageId}/workflow-run`,
+      { method: "POST", body: JSON.stringify({ repository_id: state.repositoryId }) });
+    renderProposal();
+  } catch (e) { fail(e); }
+}
+
 async function renderTask(id) {
   state.taskId = id;
   try {
-    const [task, ctx, events] = await Promise.all([
+    const [task, ctx, events, approval] = await Promise.all([
       api(`/tasks/${id}`), api(`/tasks/${id}/context`), api(`/tasks/${id}/events`),
+      pendingApproval(id),
     ]);
     $("task-detail").innerHTML = `
       <dl class="kv">
@@ -272,8 +303,11 @@ async function renderTask(id) {
         <dt>Repository</dt><dd>${esc(task.source_context.repository_id || "—")}</dd>
         <dt>Origin msg</dt><dd>${task.origin_message_id ? esc(task.origin_message_id.slice(0, 8)) : "—"}</dd>
         <dt>Parent</dt><dd>${task.parent_task_id ? esc(task.parent_task_id.slice(0, 8)) : "—"}</dd>
+        ${approval ? `<dt>Pull request</dt><dd><a href="${esc(approval.url)}" target="_blank" rel="noreferrer">#${esc(approval.number)}</a> · ${approval.draft ? "draft" : "ready for review"}</dd>` : ""}
       </dl>
       <div class="row" style="margin-top:10px">
+        ${approval && approval.draft ? `<button id="mark-ready">Mark ready for review</button>` : ""}
+        ${approval && approval.head_branch ? `<button class="quiet" id="request-revision">Request revision</button>` : ""}
         ${active(task) ? `<button class="quiet" id="cancel-task">Cancel</button>` : ""}
         <button class="ghost" id="discuss">Discuss in chat</button></div>
       <h2>Curated context</h2>
@@ -288,6 +322,44 @@ async function renderTask(id) {
     if (cancel) cancel.onclick = async () => {
       try { await api(`/tasks/${id}/cancel`, { method: "POST" }); await refreshTranscript(); }
       catch (e) { fail(e); }
+    };
+    const markReady = $("mark-ready");
+    if (markReady) markReady.onclick = async () => {
+      const token = window.prompt("Enter the separate assistant approval token");
+      if (!token) return;
+      try {
+        await api(`/tasks/${id}/pull-request-ready`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "X-Assistant-Approval-Token": token,
+          },
+          body: JSON.stringify({ expected_head_sha: approval.expected_head_sha }),
+        });
+        await renderTask(id);
+      } catch (e) { fail(e); }
+    };
+    const requestRevision = $("request-revision");
+    if (requestRevision) requestRevision.onclick = async () => {
+      const instructions = window.prompt("What should the coding agent revise?");
+      if (!instructions || !instructions.trim()) return;
+      const token = window.prompt("Enter the separate assistant approval token");
+      if (!token) return;
+      try {
+        const task = await api(`/tasks/${id}/pull-request-revision`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "X-Assistant-Approval-Token": token,
+          },
+          body: JSON.stringify({
+            instructions: instructions.trim(),
+            expected_head_sha: approval.expected_head_sha,
+          }),
+        });
+        await refreshTranscript();
+        await renderTask(task.id);
+      } catch (e) { fail(e); }
     };
     $("discuss").onclick = async () => {
       try {

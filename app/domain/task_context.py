@@ -66,9 +66,7 @@ def _artifact_payloads(events: Sequence[TaskEventModel]) -> Iterable[dict[str, A
             if isinstance(artifact, dict):
                 yield artifact
     for event in events:
-        if event.event_type == EventType.ARTIFACT_CREATED.value and isinstance(
-            event.payload, dict
-        ):
+        if event.event_type == EventType.ARTIFACT_CREATED.value and isinstance(event.payload, dict):
             yield event.payload
 
 

@@ -1,0 +1,12 @@
+id: codex-cli
+name: Codex CLI
+priority: 80
+cost_tier: 3
+reasoning_tier: 5
+strengths:
+  - architecture
+  - debugging
+  - migration
+  - refactor
+  - security
+enabled: true

@@ -3,7 +3,7 @@ from sqlalchemy import select
 
 from app.integrations.github import GitHubMergeResult, GitHubPullRequest
 from app.integrations.speech import SpeechAudio
-from app.persistence.models import ExecutionModel
+from app.persistence.models import ExecutionModel, TaskModel
 
 
 def test_create_get_list_and_cancel_task(client: TestClient) -> None:
@@ -60,6 +60,37 @@ def test_repositories_are_listed_and_task_accepts_trusted_repository(client: Tes
     assert rejected.status_code == 422
 
 
+def test_provider_runtime_state_is_visible_without_exposing_credentials(
+    client: TestClient,
+) -> None:
+    client.app.state.provider_state_store.record_failure(
+        "coding:kimi",
+        category="rate_limited",
+        cooldown_seconds=300,
+    )
+
+    response = client.get("/provider-states")
+
+    assert response.status_code == 200
+    assert response.json()["providers"][0]["provider_key"] == "coding:kimi"
+    assert response.json()["providers"][0]["available"] is False
+    assert response.json()["providers"][0]["last_error_category"] == "rate_limited"
+    assert "token" not in response.text.lower()
+
+
+def test_coding_runner_registry_is_visible(client: TestClient) -> None:
+    response = client.get("/coding-runners")
+
+    assert response.status_code == 200
+    runners = response.json()["runners"]
+    assert {runner["id"] for runner in runners} == {
+        "kimi-code",
+        "minimax-claude-code",
+        "codex-cli",
+    }
+    assert all("cost_tier" in runner and "reasoning_tier" in runner for runner in runners)
+
+
 def test_workflow_run_requires_explicit_authorized_decision(client: TestClient) -> None:
     client.app.state.approval_token = "workflow-approval-secret"
 
@@ -100,12 +131,48 @@ def test_workflow_run_requires_explicit_authorized_decision(client: TestClient) 
     )
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
-    assert approved.json()["current_stage"] == "implement"
+    assert approved.json()["current_stage"] is None
+
+    started = client.post(f"/workflow-runs/{run['id']}/start")
+    assert started.status_code == 200
+    assert started.json()["status"] == "running"
+    assert started.json()["current_stage"] == "implement"
+    task_id = started.json()["task_id"]
+    task = client.get(f"/tasks/{task_id}").json()
+    assert task["required_capabilities"] == ["coding", "pull_request_creation"]
+    assert task["source_context"] == {
+        "repository_id": "analytics-agent-playground",
+        "workflow_run_id": run["id"],
+    }
+
+    repeated_start = client.post(f"/workflow-runs/{run['id']}/start")
+    assert repeated_start.status_code == 200
+    assert repeated_start.json()["task_id"] == task_id
+
+    with client.app.state.database.session() as session, session.begin():
+        session.get(TaskModel, task_id).status = "validating"
+    validating = client.post(f"/workflow-runs/{run['id']}/sync")
+    assert validating.json()["current_stage"] == "validate"
+
+    with client.app.state.database.session() as session, session.begin():
+        session.get(TaskModel, task_id).status = "waiting_for_approval"
+    reviewing = client.post(f"/workflow-runs/{run['id']}/sync")
+    assert reviewing.json()["current_stage"] == "review"
+
+    with client.app.state.database.session() as session, session.begin():
+        session.get(TaskModel, task_id).status = "completed"
+    completed = client.post(f"/workflow-runs/{run['id']}/sync")
+    assert completed.json()["status"] == "completed"
+    assert completed.json()["current_stage"] == "merge"
 
     events = client.get(f"/workflow-runs/{run['id']}/events")
     assert [event["event_type"] for event in events.json()["events"]] == [
         "WORKFLOW_PROPOSED",
         "WORKFLOW_APPROVED",
+        "WORKFLOW_STARTED",
+        "WORKFLOW_STAGE_CHANGED",
+        "WORKFLOW_STAGE_CHANGED",
+        "WORKFLOW_COMPLETED",
     ]
 
     duplicate = client.post(
@@ -142,6 +209,41 @@ def test_workflow_run_validates_registered_repository_and_required_inputs(
         },
     )
     assert malformed_onboarding.status_code == 422
+
+
+def test_chat_message_can_propose_one_coding_workflow_then_link_started_task(
+    client: TestClient,
+) -> None:
+    client.app.state.approval_token = "workflow-approval-secret"
+    chat = client.post("/chat-sessions", json={}).json()
+    message = client.post(
+        f"/chat-sessions/{chat['id']}/messages",
+        json={"content": "Implement a revenue dashboard with tests"},
+    ).json()["message"]
+    endpoint = f"/chat-sessions/{chat['id']}/messages/{message['id']}/workflow-run"
+
+    first = client.post(endpoint, json={"repository_id": "analytics"})
+    second = client.post(endpoint, json={"repository_id": "analytics-agent-playground"})
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["id"] == second.json()["id"]
+    assert first.json()["chat_session_id"] == chat["id"]
+    assert first.json()["origin_message_id"] == message["id"]
+
+    run_id = first.json()["id"]
+    approved = client.post(
+        f"/workflow-runs/{run_id}/decision",
+        headers={"X-Assistant-Approval-Token": "workflow-approval-secret"},
+        json={"decision": "approve"},
+    )
+    assert approved.status_code == 200
+    started = client.post(f"/workflow-runs/{run_id}/start")
+    assert started.status_code == 200
+
+    messages = client.get(f"/chat-sessions/{chat['id']}/messages").json()["messages"]
+    original = next(item for item in messages if item["id"] == message["id"])
+    assert original["linked_task_id"] == started.json()["task_id"]
 
 
 def test_external_key_makes_creation_idempotent(client: TestClient) -> None:
@@ -226,9 +328,7 @@ def test_existing_task_can_open_a_backfilled_chat(client: TestClient) -> None:
     assert first.status_code == 201
     assert second.status_code == 201
     assert first.json()["id"] == second.json()["id"]
-    messages = client.get(
-        f"/chat-sessions/{first.json()['id']}/messages"
-    ).json()["messages"]
+    messages = client.get(f"/chat-sessions/{first.json()['id']}/messages").json()["messages"]
     assert [(message["role"], message["content"]) for message in messages] == [
         ("user", "Explain the result"),
         ("assistant", "Okay, I've stopped working on that."),
@@ -526,9 +626,7 @@ def test_pull_request_merge_refreshes_approval_when_remote_head_changed(
     assert response.status_code == 409
     assert client.get(f"/tasks/{task_id}").json()["status"] == "waiting_for_approval"
     events = client.get(f"/tasks/{task_id}/events").json()["events"]
-    approvals = [
-        event for event in events if event["event_type"] == "APPROVAL_REQUESTED"
-    ]
+    approvals = [event for event in events if event["event_type"] == "APPROVAL_REQUESTED"]
     assert len(approvals) == 2
     assert approvals[-1]["payload"]["expected_head_sha"] == "d" * 40
 
@@ -565,6 +663,76 @@ def test_pull_request_merge_refuses_draft_and_reopens_approval(client: TestClien
     assert client.get(f"/tasks/{task_id}").json()["status"] == "waiting_for_approval"
 
 
+def test_mark_pull_request_ready_verifies_head_and_refreshes_approval(
+    client: TestClient,
+) -> None:
+    task_id, _ = _pending_pull_request_task(client, draft=True)
+    calls: list[str] = []
+
+    class GitHub:
+        def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
+            calls.append("get")
+            return GitHubPullRequest(
+                repository="acme/widget",
+                number=17,
+                url="https://github.com/acme/widget/pull/17",
+                head_branch="assistant/task-123",
+                head_sha="a" * 40,
+                base_branch="main",
+                state="open",
+                draft=True,
+                merged=False,
+                node_id="PR_kwDOExample",
+            )
+
+        def mark_pull_request_ready_for_review(self, **kwargs) -> bool:
+            calls.append("ready")
+            assert kwargs == {"node_id": "PR_kwDOExample"}
+            return True
+
+    client.app.state.github_client = GitHub()
+    response = client.post(
+        f"/tasks/{task_id}/pull-request-ready",
+        headers={"X-Assistant-Approval-Token": "approval-secret"},
+        json={"expected_head_sha": "a" * 40},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["draft"] is False
+    assert response.json()["reason"] == "Pull request is ready for human review"
+    assert calls == ["get", "ready"]
+    assert client.get(f"/tasks/{task_id}").json()["status"] == "waiting_for_approval"
+    events = client.get(f"/tasks/{task_id}/events").json()["events"]
+    operations = [
+        event["payload"].get("operation")
+        for event in events
+        if event["event_type"] in {"TOOL_CALLED", "TOOL_RESULT_RECEIVED"}
+    ]
+    assert operations[-2:] == [
+        "mark_pull_request_ready_for_review",
+        "mark_pull_request_ready_for_review",
+    ]
+
+
+def test_mark_pull_request_ready_rejects_unreviewed_sha_without_github_call(
+    client: TestClient,
+) -> None:
+    task_id, _ = _pending_pull_request_task(client, draft=True)
+
+    class GitHub:
+        def get_pull_request(self, **_kwargs):
+            raise AssertionError("GitHub must not be called for an unrecognized SHA")
+
+    client.app.state.github_client = GitHub()
+    response = client.post(
+        f"/tasks/{task_id}/pull-request-ready",
+        headers={"X-Assistant-Approval-Token": "approval-secret"},
+        json={"expected_head_sha": "c" * 40},
+    )
+
+    assert response.status_code == 409
+
+
 def test_pull_request_rejection_leaves_pr_unmerged_and_cancels_task(
     client: TestClient,
 ) -> None:
@@ -582,9 +750,7 @@ def test_pull_request_rejection_leaves_pr_unmerged_and_cancels_task(
     assert events[-3]["event_type"] == "APPROVAL_REJECTED"
     assert events[-1]["event_type"] == "TASK_CANCELLED"
     with client.app.state.database.session() as session:
-        execution = session.scalar(
-            select(ExecutionModel).where(ExecutionModel.id == execution_id)
-        )
+        execution = session.scalar(select(ExecutionModel).where(ExecutionModel.id == execution_id))
         assert execution is not None
         assert execution.status == "cancelled"
         assert execution.completed_at is not None

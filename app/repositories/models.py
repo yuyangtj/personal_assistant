@@ -16,6 +16,7 @@ class RepositoryManifest(BaseModel):
     path_env: str = Field(pattern=r"^[A-Z][A-Z0-9_]+$")
     base_branch: str = "main"
     remote: str = "origin"
+    validation_profile: str
     enabled: bool = True
     default: bool = False
 

@@ -1,0 +1,11 @@
+id: minimax-claude-code
+name: Claude Code with MiniMax
+priority: 90
+cost_tier: 1
+reasoning_tier: 3
+strengths:
+  - data
+  - debugging
+  - refactor
+  - testing
+enabled: true

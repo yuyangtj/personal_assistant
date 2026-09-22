@@ -141,9 +141,7 @@ class MiniMaxManagerModelClient:
                 timeout=timeout_seconds,
             )
         except httpx.HTTPError as error:
-            raise MiniMaxError(
-                f"MiniMax manager request failed: {type(error).__name__}"
-            ) from error
+            raise MiniMaxError(f"MiniMax manager request failed: {type(error).__name__}") from error
         if response.status_code != 200:
             raise MiniMaxError(f"MiniMax manager returned HTTP {response.status_code}")
         try:

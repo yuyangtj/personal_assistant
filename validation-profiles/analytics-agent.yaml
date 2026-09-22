@@ -1,0 +1,6 @@
+id: analytics-agent
+name: Analytics Agent Python validation
+steps:
+  - id: compile
+    command: [python, -m, compileall, -q, agent, benchmark, generator, grader]
+    timeout_seconds: 300

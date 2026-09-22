@@ -298,6 +298,21 @@ class TaskService:
             origin_message_id=message_id,
         )
 
+    def get_user_chat_message(
+        self,
+        chat_session_id: str,
+        message_id: str,
+    ) -> ChatMessageModel:
+        with self.database.session() as session:
+            if ChatSessionRepository.get(session, chat_session_id) is None:
+                raise ChatSessionNotFoundError(chat_session_id)
+            message = session.get(ChatMessageModel, message_id)
+            if message is None or message.chat_session_id != chat_session_id:
+                raise ChatMessageNotFoundError(message_id)
+            if message.role != "user":
+                raise ValueError("Only a user message can propose a workflow")
+            return message
+
     def task_context(self, task_id: str) -> dict[str, Any]:
         """The curated, whitelisted summary of a task — safe to put in a model prompt."""
         with self.database.session() as session:
@@ -447,8 +462,7 @@ class TaskService:
                 statement = statement.where(TaskModel.chat_session_id == task.chat_session_id)
             else:
                 statement = statement.where(
-                    TaskModel.source_context["conversation_id"].as_string()
-                    == str(conversation_id)
+                    TaskModel.source_context["conversation_id"].as_string() == str(conversation_id)
                 )
             recent = session.scalars(statement).all()
             turns: list[ConversationTurn] = []
@@ -464,10 +478,7 @@ class TaskService:
                     action_notes = session.scalars(
                         select(TaskEventModel.payload)
                         .where(TaskEventModel.task_id == previous.id)
-                        .where(
-                            TaskEventModel.event_type
-                            == EventType.USER_MESSAGE_RECEIVED.value
-                        )
+                        .where(TaskEventModel.event_type == EventType.USER_MESSAGE_RECEIVED.value)
                         .order_by(TaskEventModel.sequence.desc())
                     ).all()
                     outcome = next(
@@ -776,6 +787,75 @@ class TaskService:
                     "number": number,
                 },
             )
+
+    def record_pull_request_ready_call(
+        self,
+        task_id: str,
+        *,
+        repository: str,
+        number: int,
+        expected_head_sha: str,
+    ) -> None:
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            if TaskStatus(task.status) != TaskStatus.WAITING_FOR_APPROVAL:
+                raise ApprovalConflictError("Task is not waiting for pull request review")
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.TOOL_CALLED,
+                {
+                    "tool": "github",
+                    "operation": "mark_pull_request_ready_for_review",
+                    "repository": repository,
+                    "number": number,
+                    "expected_head_sha": expected_head_sha,
+                },
+            )
+
+    def record_pull_request_ready_result(
+        self,
+        task_id: str,
+        *,
+        ok: bool,
+        reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            if TaskStatus(task.status) != TaskStatus.WAITING_FOR_APPROVAL:
+                return None
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.TOOL_RESULT_RECEIVED,
+                {
+                    "tool": "github",
+                    "operation": "mark_pull_request_ready_for_review",
+                    "ok": ok,
+                    **({"reason": reason} if reason else {}),
+                },
+            )
+            if not ok:
+                return None
+            previous = session.scalar(
+                select(TaskEventModel)
+                .where(TaskEventModel.task_id == task.id)
+                .where(TaskEventModel.event_type == EventType.APPROVAL_REQUESTED.value)
+                .order_by(TaskEventModel.sequence.desc())
+                .limit(1)
+            )
+            if previous is None:
+                raise ApprovalNotFoundError(task_id)
+            refreshed = dict(previous.payload)
+            refreshed["draft"] = False
+            refreshed["reason"] = "Pull request is ready for human review"
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.APPROVAL_REQUESTED,
+                refreshed,
+            )
+            return refreshed
 
     def complete_pull_request_merge(
         self,

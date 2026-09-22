@@ -1,0 +1,9 @@
+id: kimi-code
+name: Kimi Code
+priority: 100
+cost_tier: 1
+reasoning_tier: 2
+strengths:
+  - documentation
+  - testing
+enabled: true

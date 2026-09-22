@@ -9,6 +9,8 @@ from pathlib import Path
 
 from app.capabilities import CapabilityRegistry
 from app.config import Settings
+from app.decision import CodingDecisionEngine, CodingRunnerRegistry
+from app.deployments import DeploymentRegistry
 from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.coding import (
     ClaudeCodeMiniMaxRunner,
@@ -28,9 +30,13 @@ from app.integrations.minimax import MiniMaxChatClient, MiniMaxManagerModelClien
 from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
 from app.manager.decisions import DelegateDecision, FailDecision
 from app.manager.model import ManagerModelClient, ValidatedManagerModelAdapter
+from app.memory import MemoryService
 from app.persistence.database import Database
+from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.service import TaskService
+from app.validation import ValidationProfileRegistry
+from app.workflows import WorkflowRegistry, WorkflowService
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +45,11 @@ class ExecutorAdapterNotFoundError(LookupError):
     pass
 
 
-def build_coding_executor(settings: Settings) -> RepositoryCodingExecutor | None:
+def build_coding_executor(
+    settings: Settings,
+    *,
+    provider_state_store: ProviderStateStore | None = None,
+) -> RepositoryCodingExecutor | None:
     """Builds the opt-in isolated coding-to-draft-PR workflow."""
     if not settings.code_agent_enabled:
         return None
@@ -54,8 +64,20 @@ def build_coding_executor(settings: Settings) -> RepositoryCodingExecutor | None
         runners,
         rate_limit_cooldown_seconds=settings.code_agent_rate_limit_cooldown_seconds,
         quota_cooldown_seconds=settings.code_agent_quota_cooldown_seconds,
+        state_store=provider_state_store,
+        decision_engine=(
+            CodingDecisionEngine(
+                CodingRunnerRegistry.from_directory(settings.coding_runners_directory),
+                provider_state_store,
+            )
+            if provider_state_store is not None
+            else None
+        ),
     )
     registry = RepositoryRegistry.from_directory(settings.repositories_directory)
+    validation_registry = ValidationProfileRegistry.from_directory(
+        settings.validation_profiles_directory
+    )
     executors: dict[str, CodingPullRequestExecutor] = {}
     for manifest in registry.list():
         configured_path = os.getenv(manifest.path_env)
@@ -90,6 +112,7 @@ def build_coding_executor(settings: Settings) -> RepositoryCodingExecutor | None
             remote=remote,
             timeout_seconds=settings.code_agent_timeout_seconds,
             draft_pull_requests=settings.github_draft_pull_requests,
+            validation_profile=validation_registry.get(manifest.validation_profile),
         )
     if not executors:
         expected = ", ".join(manifest.path_env for manifest in registry.list())
@@ -144,7 +167,7 @@ def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
             )
     if not runners:
         raise ValueError("No configured coding runner is usable")
-    logger.info("Coding runner order: %s", " -> ".join(runner.provider for runner in runners))
+    logger.info("Configured coding runners: %s", ", ".join(runner.provider for runner in runners))
     return runners
 
 
@@ -252,8 +275,7 @@ def build_manager(settings: Settings, registry: CapabilityRegistry) -> TaskManag
     ]
     if not clients:
         raise ValueError(
-            "Manager analysis requires credentials for a configured provider: "
-            + ", ".join(order)
+            "Manager analysis requires credentials for a configured provider: " + ", ".join(order)
         )
     client: ManagerModelClient = (
         clients[0] if len(clients) == 1 else FallbackManagerModelClient(clients)
@@ -279,6 +301,8 @@ class TaskWorker:
         worker_id: str,
         lease_seconds: int = 60,
         poll_interval_seconds: float = 1.0,
+        workflow_service: WorkflowService | None = None,
+        memory_service: MemoryService | None = None,
     ):
         self.service = service
         self.manager = manager
@@ -286,6 +310,8 @@ class TaskWorker:
         self.worker_id = worker_id
         self.lease_seconds = lease_seconds
         self.poll_interval_seconds = poll_interval_seconds
+        self.workflow_service = workflow_service
+        self.memory_service = memory_service
         self._stop_event = threading.Event()
 
     def run_once(self) -> bool:
@@ -346,12 +372,17 @@ class TaskWorker:
             if execution_id is None:
                 return True
 
+            execution_context = dict(task.source_context or {})
+            if self.memory_service is not None and executor.id == "model-conversation":
+                execution_context["memories"] = [
+                    memory.content for memory in self.memory_service.relevant(task.original_request)
+                ]
             result = executor.execute(
                 task_id=task.id,
                 request=task.original_request,
                 is_cancelled=lambda: self.service.is_cancelled(task.id),
                 history=self.service.conversation_history(task),
-                context=task.source_context or {},
+                context=execution_context,
             )
             if not self.service.start_validation(
                 task.id,
@@ -359,6 +390,7 @@ class TaskWorker:
                 output=result.output,
             ):
                 return True
+            self._sync_workflow(task.id)
             if not result.output or not result.output.get("summary"):
                 raise ValueError("Executor produced no summary")
             approval = result.output.get("approval_request")
@@ -393,7 +425,17 @@ class TaskWorker:
                 error=str(error),
                 execution_id=execution_id,
             )
+        finally:
+            self._sync_workflow(task.id)
         return True
+
+    def _sync_workflow(self, task_id: str) -> None:
+        if self.workflow_service is None:
+            return
+        try:
+            self.workflow_service.sync_for_task(task_id)
+        except Exception:
+            logger.exception("Could not synchronize workflow for task %s", task_id)
 
     def run_forever(self) -> None:
         logger.info("Worker %s started", self.worker_id)
@@ -427,7 +469,11 @@ def main() -> None:
             "%s conversation credentials are not set; conversation falls back to fake",
             settings.conversation_model_provider,
         )
-    coding_executor = build_coding_executor(settings)
+    provider_state_store = DatabaseProviderStateStore(database)
+    coding_executor = build_coding_executor(
+        settings,
+        provider_state_store=provider_state_store,
+    )
     if coding_executor is not None:
         executors[coding_executor.id] = coding_executor
         logger.info(
@@ -439,6 +485,12 @@ def main() -> None:
         settings.capabilities_directory
     ).restricted_to_adapters(executors)
     manager = build_manager(settings, registry)
+    workflow_service = WorkflowService(
+        database,
+        WorkflowRegistry.from_directory(settings.workflows_directory),
+        RepositoryRegistry.from_directory(settings.repositories_directory),
+        DeploymentRegistry.from_directory(settings.deployment_targets_directory),
+    )
     worker = TaskWorker(
         service=TaskService(database),
         manager=manager,
@@ -446,6 +498,8 @@ def main() -> None:
         worker_id=settings.worker_id,
         lease_seconds=settings.worker_lease_seconds,
         poll_interval_seconds=settings.worker_poll_interval_seconds,
+        workflow_service=workflow_service,
+        memory_service=MemoryService(database),
     )
 
     def stop_worker(_signum, _frame) -> None:

@@ -14,9 +14,12 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.decision import CodingDecision, CodingDecisionEngine
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.integrations.github import GitHubClient, GitHubPullRequest
+from app.providers import InMemoryProviderStateStore, ProviderStateStore
+from app.validation import ValidationProfile
 
 logger = logging.getLogger(__name__)
 
@@ -256,13 +259,17 @@ class FallbackCodeAgentRunner:
         *,
         rate_limit_cooldown_seconds: int = 300,
         quota_cooldown_seconds: int = 3600,
+        state_store: ProviderStateStore | None = None,
+        decision_engine: CodingDecisionEngine | None = None,
     ):
         if not runners:
             raise ValueError("At least one coding runner is required")
         self.runners = tuple(runners)
         self.rate_limit_cooldown_seconds = rate_limit_cooldown_seconds
         self.quota_cooldown_seconds = quota_cooldown_seconds
-        self._cooldowns: dict[str, float] = {}
+        self.state_store = state_store or InMemoryProviderStateStore()
+        self.decision_engine = decision_engine
+        self.last_decision: CodingDecision | None = None
         self.attempts: tuple[RunnerAttempt, ...] = ()
         self.provider = "->".join(runner.provider for runner in runners)
 
@@ -277,8 +284,16 @@ class FallbackCodeAgentRunner:
         deadline = time.monotonic() + timeout_seconds
         attempts: list[RunnerAttempt] = []
         failures: list[str] = []
-        for runner in self.runners:
-            if self._cooldowns.get(runner.provider, 0) > time.monotonic():
+        ordered_runners = self.runners
+        if self.decision_engine is not None:
+            self.last_decision = self.decision_engine.decide(self.runners, request)
+            by_provider = {runner.provider: runner for runner in self.runners}
+            ordered_runners = tuple(
+                by_provider[provider] for provider in self.last_decision.ordered_providers
+            )
+        for runner in ordered_runners:
+            provider_key = f"coding:{runner.provider}"
+            if not self.state_store.is_available(provider_key):
                 attempts.append(RunnerAttempt(runner.provider, "skipped", "cooldown"))
                 continue
             remaining = int(deadline - time.monotonic())
@@ -302,10 +317,17 @@ class FallbackCodeAgentRunner:
                         if error.category == "quota_exhausted"
                         else self.rate_limit_cooldown_seconds
                     )
-                    self._cooldowns[runner.provider] = time.monotonic() + cooldown
+                else:
+                    cooldown = 0
+                self.state_store.record_failure(
+                    provider_key,
+                    category=error.category,
+                    cooldown_seconds=cooldown,
+                )
                 _restore_clean_worktree(worktree)
                 continue
             attempts.append(RunnerAttempt(runner.provider, "succeeded"))
+            self.state_store.record_success(provider_key)
             self.attempts = tuple(attempts)
             self.provider = runner.provider
             report.notes.append(
@@ -316,6 +338,12 @@ class FallbackCodeAgentRunner:
                     for attempt in attempts
                 )
             )
+            if self.last_decision is not None:
+                report.notes.append(
+                    "Decision engine: "
+                    f"complexity={self.last_decision.profile.complexity.value}; "
+                    "order=" + " -> ".join(self.last_decision.ordered_providers)
+                )
             return report
         self.attempts = tuple(attempts)
         detail = ", ".join(failures) or "all providers are cooling down"
@@ -391,6 +419,7 @@ class CodingPullRequestExecutor:
         remote: str = "origin",
         timeout_seconds: int = 1800,
         draft_pull_requests: bool = True,
+        validation_profile: ValidationProfile | None = None,
     ):
         self.repository_path = repository_path.resolve()
         self.worktree_root = worktree_root.resolve()
@@ -401,6 +430,7 @@ class CodingPullRequestExecutor:
         self.remote = _safe_ref(remote)
         self.timeout_seconds = timeout_seconds
         self.draft_pull_requests = draft_pull_requests
+        self.validation_profile = validation_profile
 
     def execute(
         self,
@@ -411,10 +441,15 @@ class CodingPullRequestExecutor:
         history: Sequence[ConversationTurn] = (),
         context: Mapping[str, Any] | None = None,
     ) -> ExecutionResult:
-        del history, context
+        del history
         if not (self.repository_path / ".git").exists():
             raise CodingAgentError("Configured coding repository is not a Git repository")
-        branch = f"assistant/task-{task_id.replace('-', '')[:12]}"
+        revision = dict((context or {}).get("revision_pull_request") or {})
+        branch = (
+            _safe_ref(str(revision["head_branch"]))
+            if revision
+            else f"assistant/task-{task_id.replace('-', '')[:12]}"
+        )
         worktree = self.worktree_root / task_id
         self.worktree_root.mkdir(parents=True, exist_ok=True)
         if worktree.exists():
@@ -426,18 +461,28 @@ class CodingPullRequestExecutor:
                 "fetch",
                 "--no-tags",
                 self.remote,
-                self.base_branch,
+                branch if revision else self.base_branch,
                 timeout=120,
             )
-            _git(
-                self.repository_path,
-                "worktree",
-                "add",
-                "-b",
-                branch,
-                str(worktree),
-                f"{self.remote}/{self.base_branch}",
-            )
+            start_ref = f"{self.remote}/{branch if revision else self.base_branch}"
+            if revision:
+                actual_sha = _git(self.repository_path, "rev-parse", start_ref).strip()
+                if actual_sha != revision.get("expected_head_sha"):
+                    raise CodingAgentError(
+                        "Pull request head changed before revision started",
+                        category="stale_revision",
+                    )
+                _git(self.repository_path, "worktree", "add", "--detach", str(worktree), start_ref)
+            else:
+                _git(
+                    self.repository_path,
+                    "worktree",
+                    "add",
+                    "-b",
+                    branch,
+                    str(worktree),
+                    start_ref,
+                )
             created = True
             report = self.agent.run(
                 worktree=worktree,
@@ -450,6 +495,7 @@ class CodingPullRequestExecutor:
             if not _git(worktree, "status", "--porcelain").strip():
                 raise CodingAgentError("Coding agent completed without repository changes")
             _git(worktree, "diff", "--check")
+            validation = self._validate(worktree, is_cancelled)
             _git(worktree, "add", "-A")
             _git(
                 worktree,
@@ -463,16 +509,30 @@ class CodingPullRequestExecutor:
             )
             commit_sha = _git(worktree, "rev-parse", "HEAD").strip()
             _git(worktree, "push", self.remote, f"HEAD:refs/heads/{branch}", timeout=120)
-            pull_request = self.github.create_pull_request(
-                repository=self.github_repository,
-                title=_pull_request_title(request),
-                head=branch,
-                base=self.base_branch,
-                body=_pull_request_body(task_id, report),
-                draft=self.draft_pull_requests,
-            )
+            if revision:
+                pull_request = self.github.get_pull_request(
+                    repository=self.github_repository, number=int(revision["number"])
+                )
+                if pull_request.head_sha != commit_sha:
+                    raise CodingAgentError("GitHub did not expose the revised head commit")
+            else:
+                pull_request = self.github.create_pull_request(
+                    repository=self.github_repository,
+                    title=_pull_request_title(request),
+                    head=branch,
+                    base=self.base_branch,
+                    body=_pull_request_body(task_id, report),
+                    draft=self.draft_pull_requests,
+                )
             return ExecutionResult(
-                output=_coding_output(report, pull_request, commit_sha, self.agent.provider)
+                output=_coding_output(
+                    report,
+                    pull_request,
+                    commit_sha,
+                    self.agent.provider,
+                    decision=getattr(self.agent, "last_decision", None),
+                    validation=validation,
+                )
             )
         finally:
             if created:
@@ -481,6 +541,51 @@ class CodingPullRequestExecutor:
                 except CodingAgentError:
                     # Do not turn a successfully published PR into a retryable task failure.
                     logger.exception("Could not remove task worktree %s", worktree)
+
+    def _validate(self, worktree: Path, is_cancelled: Callable[[], bool]) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        if self.validation_profile is None:
+            return results
+        for step in self.validation_profile.steps:
+            if is_cancelled():
+                raise ExecutionCancelled("Coding task was cancelled")
+            started = time.monotonic()
+            try:
+                completed = subprocess.run(
+                    list(step.command),
+                    cwd=worktree,
+                    capture_output=True,
+                    text=True,
+                    timeout=step.timeout_seconds,
+                    env=_safe_agent_environment(),
+                    check=False,
+                )
+                passed = completed.returncode == 0
+                result = {
+                    "id": step.id,
+                    "passed": passed,
+                    "required": step.required,
+                    "exit_code": completed.returncode,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                    "output": (completed.stdout + completed.stderr)[-4000:],
+                }
+            except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+                passed = False
+                result = {
+                    "id": step.id,
+                    "passed": False,
+                    "required": step.required,
+                    "exit_code": None,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                    "output": type(error).__name__,
+                }
+            results.append(result)
+            if not passed and step.required:
+                raise CodingAgentError(
+                    f"Required validation step failed: {step.id}",
+                    category="validation_failed",
+                )
+        return results
 
 
 def _coding_prompt(request: str) -> str:
@@ -544,9 +649,7 @@ def _run_code_agent_process(
                     if time.monotonic() >= deadline:
                         process.terminate()
                         _wait_or_kill(process)
-                        raise CodingAgentError(
-                            f"{display_name} timed out", category="timeout"
-                        )
+                        raise CodingAgentError(f"{display_name} timed out", category="timeout")
                     time.sleep(0.2)
         except FileNotFoundError as error:
             raise CodingAgentError(
@@ -702,6 +805,8 @@ def _coding_output(
     pull_request: GitHubPullRequest,
     commit_sha: str,
     agent_provider: str,
+    decision: CodingDecision | None = None,
+    validation: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     artifact = {
         "type": "github_pull_request",
@@ -714,7 +819,7 @@ def _coding_output(
         "draft": pull_request.draft,
         "commit_sha": commit_sha,
     }
-    return {
+    output = {
         "summary": report.summary,
         "reply": (
             f"I created pull request #{pull_request.number}. Review it before approving merge."
@@ -724,13 +829,18 @@ def _coding_output(
         "agent_provider": agent_provider,
         "tests": report.tests,
         "notes": report.notes,
+        "validation": validation or [],
         "artifacts": [artifact],
         "approval_request": {
             "type": "github_pull_request_merge",
             "repository": pull_request.repository,
             "number": pull_request.number,
             "url": pull_request.url,
+            "head_branch": pull_request.head_branch,
             "expected_head_sha": pull_request.head_sha,
             "draft": pull_request.draft,
         },
     }
+    if decision is not None:
+        output["agent_decision"] = decision.model_dump(mode="json")
+    return output

@@ -28,9 +28,11 @@ flowchart LR
   forbids publishing or merging; the trusted host owns the intended commit, push, PR, and
   merge path. Run third-party CLIs under an OS/container sandbox in production because
   their own autonomous shell permissions are broader than Codex's workspace sandbox.
-- Runner order is deterministic. A missing executable, provider failure, rate limit, or
-  exhausted quota advances to the next configured runner. Rate-limited runners are kept
-  on an in-memory cooldown so subsequent tasks do not immediately retry them.
+- Runner selection is deterministic and explainable: the decision engine profiles the
+  request, scores the configured runner manifests, and filters persistent cooldowns. A
+  missing executable, provider failure, rate limit, or exhausted quota advances to the
+  next ranked runner. Rate-limit and quota cooldowns are persisted in PostgreSQL, so
+  replacement workers do not immediately retry a provider whose limit was already observed.
 - Every fallback attempt starts from the original clean worktree. Partial changes from a
   failed runner are discarded before the next runner starts.
 - The worktree starts from a freshly fetched remote base branch. The original checkout is
@@ -38,6 +40,9 @@ flowchart LR
 - The host rejects an empty change and runs `git diff --check` before committing.
 - A new `assistant/task-<id>` branch is pushed and a draft PR is created. The task moves to
   `waiting_for_approval`.
+- The console can mark that exact draft head ready for review through a separately
+  authorized GitHub action. The task remains `waiting_for_approval`; ready-for-review is
+  not merge approval.
 - Merge is not registered as a manager-selectable capability. It is available only through
   the explicit approval API, and only for the PR recorded by the execution.
 - Approval must include the exact reviewed head SHA. If the branch changes, the gate is
@@ -97,9 +102,10 @@ The coding runner settings are:
 | `ASSISTANT_CODE_AGENT_RATE_LIMIT_COOLDOWN_SECONDS` | `300` |
 | `ASSISTANT_CODE_AGENT_QUOTA_COOLDOWN_SECONDS` | `3600` |
 
-The order can be changed or narrowed, for example `minimax-claude,codex`. A provider is
-only a coding runner here; MiniMax remains independently configurable as the manager
-model that infers required capabilities.
+The setting can narrow the allowed runner set, for example `minimax-claude,codex`.
+Ranking within that set comes from `coding-runners/*.yaml`, task fit, and runtime state.
+A provider is only a coding runner here; MiniMax remains independently configurable as
+the manager model that infers required capabilities.
 
 For a personal installation, use a fine-grained token scoped to the configured repository.
 It needs **Pull requests: write** to create PRs and **Contents: write** to merge; Git push
@@ -125,7 +131,20 @@ curl -X POST http://localhost:8000/tasks \
 ```
 
 After the draft PR is created, inspect the `APPROVAL_REQUESTED` task event. Review the
-PR in GitHub and mark it ready for review. Then approve the exact SHA from that event:
+PR changes, then mark its exact head ready for review from the task console or API:
+
+```shell
+curl -X POST http://localhost:8000/tasks/TASK_ID/pull-request-ready \
+  -H 'content-type: application/json' \
+  -H 'X-Assistant-Approval-Token: YOUR_SEPARATE_APPROVAL_SECRET' \
+  -d '{"expected_head_sha":"REVIEWED_40_OR_64_CHARACTER_SHA"}'
+```
+
+This operation validates the pending repository, PR number, open state, and exact head
+SHA before asking GitHub to remove draft status. It records the tool call and result and
+refreshes the pending approval with `draft: false`. It never merges the PR.
+
+After human review, approve the exact SHA from that event:
 
 ```shell
 curl -X POST http://localhost:8000/tasks/TASK_ID/pull-request-approval \

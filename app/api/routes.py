@@ -18,16 +18,26 @@ from app.api.schemas import (
     ChatMessageResponse,
     ChatSessionListResponse,
     ChatSessionResponse,
+    CodingRunnerListResponse,
     CreateChatSessionRequest,
+    CreateCodingWorkflowFromMessageRequest,
+    CreateMemoryRequest,
     CreateTaskFromMessageRequest,
     CreateTaskRequest,
     CreateWorkflowRunRequest,
+    DeploymentTargetListResponse,
     EventListResponse,
     EventResponse,
     FollowUpTaskRequest,
     HealthResponse,
+    MemoryListResponse,
+    MemoryResponse,
     PendingApprovalResponse,
+    ProviderRuntimeStateListResponse,
+    ProviderRuntimeStateResponse,
     PullRequestApprovalRequest,
+    PullRequestReadyRequest,
+    PullRequestRevisionRequest,
     RepositoryListResponse,
     RepositoryResponse,
     SpeechRequest,
@@ -35,6 +45,7 @@ from app.api.schemas import (
     TaskListResponse,
     TaskProposalResponse,
     TaskResponse,
+    ValidationProfileListResponse,
     WorkflowDecisionRequest,
     WorkflowListResponse,
     WorkflowRunEventListResponse,
@@ -206,9 +217,7 @@ def create_task_from_chat_message(
             message_id,
             goal=body.goal,
             required_capabilities=body.required_capabilities,
-            source_context=_repository_context(
-                request, body.source_context, body.repository_id
-            ),
+            source_context=_repository_context(request, body.source_context, body.repository_id),
         )
     except ChatSessionNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error
@@ -270,7 +279,9 @@ def decide_pull_request_approval(
     service = _service(request)
     if body.decision == "reject":
         try:
-            return TaskResponse.from_model(service.reject_approval(task_id))
+            task = service.reject_approval(task_id)
+            request.app.state.workflow_service.sync_for_task(task_id)
+            return TaskResponse.from_model(task)
         except TaskNotFoundError as error:
             raise HTTPException(status_code=404, detail="Task not found") from error
         except ApprovalNotFoundError as error:
@@ -314,16 +325,16 @@ def decide_pull_request_approval(
                 detail="Pull request changed; review the new head SHA before approving",
             )
         if pull_request.merged:
-            return TaskResponse.from_model(
-                service.complete_pull_request_merge(
-                    task_id,
-                    execution_id=execution_id,
-                    repository=repository,
-                    number=number,
-                    url=pull_request.url,
-                    merge_sha=pull_request.merge_commit_sha,
-                )
+            task = service.complete_pull_request_merge(
+                task_id,
+                execution_id=execution_id,
+                repository=repository,
+                number=number,
+                url=pull_request.url,
+                merge_sha=pull_request.merge_commit_sha,
             )
+            request.app.state.workflow_service.sync_for_task(task_id)
+            return TaskResponse.from_model(task)
         if pull_request.state != "open" or pull_request.draft:
             reason = "pull_request_is_draft" if pull_request.draft else "pull_request_is_not_open"
             service.return_to_pull_request_approval(task_id, reason=reason)
@@ -350,21 +361,127 @@ def decide_pull_request_approval(
         if not result.merged:
             service.return_to_pull_request_approval(task_id, reason="github_declined_merge")
             raise HTTPException(status_code=409, detail="GitHub did not merge the pull request")
-        return TaskResponse.from_model(
-            service.complete_pull_request_merge(
-                task_id,
-                execution_id=execution_id,
-                repository=repository,
-                number=number,
-                url=pull_request.url,
-                merge_sha=result.sha,
-            )
+        task = service.complete_pull_request_merge(
+            task_id,
+            execution_id=execution_id,
+            repository=repository,
+            number=number,
+            url=pull_request.url,
+            merge_sha=result.sha,
         )
+        request.app.state.workflow_service.sync_for_task(task_id)
+        return TaskResponse.from_model(task)
     except HTTPException:
         raise
     except (GitHubError, KeyError, TypeError, ValueError) as error:
         service.return_to_pull_request_approval(task_id, reason="github_request_failed")
         raise HTTPException(status_code=502, detail="GitHub operation failed") from error
+
+
+@router.post(
+    "/tasks/{task_id}/pull-request-ready",
+    response_model=PendingApprovalResponse,
+)
+def mark_pull_request_ready(
+    task_id: str,
+    body: PullRequestReadyRequest,
+    request: Request,
+) -> PendingApprovalResponse:
+    _require_approval_authorization(request)
+    service = _service(request)
+    github = request.app.state.github_client
+    if github is None:
+        raise HTTPException(status_code=503, detail="GitHub integration is not configured")
+    try:
+        approval = service.get_pending_approval(task_id)
+        if approval.get("type") != "github_pull_request_merge":
+            raise ApprovalNotFoundError(task_id)
+        if approval.get("expected_head_sha") != body.expected_head_sha:
+            raise ApprovalConflictError("Reviewed head SHA does not match the pending approval")
+        repository = str(approval["repository"])
+        number = int(approval["number"])
+        pull_request = github.get_pull_request(repository=repository, number=number)
+        if pull_request.head_sha != body.expected_head_sha:
+            raise ApprovalConflictError(
+                "Pull request changed; review the new head SHA before marking it ready"
+            )
+        if pull_request.state != "open" or pull_request.merged:
+            raise ApprovalConflictError("Pull request is not open")
+        service.record_pull_request_ready_call(
+            task_id,
+            repository=repository,
+            number=number,
+            expected_head_sha=body.expected_head_sha,
+        )
+        if pull_request.draft:
+            if not pull_request.node_id:
+                raise GitHubError("GitHub did not return the pull request node id")
+            if not github.mark_pull_request_ready_for_review(node_id=pull_request.node_id):
+                raise GitHubError("GitHub did not mark the pull request ready for review")
+        refreshed = service.record_pull_request_ready_result(task_id, ok=True)
+        if refreshed is None:
+            raise ApprovalConflictError("Pull request approval is no longer active")
+        return PendingApprovalResponse.model_validate(refreshed)
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+    except ApprovalNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Pull request approval not found") from error
+    except ApprovalConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (GitHubError, KeyError, TypeError, ValueError) as error:
+        service.record_pull_request_ready_result(
+            task_id,
+            ok=False,
+            reason="github_request_failed",
+        )
+        raise HTTPException(status_code=502, detail="GitHub operation failed") from error
+
+
+@router.post(
+    "/tasks/{task_id}/pull-request-revision",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def request_pull_request_revision(
+    task_id: str, body: PullRequestRevisionRequest, request: Request
+) -> TaskResponse:
+    _require_approval_authorization(request)
+    service = _service(request)
+    try:
+        parent = service.get_task(task_id)
+        approval = service.get_pending_approval(task_id)
+        if approval.get("expected_head_sha") != body.expected_head_sha:
+            raise ApprovalConflictError("Reviewed head SHA does not match the pending approval")
+        repository_id = str((parent.source_context or {}).get("repository_id") or "")
+        if not repository_id:
+            raise ApprovalConflictError("The original task has no trusted repository id")
+        revision_context = {
+            "repository_id": repository_id,
+            "revision_pull_request": {
+                "number": int(approval["number"]),
+                "head_branch": str(approval.get("head_branch") or ""),
+                "expected_head_sha": body.expected_head_sha,
+            },
+        }
+        if not revision_context["revision_pull_request"]["head_branch"]:
+            raise ApprovalConflictError("Pending approval has no pull request branch")
+        task = service.create_follow_up_task(
+            task_id,
+            request=body.instructions,
+            required_capabilities=["coding-pull-request"],
+            source_context=revision_context,
+        )
+        # The child now owns the PR. Retire the old exact-SHA approval so two
+        # independently actionable merge gates cannot exist for one branch.
+        service.reject_approval(task_id)
+        request.app.state.workflow_service.sync_for_task(task_id)
+        return TaskResponse.from_model(task)
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+    except ApprovalNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Pull request approval not found") from error
+    except (ApprovalConflictError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
@@ -374,9 +491,7 @@ def create_task(body: CreateTaskRequest, request: Request) -> TaskResponse:
             request=body.request,
             goal=body.goal,
             required_capabilities=body.required_capabilities,
-            source_context=_repository_context(
-                request, body.source_context, body.repository_id
-            ),
+            source_context=_repository_context(request, body.source_context, body.repository_id),
             chat_session_id=body.chat_session_id,
             external_source=body.external_source,
             external_key=body.external_key,
@@ -401,6 +516,7 @@ def list_tasks(
 @router.get(
     "/tasks/{task_id}/pending-approval",
     response_model=PendingApprovalResponse,
+    response_model_exclude_none=True,
 )
 def get_pending_approval(task_id: str, request: Request) -> PendingApprovalResponse:
     try:
@@ -446,9 +562,7 @@ def create_follow_up_task(
             request=body.request,
             goal=body.goal,
             required_capabilities=body.required_capabilities,
-            source_context=_repository_context(
-                request, body.source_context, body.repository_id
-            ),
+            source_context=_repository_context(request, body.source_context, body.repository_id),
         )
     except TaskNotFoundError as error:
         raise HTTPException(status_code=404, detail="Task not found") from error
@@ -479,7 +593,9 @@ def add_task_message(task_id: str, body: AddMessageRequest, request: Request) ->
 @router.post("/tasks/{task_id}/cancel", response_model=TaskResponse)
 def cancel_task(task_id: str, request: Request) -> TaskResponse:
     try:
-        return TaskResponse.from_model(_service(request).cancel_task(task_id))
+        task = _service(request).cancel_task(task_id)
+        request.app.state.workflow_service.sync_for_task(task_id)
+        return TaskResponse.from_model(task)
     except TaskNotFoundError as error:
         raise HTTPException(status_code=404, detail="Task not found") from error
 
@@ -540,6 +656,73 @@ def list_repositories(request: Request) -> RepositoryListResponse:
     return RepositoryListResponse(repositories=repositories)
 
 
+@router.get("/validation-profiles", response_model=ValidationProfileListResponse)
+def list_validation_profiles(request: Request) -> ValidationProfileListResponse:
+    return ValidationProfileListResponse(
+        profiles=request.app.state.validation_profile_registry.list()
+    )
+
+
+@router.get("/deployment-targets", response_model=DeploymentTargetListResponse)
+def list_deployment_targets(request: Request) -> DeploymentTargetListResponse:
+    return DeploymentTargetListResponse(targets=request.app.state.deployment_registry.list())
+
+
+@router.post("/memories", response_model=MemoryResponse, status_code=status.HTTP_201_CREATED)
+def create_memory(body: CreateMemoryRequest, request: Request) -> MemoryResponse:
+    try:
+        memory = request.app.state.memory_service.create(
+            kind=body.kind,
+            content=body.content,
+            tags=body.tags,
+            chat_session_id=body.chat_session_id,
+            task_id=body.task_id,
+        )
+        return MemoryResponse.model_validate(memory)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.get("/memories", response_model=MemoryListResponse)
+def list_memories(request: Request, include_archived: bool = False) -> MemoryListResponse:
+    memories = request.app.state.memory_service.list(active_only=not include_archived)
+    return MemoryListResponse(memories=[MemoryResponse.model_validate(item) for item in memories])
+
+
+@router.delete("/memories/{memory_id}", response_model=MemoryResponse)
+def archive_memory(memory_id: str, request: Request) -> MemoryResponse:
+    try:
+        return MemoryResponse.model_validate(request.app.state.memory_service.archive(memory_id))
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail="Memory not found") from error
+
+
+@router.get("/provider-states", response_model=ProviderRuntimeStateListResponse)
+def list_provider_states(request: Request) -> ProviderRuntimeStateListResponse:
+    store = request.app.state.provider_state_store
+    providers = [
+        ProviderRuntimeStateResponse(
+            provider_key=state.provider_key,
+            available=store.is_available(state.provider_key),
+            cooldown_until=state.cooldown_until,
+            last_error_category=state.last_error_category,
+            consecutive_failures=state.consecutive_failures,
+            total_successes=state.total_successes,
+            total_failures=state.total_failures,
+            last_success_at=state.last_success_at,
+            last_failure_at=state.last_failure_at,
+            updated_at=state.updated_at,
+        )
+        for state in store.list()
+    ]
+    return ProviderRuntimeStateListResponse(providers=providers)
+
+
+@router.get("/coding-runners", response_model=CodingRunnerListResponse)
+def list_coding_runners(request: Request) -> CodingRunnerListResponse:
+    return CodingRunnerListResponse(runners=request.app.state.coding_runner_registry.list())
+
+
 @router.get("/workflows", response_model=WorkflowListResponse)
 def list_workflows(request: Request) -> WorkflowListResponse:
     return WorkflowListResponse(workflows=request.app.state.workflow_registry.list())
@@ -561,6 +744,38 @@ def create_workflow_run(
             chat_session_id=body.chat_session_id,
             task_id=body.task_id,
         )
+    except (LookupError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return WorkflowRunResponse.from_model(run)
+
+
+@router.post(
+    "/chat-sessions/{chat_session_id}/messages/{message_id}/workflow-run",
+    response_model=WorkflowRunResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_coding_workflow_from_message(
+    chat_session_id: str,
+    message_id: str,
+    body: CreateCodingWorkflowFromMessageRequest,
+    request: Request,
+) -> WorkflowRunResponse:
+    try:
+        message = _service(request).get_user_chat_message(chat_session_id, message_id)
+        repository = request.app.state.repository_registry.get(body.repository_id)
+        run = request.app.state.workflow_service.create_run(
+            workflow_id="coding-change",
+            workflow_input={
+                "repository_id": repository.id,
+                "request": message.content,
+            },
+            chat_session_id=chat_session_id,
+            origin_message_id=message.id,
+        )
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+    except ChatMessageNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat message not found") from error
     except (LookupError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return WorkflowRunResponse.from_model(run)
@@ -616,6 +831,57 @@ def decide_workflow_run(
             workflow_run_id,
             approve=body.decision == "approve",
         )
+    except WorkflowRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Workflow run not found") from error
+    except WorkflowRunConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return WorkflowRunResponse.from_model(run)
+
+
+@router.post(
+    "/workflow-runs/{workflow_run_id}/start",
+    response_model=WorkflowRunResponse,
+)
+def start_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunResponse:
+    workflow_service = request.app.state.workflow_service
+    try:
+        run = workflow_service.get_run(workflow_run_id)
+        if run.workflow_id != "coding-change":
+            raise WorkflowRunConflictError(
+                f"Workflow {run.workflow_id} has no trusted execution adapter"
+            )
+        if run.task_id is not None:
+            return WorkflowRunResponse.from_model(workflow_service.sync_run(run.id))
+        if run.status != "approved":
+            raise WorkflowRunConflictError("Workflow run must be approved before it can start")
+        task = _service(request).create_task(
+            request=str(run.workflow_input["request"]),
+            required_capabilities=["coding", "pull_request_creation"],
+            source_context={
+                "repository_id": str(run.workflow_input["repository_id"]),
+                "workflow_run_id": run.id,
+            },
+            chat_session_id=run.chat_session_id,
+            origin_message_id=run.origin_message_id,
+            external_source="workflow",
+            external_key=run.id,
+        )
+        return WorkflowRunResponse.from_model(
+            workflow_service.attach_coding_task(run.id, task_id=task.id)
+        )
+    except WorkflowRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Workflow run not found") from error
+    except (KeyError, ValueError, WorkflowRunConflictError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/workflow-runs/{workflow_run_id}/sync",
+    response_model=WorkflowRunResponse,
+)
+def sync_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunResponse:
+    try:
+        run = request.app.state.workflow_service.sync_run(workflow_run_id)
     except WorkflowRunNotFoundError as error:
         raise HTTPException(status_code=404, detail="Workflow run not found") from error
     except WorkflowRunConflictError as error:

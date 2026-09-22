@@ -26,6 +26,8 @@ agent, tool, approval, and Slack integrations.
 - Run coding changes in isolated Git worktrees and publish dedicated draft pull requests.
 - Select coding targets from a trusted multi-repository registry rather than task-supplied paths.
 - Persist controlled workflow proposals and authenticated approval decisions with an audit log.
+- Persist coding-provider health and cooldown state across worker restarts.
+- Rank coding runners through an explainable task-profile and runtime-state decision engine.
 - Require an exact-head-SHA approval before the GitHub merge operation.
 
 The fake executor remains as a credential-free fallback, and a scripted client
@@ -38,6 +40,10 @@ The before-and-after architecture diagrams are in
 [`docs/architecture.md`](docs/architecture.md).
 The model-versus-authority boundary and workflow APIs are described in
 [`docs/controlled-workflows.md`](docs/controlled-workflows.md).
+Provider cooldown persistence and operational fields are described in
+[`docs/provider-runtime-state.md`](docs/provider-runtime-state.md).
+Coding task profiling and runner scoring are described in
+[`docs/coding-decision-engine.md`](docs/coding-decision-engine.md).
 
 ## Run with Docker
 
@@ -367,3 +373,6 @@ Kotlin shell, and two characters.
   [`android-assistant/docs/credits.md`](android-assistant/docs/credits.md).
 - English pronunciations derive from the CMU Pronouncing Dictionary
   (Carnegie Mellon University, BSD-style licence).
+Trusted validation, SHA-guarded PR revision, registered deployment targets, explicit memory, and
+bounded provider outcome learning are described in
+[`docs/trusted-execution-and-learning.md`](docs/trusted-execution-and-learning.md).

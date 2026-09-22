@@ -10,6 +10,9 @@ COPY app ./app
 COPY capabilities ./capabilities
 COPY repositories ./repositories
 COPY workflows ./workflows
+COPY coding-runners ./coding-runners
+COPY validation-profiles ./validation-profiles
+COPY deployment-targets ./deployment-targets
 
 RUN pip install --no-cache-dir .
 

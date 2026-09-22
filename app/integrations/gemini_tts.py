@@ -108,9 +108,7 @@ class GeminiTtsClient:
         try:
             response = self._client.post("/interactions", json=payload)
         except httpx.HTTPError as error:
-            raise GeminiTtsError(
-                f"Gemini TTS request failed: {type(error).__name__}"
-            ) from error
+            raise GeminiTtsError(f"Gemini TTS request failed: {type(error).__name__}") from error
         if response.status_code != 200:
             raise GeminiTtsError(f"Gemini TTS returned HTTP {response.status_code}")
         try:

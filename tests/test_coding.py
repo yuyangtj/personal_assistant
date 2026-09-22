@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.execution.coding import (
@@ -12,6 +13,8 @@ from app.execution.coding import (
     _text_report,
 )
 from app.integrations.github import GitHubPullRequest
+from app.persistence.database import Database
+from app.providers import DatabaseProviderStateStore
 
 
 def _git(directory: Path, *arguments: str) -> str:
@@ -133,6 +136,57 @@ def test_coding_runner_falls_back_from_quota_limit_with_clean_worktree(tmp_path:
     assert "limited=failed(quota_exhausted)" in report.notes[-1]
     assert not (repository / "partial.txt").exists()
     assert (repository / "complete.txt").exists()
+
+
+def test_coding_runner_cooldown_survives_runner_recreation(
+    tmp_path: Path,
+    database: Database,
+) -> None:
+    repository, _remote = _repository(tmp_path)
+    calls = {"limited": 0, "backup": 0}
+
+    class LimitedAgent:
+        provider = "limited"
+
+        def run(self, **_kwargs) -> CodeAgentReport:
+            calls["limited"] += 1
+            raise CodingAgentError("rate limited", category="rate_limited")
+
+    class BackupAgent:
+        provider = "backup"
+
+        def run(self, **_kwargs) -> CodeAgentReport:
+            calls["backup"] += 1
+            return CodeAgentReport(summary="fallback succeeded")
+
+    def clock() -> datetime:
+        return datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+
+    first = FallbackCodeAgentRunner(
+        [LimitedAgent(), BackupAgent()],
+        state_store=DatabaseProviderStateStore(database, clock=clock),
+    )
+    first.run(
+        worktree=repository,
+        request="Implement feature",
+        timeout_seconds=60,
+        is_cancelled=lambda: False,
+    )
+
+    second = FallbackCodeAgentRunner(
+        [LimitedAgent(), BackupAgent()],
+        state_store=DatabaseProviderStateStore(database, clock=clock),
+    )
+    second.run(
+        worktree=repository,
+        request="Implement another feature",
+        timeout_seconds=60,
+        is_cancelled=lambda: False,
+    )
+
+    assert calls == {"limited": 1, "backup": 2}
+    assert second.attempts[0].outcome == "skipped"
+    assert second.attempts[0].category == "cooldown"
 
 
 def test_text_report_normalizes_kimi_fenced_json() -> None:
