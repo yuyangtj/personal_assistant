@@ -6,6 +6,7 @@ REPOSITORY_ROOT="$(cd -- "${SCRIPT_DIRECTORY}/.." && pwd)"
 ENV_FILE="${ASSISTANT_DEPLOY_ENV_FILE:-${REPOSITORY_ROOT}/.env.remote}"
 COMPOSE_FILE="${REPOSITORY_ROOT}/compose.remote.yaml"
 DEPLOY_BRANCH="${ASSISTANT_DEPLOY_BRANCH:-main}"
+EXPECTED_SHA="${ASSISTANT_DEPLOY_EXPECTED_SHA:-}"
 PROVIDER="${1:-minimax}"
 
 usage() {
@@ -49,6 +50,18 @@ fi
 
 echo "Pulling origin/${DEPLOY_BRANCH}..."
 git pull --ff-only origin "${DEPLOY_BRANCH}"
+
+if [[ -n "${EXPECTED_SHA}" ]]; then
+    if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "ASSISTANT_DEPLOY_EXPECTED_SHA must be a full lowercase Git SHA." >&2
+        exit 1
+    fi
+    deployed_sha="$(git rev-parse HEAD)"
+    if [[ "${deployed_sha}" != "${EXPECTED_SHA}" ]]; then
+        echo "Refusing deployment: origin/${DEPLOY_BRANCH} is ${deployed_sha}, expected ${EXPECTED_SHA}." >&2
+        exit 1
+    fi
+fi
 
 set_env_value "ASSISTANT_CONVERSATION_MODEL_PROVIDER" "${PROVIDER}"
 set_env_value "ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER" "auto"

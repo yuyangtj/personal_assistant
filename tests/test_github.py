@@ -270,3 +270,55 @@ def test_github_paginates_and_truncates_unresolved_review_comments() -> None:
 
     assert cursors == [None, "page-2"]
     assert [len(comment.body) for comment in comments] == [2000, 6]
+
+
+def test_github_dispatches_and_finds_exact_workflow_run() -> None:
+    requests: list[tuple[str, str, dict[str, object] | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content) if request.content else None
+        requests.append((request.method, request.url.path, payload))
+        if request.method == "POST":
+            return httpx.Response(204)
+        return httpx.Response(
+            200,
+            json={
+                "workflow_runs": [
+                    {
+                        "id": 42,
+                        "html_url": "https://github.com/acme/widget/actions/runs/42",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "head_sha": "a" * 40,
+                        "display_title": "Deploy run-123",
+                    }
+                ]
+            },
+        )
+
+    client = GitHubClient(token="secret", transport=httpx.MockTransport(handler))
+    try:
+        client.dispatch_workflow(
+            repository="acme/widget",
+            workflow_file="deploy.yml",
+            ref="main",
+            inputs={"commit_sha": "a" * 40, "workflow_run_id": "run-123"},
+        )
+        run = client.find_workflow_run(
+            repository="acme/widget",
+            workflow_file="deploy.yml",
+            branch="main",
+            commit_sha="a" * 40,
+            display_title="Deploy run-123",
+        )
+    finally:
+        client.close()
+
+    assert run is not None
+    assert run.id == 42
+    assert run.conclusion == "success"
+    assert requests[0] == (
+        "POST",
+        "/repos/acme/widget/actions/workflows/deploy.yml/dispatches",
+        {"ref": "main", "inputs": {"commit_sha": "a" * 40, "workflow_run_id": "run-123"}},
+    )

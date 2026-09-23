@@ -393,3 +393,6 @@ Kotlin shell, and two characters.
 Trusted validation, SHA-guarded PR revision, registered deployment targets, explicit memory, and
 bounded provider outcome learning are described in
 [`docs/trusted-execution-and-learning.md`](docs/trusted-execution-and-learning.md).
+The explicit post-merge deployment gate and required GitHub environment secrets are in
+[`docs/controlled-workflows.md`](docs/controlled-workflows.md) and
+[`docs/remote-hosting.md`](docs/remote-hosting.md).

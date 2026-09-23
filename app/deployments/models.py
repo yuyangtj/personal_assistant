@@ -4,7 +4,7 @@ from enum import StrEnum
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.capabilities.models import IDENTIFIER_PATTERN
 
@@ -22,6 +22,10 @@ class DeploymentTarget(BaseModel):
     repository_id: str
     environment: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
     strategy: DeploymentStrategy
+    workflow_file: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9._/-]+\.ya?ml$",
+    )
     requires_approval: bool = True
     enabled: bool = True
 
@@ -31,6 +35,19 @@ class DeploymentTarget(BaseModel):
         if not IDENTIFIER_PATTERN.fullmatch(value):
             raise ValueError("must be a lowercase identifier")
         return value
+
+    @field_validator("workflow_file")
+    @classmethod
+    def workflow_file_is_relative(cls, value: str | None) -> str | None:
+        if value is not None and (value.startswith("/") or ".." in value.split("/")):
+            raise ValueError("workflow_file must be a safe relative workflow path")
+        return value
+
+    @model_validator(mode="after")
+    def github_actions_requires_workflow(self) -> DeploymentTarget:
+        if self.strategy == DeploymentStrategy.GITHUB_ACTIONS and not self.workflow_file:
+            raise ValueError("github_actions targets require workflow_file")
+        return self
 
 
 class DeploymentRegistry:

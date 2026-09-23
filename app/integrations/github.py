@@ -51,6 +51,16 @@ class GitHubMergeResult:
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class GitHubWorkflowRun:
+    id: int
+    url: str
+    status: str
+    conclusion: str | None
+    head_sha: str
+    display_title: str
+
+
 class GitHubClient:
     """Minimal GitHub REST client for creating, inspecting, and merging pull requests."""
 
@@ -261,6 +271,76 @@ class GitHubClient:
         except (KeyError, TypeError) as error:
             raise GitHubError("GitHub returned an unexpected ready-for-review result") from error
 
+    def get_branch_head(self, *, repository: str, branch: str) -> str:
+        owner, name = _repository_parts(repository)
+        if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch) or ".." in branch.split("/"):
+            raise ValueError("GitHub branch is invalid")
+        response = self._request("GET", f"/repos/{owner}/{name}/git/ref/heads/{branch}")
+        try:
+            target = response["object"]
+            if not isinstance(target, dict) or not isinstance(target.get("sha"), str):
+                raise TypeError
+            return target["sha"]
+        except (KeyError, TypeError) as error:
+            raise GitHubError("GitHub returned an unexpected branch response") from error
+
+    def dispatch_workflow(
+        self,
+        *,
+        repository: str,
+        workflow_file: str,
+        ref: str,
+        inputs: dict[str, str],
+    ) -> None:
+        owner, name = _repository_parts(repository)
+        _validate_workflow_file(workflow_file)
+        self._request_empty(
+            "POST",
+            f"/repos/{owner}/{name}/actions/workflows/{workflow_file}/dispatches",
+            json={"ref": ref, "inputs": inputs},
+        )
+
+    def find_workflow_run(
+        self,
+        *,
+        repository: str,
+        workflow_file: str,
+        branch: str,
+        commit_sha: str,
+        display_title: str,
+    ) -> GitHubWorkflowRun | None:
+        owner, name = _repository_parts(repository)
+        _validate_workflow_file(workflow_file)
+        response = self._request(
+            "GET",
+            f"/repos/{owner}/{name}/actions/workflows/{workflow_file}/runs",
+            params={"event": "workflow_dispatch", "branch": branch, "per_page": 100},
+        )
+        runs = response.get("workflow_runs")
+        if not isinstance(runs, list):
+            raise GitHubError("GitHub returned an unexpected workflow-runs response")
+        for raw in runs:
+            if not isinstance(raw, dict):
+                raise GitHubError("GitHub returned an invalid workflow run")
+            if raw.get("head_sha") != commit_sha or raw.get("display_title") != display_title:
+                continue
+            try:
+                return GitHubWorkflowRun(
+                    id=int(raw["id"]),
+                    url=str(raw["html_url"]),
+                    status=str(raw["status"]),
+                    conclusion=(
+                        raw.get("conclusion")
+                        if isinstance(raw.get("conclusion"), str)
+                        else None
+                    ),
+                    head_sha=str(raw["head_sha"]),
+                    display_title=str(raw["display_title"]),
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise GitHubError("GitHub returned an invalid workflow run") from error
+        return None
+
     def close(self) -> None:
         self._client.close()
 
@@ -289,6 +369,14 @@ class GitHubClient:
             raise GitHubError("GitHub returned invalid JSON") from error
         return body
 
+    def _request_empty(self, method: str, path: str, **kwargs: object) -> None:
+        try:
+            response = self._client.request(method, path, **kwargs)
+        except httpx.HTTPError as error:
+            raise GitHubError(f"GitHub request failed: {type(error).__name__}") from error
+        if response.status_code not in range(200, 300):
+            raise GitHubError(f"GitHub returned HTTP {response.status_code}")
+
 
 def _repository_parts(repository: str) -> tuple[str, str]:
     parts = repository.strip().split("/")
@@ -300,6 +388,15 @@ def _repository_parts(repository: str) -> tuple[str, str]:
     if not owner_is_valid or not name_is_valid:
         raise ValueError("GitHub repository must use owner/name format")
     return owner, name
+
+
+def _validate_workflow_file(workflow_file: str) -> None:
+    if (
+        not re.fullmatch(r"[A-Za-z0-9._/-]+\.ya?ml", workflow_file)
+        or workflow_file.startswith("/")
+        or ".." in workflow_file.split("/")
+    ):
+        raise ValueError("GitHub workflow file is invalid")
 
 
 def _pull_request_from_json(repository: str, body: dict[str, object]) -> GitHubPullRequest:

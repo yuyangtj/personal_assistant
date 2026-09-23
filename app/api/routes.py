@@ -21,6 +21,7 @@ from app.api.schemas import (
     CodingRunnerListResponse,
     CreateChatSessionRequest,
     CreateCodingWorkflowFromMessageRequest,
+    CreateDeploymentWorkflowRequest,
     CreateMemoryRequest,
     CreateTaskFromMessageRequest,
     CreateTaskRequest,
@@ -961,6 +962,72 @@ def create_coding_workflow_from_message(
     return WorkflowRunResponse.from_model(run)
 
 
+@router.post(
+    "/tasks/{task_id}/deployment-workflow",
+    response_model=WorkflowRunResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_deployment_workflow_for_task(
+    task_id: str,
+    body: CreateDeploymentWorkflowRequest,
+    request: Request,
+) -> WorkflowRunResponse:
+    try:
+        task = _service(request).get_task(task_id)
+        if task.status != TaskStatus.COMPLETED.value:
+            raise ValueError("Only a completed merged task can be deployed")
+        target = request.app.state.deployment_registry.get(body.deployment_target_id)
+        repository_id = str((task.source_context or {}).get("repository_id") or "")
+        if repository_id != target.repository_id:
+            raise ValueError("Deployment target does not match the task repository")
+        context = _service(request).task_context(task_id)
+        merge_artifact = next(
+            (
+                artifact
+                for artifact in reversed(context.get("artifacts") or [])
+                if artifact.get("type") == "github_pull_request_merge"
+                and artifact.get("merge_sha")
+            ),
+            None,
+        )
+        if merge_artifact is None:
+            raise ValueError("Task has no trusted merged commit artifact")
+        run = request.app.state.workflow_service.create_run(
+            workflow_id="assistant-deployment",
+            workflow_input={
+                "deployment_target_id": target.id,
+                "commit_sha": str(merge_artifact["merge_sha"]),
+            },
+            chat_session_id=task.chat_session_id,
+            task_id=task.id,
+        )
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+    except WorkflowRunConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (LookupError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return WorkflowRunResponse.from_model(run)
+
+
+@router.get(
+    "/tasks/{task_id}/deployment-workflow",
+    response_model=WorkflowRunResponse,
+)
+def get_deployment_workflow_for_task(
+    task_id: str,
+    request: Request,
+) -> WorkflowRunResponse:
+    try:
+        _service(request).get_task(task_id)
+        run = request.app.state.workflow_service.get_deployment_for_task(task_id)
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+    if run is None:
+        raise HTTPException(status_code=404, detail="Deployment workflow not found")
+    return WorkflowRunResponse.from_model(run)
+
+
 @router.get("/workflow-runs", response_model=WorkflowRunListResponse)
 def list_workflow_runs(
     request: Request,
@@ -1026,6 +1093,16 @@ def start_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunRes
     workflow_service = request.app.state.workflow_service
     try:
         run = workflow_service.get_run(workflow_run_id)
+        if run.workflow_id == "assistant-deployment":
+            github = request.app.state.github_client
+            if github is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="GitHub integration is not configured",
+                )
+            return WorkflowRunResponse.from_model(
+                workflow_service.start_deployment(run.id, github=github)
+            )
         if run.workflow_id != "coding-change":
             raise WorkflowRunConflictError(
                 f"Workflow {run.workflow_id} has no trusted execution adapter"
@@ -1051,6 +1128,8 @@ def start_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunRes
         )
     except WorkflowRunNotFoundError as error:
         raise HTTPException(status_code=404, detail="Workflow run not found") from error
+    except GitHubError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
     except (KeyError, ValueError, WorkflowRunConflictError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -1061,9 +1140,22 @@ def start_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunRes
 )
 def sync_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunResponse:
     try:
-        run = request.app.state.workflow_service.sync_run(workflow_run_id)
+        workflow_service = request.app.state.workflow_service
+        run = workflow_service.get_run(workflow_run_id)
+        if run.workflow_id == "assistant-deployment":
+            github = request.app.state.github_client
+            if github is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="GitHub integration is not configured",
+                )
+            run = workflow_service.sync_deployment(workflow_run_id, github=github)
+        else:
+            run = workflow_service.sync_run(workflow_run_id)
     except WorkflowRunNotFoundError as error:
         raise HTTPException(status_code=404, detail="Workflow run not found") from error
     except WorkflowRunConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except GitHubError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
     return WorkflowRunResponse.from_model(run)

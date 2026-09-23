@@ -120,6 +120,29 @@ On a server that predates this script, obtain it once with `git pull --ff-only o
 main`, then use the script for subsequent deployments. Backups are written to the
 Git-ignored `backups/` directory with permissions restricted to the current user.
 
+## Approved post-merge deployments
+
+The task UI can dispatch `.github/workflows/deploy.yml` only after the coding task has
+merged and a second approval has authorized the exact merge SHA. Before using it, create
+the GitHub `production` environment and configure these environment secrets:
+
+| Secret | Value |
+| --- | --- |
+| `DEPLOY_HOST` | DNS name or IP of the remote server |
+| `DEPLOY_USER` | Restricted SSH user that owns the checkout and can run Docker Compose |
+| `DEPLOY_PATH` | Absolute path to the trusted repository clone on that server |
+| `DEPLOY_SSH_PRIVATE_KEY` | Private key dedicated to this deployment route |
+| `DEPLOY_KNOWN_HOSTS` | Pinned `known_hosts` line for the server, collected out of band |
+
+Give the API's GitHub credential **Actions: write** in addition to its existing repository,
+pull-request, contents, and checks permissions. Configure required reviewers on the
+`production` GitHub environment if you want a third gate after the assistant approval.
+
+The first deployment after installing this feature must still be run manually with
+`./scripts/redeploy-remote.sh` so the server checkout contains the SHA-guarded script.
+Subsequent approved deployments pull `main`, refuse a mismatched commit, back up the
+database, rebuild the Compose stack, and wait for `/health` automatically.
+
 The ordered SQL migrations are idempotent and run before each API/worker rollout.
 PostgreSQL and Caddy certificate state live in named Docker volumes.
 
