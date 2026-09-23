@@ -243,7 +243,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { chats: [], repositories: [], repositoryId: null, chatId: null, messages: [], tasks: [], proposal: null,
+const state = { chats: [], repositories: [], deploymentTargets: [], repositoryId: null, chatId: null, messages: [], tasks: [], proposal: null,
                 proposalFor: null, workflowRun: null, taskId: null, busy: false, timer: null,
                 taskTimer: null, prPollAttempts: 0, pendingAction: null };
 
@@ -288,6 +288,13 @@ async function pullRequestStatus(taskId) {
   return res.json();
 }
 
+async function taskDeployment(taskId) {
+  const res = await fetch(`/tasks/${taskId}/deployment-workflow`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
 async function loadChats() {
   try {
     state.chats = (await api("/chat-sessions")).sessions;
@@ -308,6 +315,14 @@ async function loadRepositories() {
         ${repository.id === state.repositoryId ? "selected" : ""}>
         ${esc(repository.name)}${repository.configured ? "" : " (not configured)"}</option>`).join("");
   } catch (e) { fail(e); }
+}
+
+async function loadDeploymentTargets() {
+  try {
+    state.deploymentTargets = (await api("/deployment-targets")).targets;
+    if (state.taskId) await renderTask(state.taskId);
+  }
+  catch (e) { fail(e); }
 }
 
 async function openChat(id) {
@@ -561,6 +576,36 @@ function pullRequestPanel(prStatus, approval) {
   </div>`;
 }
 
+function deploymentPanel(task, ctx, run, runEvents) {
+  const mergeArtifact = [...(ctx.artifacts || [])].reverse().find((artifact) =>
+    artifact.type === "github_pull_request_merge" && artifact.merge_sha);
+  if (task.status !== "completed" || !mergeArtifact) return "";
+  const repositoryId = task.source_context.repository_id;
+  const targets = state.deploymentTargets.filter((target) =>
+    target.enabled && target.repository_id === repositoryId);
+  if (!targets.length) return `<h2>Deployment</h2><div class="gate-notice">No enabled deployment target is registered for this repository.</div>`;
+  if (!run) return `<h2>Deployment</h2><div class="panel-card">
+    <div class="sub">Deploy reviewed commit ${esc(shortSha(mergeArtifact.merge_sha))} through a registered target.</div>
+    <div class="row wrap"><select id="deployment-target" aria-label="Deployment target">
+      ${targets.map((target) => `<option value="${esc(target.id)}">${esc(target.name)} · ${esc(target.environment)}</option>`).join("")}
+    </select><button type="button" id="propose-deployment">Propose deployment</button></div>
+  </div>`;
+  const latestExternal = [...(runEvents || [])].reverse().find((event) => event.payload?.url);
+  const actions = run.status === "proposed"
+    ? `<button type="button" id="approve-deployment">Approve deployment</button>`
+    : run.status === "approved"
+      ? `<button type="button" id="start-deployment">Start deployment</button>` : "";
+  return `<h2>Deployment</h2><div class="panel-card">
+    <div class="row wrap">${statusPill(run.status)}<strong>${esc(label(run.current_stage || "awaiting approval"))}</strong></div>
+    <div class="summary-grid">
+      <div class="summary-card"><div class="key">Target</div><div class="value">${esc(run.input.deployment_target_id)}</div></div>
+      <div class="summary-card"><div class="key">Commit</div><div class="value">${esc(shortSha(run.input.commit_sha))}</div></div>
+    </div>
+    ${latestExternal ? `<a href="${esc(latestExternal.payload.url)}" target="_blank" rel="noreferrer">View deployment run</a>` : ""}
+    ${actions ? `<div class="row wrap" style="margin-top:10px">${actions}</div>` : ""}
+  </div>`;
+}
+
 function gateReason(prStatus, action) {
   if (!prStatus) return "Live GitHub status is unavailable.";
   if (!prStatus.head_matches) return "The pull request head no longer matches the approved commit.";
@@ -574,11 +619,13 @@ function gateReason(prStatus, action) {
 }
 
 function openActionDialog(mode, taskId, approval) {
-  const titles = { workflow: "Approve coding workflow", ready: "Mark pull request ready", revision: "Request a revision", merge: "Approve and merge" };
+  const titles = { workflow: "Approve coding workflow", deployment: "Approve production deployment", ready: "Mark pull request ready", revision: "Request a revision", merge: "Approve and merge" };
   state.pendingAction = { mode, taskId, approval };
   $("action-title").textContent = titles[mode];
   $("action-summary").textContent = mode === "workflow"
     ? `Workflow ${approval.id.slice(0, 8)} will start a coding task in ${approval.input.repository_id}. The agent may edit code, validate it, push a branch, and create a draft pull request.`
+    : mode === "deployment"
+      ? `Deploy commit ${shortSha(approval.input.commit_sha)} to ${approval.input.deployment_target_id}. GitHub Actions will rebuild the registered remote service and verify its health.`
     : `PR #${approval.number} at ${shortSha(approval.expected_head_sha)}. This action is explicitly authorized and recorded.`;
   const revision = mode === "revision";
   $("revision-label").hidden = !revision;
@@ -587,7 +634,7 @@ function openActionDialog(mode, taskId, approval) {
   $("revision-instructions").value = "";
   $("approval-token").value = "";
   $("action-error").textContent = "";
-  $("confirm-action").textContent = mode === "workflow" ? "Approve and start" : mode === "merge" ? "Approve and merge" : mode === "revision" ? "Request revision" : "Mark ready";
+  $("confirm-action").textContent = mode === "workflow" ? "Approve and start" : mode === "deployment" ? "Approve deployment" : mode === "merge" ? "Approve and merge" : mode === "revision" ? "Request revision" : "Mark ready";
   $("action-dialog").showModal();
   (revision ? $("revision-instructions") : $("approval-token")).focus();
 }
@@ -614,6 +661,14 @@ async function renderTask(id) {
       try { prStatus = await pullRequestStatus(id); }
       catch (error) { prStatusError = error.message || String(error); }
     }
+    let deploymentRun = await taskDeployment(id);
+    if (deploymentRun?.status === "running") {
+      deploymentRun = await api(`/workflow-runs/${deploymentRun.id}/sync`, {
+        method: "POST", body: "{}",
+      });
+    }
+    const deploymentEvents = deploymentRun
+      ? (await api(`/workflow-runs/${deploymentRun.id}/events`)).events : [];
     const ciReady = prStatus && prStatus.head_matches
       && prStatus.state === "open" && prStatus.required_checks_state === "passed"
       && prStatus.mergeable === true;
@@ -648,6 +703,7 @@ async function renderTask(id) {
       ${lineage}
       ${codingWorkflow(ctx, task, prStatus)}
       ${pullRequestPanel(prStatus, approval)}
+      ${deploymentPanel(task, ctx, deploymentRun, deploymentEvents)}
       ${prStatusError ? `<div class="gate-notice">Could not load live GitHub status: ${esc(prStatusError)}</div>` : ""}
       ${approval ? `<div id="gate-reason" class="gate-notice ${primaryGate ? "" : "pass"}">${primaryGate ? `Action blocked: ${esc(primaryGate)}` : "Exact commit and required checks are ready for an authorized action."}</div>` : ""}
       <div class="row wrap" style="margin-top:10px">
@@ -683,6 +739,26 @@ async function renderTask(id) {
       state.prPollAttempts = 0;
       renderTask(id);
     };
+    const proposeDeployment = $("propose-deployment");
+    if (proposeDeployment) proposeDeployment.onclick = async () => {
+      try {
+        await api(`/tasks/${id}/deployment-workflow`, {
+          method: "POST",
+          body: JSON.stringify({ deployment_target_id: $("deployment-target").value }),
+        });
+        await renderTask(id);
+      } catch (error) { fail(error); }
+    };
+    const approveDeployment = $("approve-deployment");
+    if (approveDeployment) approveDeployment.onclick = () =>
+      openActionDialog("deployment", id, deploymentRun);
+    const startDeployment = $("start-deployment");
+    if (startDeployment) startDeployment.onclick = async () => {
+      try {
+        await api(`/workflow-runs/${deploymentRun.id}/start`, { method: "POST", body: "{}" });
+        await renderTask(id);
+      } catch (error) { fail(error); }
+    };
     $("discuss").onclick = async () => {
       try {
         const chat = await api(`/tasks/${id}/chat-session`, { method: "POST" });
@@ -706,6 +782,11 @@ async function renderTask(id) {
         || prStatus.mergeable === null);
     if (unsettledPr && state.prPollAttempts < 24) {
       state.prPollAttempts += 1;
+      state.taskTimer = setTimeout(() => {
+        if (state.taskId === id) renderTask(id);
+      }, 5000);
+    }
+    if (deploymentRun?.status === "running") {
       state.taskTimer = setTimeout(() => {
         if (state.taskId === id) renderTask(id);
       }, 5000);
@@ -771,6 +852,15 @@ $("action-form").onsubmit = async (event) => {
       });
       await startCodingWorkflow(pending.taskId);
       closeActionDialog();
+    } else if (pending.mode === "deployment") {
+      await api(`/workflow-runs/${pending.approval.id}/decision`, {
+        method: "POST", headers, body: JSON.stringify({ decision: "approve" }),
+      });
+      await api(`/workflow-runs/${pending.approval.id}/start`, {
+        method: "POST", body: "{}",
+      });
+      closeActionDialog();
+      await renderTask(pending.taskId);
     } else if (pending.mode === "ready") {
       await api(`/tasks/${pending.taskId}/pull-request-ready`, {
         method: "POST", headers,
@@ -836,5 +926,5 @@ const theme = {
 };
 theme.init();
 $("theme-toggle").onclick = () => theme.toggle();
-Promise.all([loadChats(), loadRepositories()]);
+Promise.all([loadChats(), loadRepositories(), loadDeploymentTargets()]);
 </script>

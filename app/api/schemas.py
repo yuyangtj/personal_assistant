@@ -351,6 +351,10 @@ class CreateCodingWorkflowFromMessageRequest(BaseModel):
     repository_id: str = Field(min_length=1, max_length=120)
 
 
+class CreateDeploymentWorkflowRequest(BaseModel):
+    deployment_target_id: str = Field(min_length=1, max_length=120)
+
+
 class WorkflowDecisionRequest(BaseModel):
     decision: Literal["approve", "reject"]
 

@@ -21,7 +21,7 @@ All transitions are stored in `workflow_run_events`. A proposal follows either
 `proposed → rejected` or `proposed → approved → running → completed/failed/cancelled`.
 Approval only authorizes the proposal; an explicit start is still required.
 
-Only `coding-change` currently has a trusted start adapter. Starting it creates exactly
+`coding-change` has a trusted start adapter. Starting it creates exactly
 one idempotent task requiring `coding` and `pull_request_creation`, fixed to the registered
 repository in the approved input. Its workflow stage is synchronized from persisted task
 state: execution maps to `implement`, validation to `validate`, PR approval to `review`,
@@ -29,8 +29,14 @@ and a completed merge to `merge`. While at `review`, marking a draft ready and a
 its merge remain two distinct, separately audited actions gated by exact-SHA CI results.
 An explicitly authorized revision supersedes the previous task, transfers the workflow to
 a child task on the same PR branch, and loops the run back through implement, validate,
-CI, and review. Repository onboarding and deployment remain proposal-only until their
-narrower executors and rollback rules are implemented.
+CI, and review.
+
+`assistant-deployment` is the explicit post-merge adapter. A completed coding task with
+a trusted merge artifact can propose one idempotent deployment run. Approval uses the
+separate assistant approval token. Start verifies that the immutable merge SHA is still
+the exact head of the registered base branch, then dispatches the deployment target's
+registered GitHub Actions workflow. Sync records the matching Actions run as completed
+or failed. The API never receives a Docker socket or arbitrary SSH destination.
 
 Create a proposal:
 
@@ -72,6 +78,18 @@ Then explicitly start the approved coding workflow:
 curl -X POST http://localhost:8000/workflow-runs/WORKFLOW_RUN_ID/start
 ```
 
+After an approved merge, propose the registered deployment directly from its task:
+
+```bash
+curl -X POST http://localhost:8000/tasks/TASK_ID/deployment-workflow \
+  -H 'content-type: application/json' \
+  -d '{"deployment_target_id":"personal-assistant-production"}'
+```
+
+Approve that returned workflow run with `/decision`, then call `/start`. The task panel
+provides the same **Propose deployment → Approve deployment** sequence and polls the
+GitHub Actions result.
+
 The worker synchronizes linked workflow state automatically. The sync endpoint is also
 available for recovery and reconciliation:
 
@@ -91,9 +109,6 @@ Workflow runs may link to a chat session and task. Those records, messages, task
 events all live in PostgreSQL, so replacing API or worker containers does not erase the
 conversation. Deployments must preserve the database volume and run ordered migrations.
 
-## Next execution increment
-
-The next increment should make chat confirmation create a workflow proposal for
-consequential coding requests instead of directly creating a task. Repository activation
-and production deployment remain disabled until their own trusted executors, health
-checks, and rollback behavior exist.
+Repository onboarding remains proposal-only until its trusted activation adapter is
+implemented. Production rollback remains manual: a failed deployment is recorded and
+the existing release is left for the operator to inspect or redeploy explicitly.

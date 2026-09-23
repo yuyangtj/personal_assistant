@@ -2,6 +2,7 @@ id: personal-assistant-production
 name: Personal Assistant production
 repository_id: personal-assistant
 environment: production
-strategy: compose_pull_redeploy
+strategy: github_actions
+workflow_file: deploy.yml
 requires_approval: true
 enabled: true

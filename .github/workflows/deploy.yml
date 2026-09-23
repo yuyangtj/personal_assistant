@@ -1,0 +1,67 @@
+name: deploy
+run-name: Deploy ${{ inputs.workflow_run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact reviewed main commit to deploy
+        required: true
+        type: string
+      workflow_run_id:
+        description: Assistant deployment workflow run id
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-assistant-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate immutable inputs
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          WORKFLOW_RUN_ID: ${{ inputs.workflow_run_id }}
+        run: |
+          [[ "${COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${WORKFLOW_RUN_ID}" =~ ^[0-9a-f-]{36}$ ]]
+
+      - name: Configure trusted SSH host
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          test -n "${DEPLOY_SSH_PRIVATE_KEY}"
+          test -n "${DEPLOY_KNOWN_HOSTS}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${DEPLOY_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Pull and rebuild the registered release
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          test -n "${DEPLOY_HOST}"
+          test -n "${DEPLOY_USER}"
+          test -n "${DEPLOY_PATH}"
+          printf -v remote_command \
+            'cd %q && ASSISTANT_DEPLOY_EXPECTED_SHA=%q ./scripts/redeploy-remote.sh' \
+            "${DEPLOY_PATH}" "${COMMIT_SHA}"
+          ssh -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "${remote_command}"

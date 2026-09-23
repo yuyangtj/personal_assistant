@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 
 from app.deployments import DeploymentRegistry
 from app.domain.enums import TaskStatus
+from app.integrations.github import GitHubClient
 from app.persistence.database import Database
 from app.persistence.models import (
     ChatMessageModel,
@@ -89,6 +90,19 @@ class WorkflowService:
                 raise ValueError("Chat session does not exist")
             if task_id and session.get(TaskModel, task_id) is None:
                 raise ValueError("Task does not exist")
+            if task_id and manifest.id == "assistant-deployment":
+                existing = session.scalar(
+                    select(WorkflowRunModel).where(
+                        WorkflowRunModel.task_id == task_id,
+                        WorkflowRunModel.workflow_id == manifest.id,
+                    )
+                )
+                if existing is not None:
+                    if existing.workflow_input != normalized_input:
+                        raise WorkflowRunConflictError(
+                            "Task already has a different deployment workflow"
+                        )
+                    return existing
             if origin_message_id:
                 message = session.get(ChatMessageModel, origin_message_id)
                 if message is None or message.chat_session_id != chat_session_id:
@@ -214,6 +228,148 @@ class WorkflowService:
                 run,
                 "WORKFLOW_STARTED",
                 {"task_id": task_id, "stage": run.current_stage},
+            )
+            return run
+
+    def get_deployment_for_task(self, task_id: str) -> WorkflowRunModel | None:
+        with self.database.session() as session:
+            return session.scalar(
+                select(WorkflowRunModel)
+                .where(
+                    WorkflowRunModel.task_id == task_id,
+                    WorkflowRunModel.workflow_id == "assistant-deployment",
+                )
+                .order_by(WorkflowRunModel.created_at.desc())
+            )
+
+    def start_deployment(
+        self,
+        workflow_run_id: str,
+        *,
+        github: GitHubClient,
+    ) -> WorkflowRunModel:
+        with self.database.session() as session, session.begin():
+            run = session.scalar(
+                select(WorkflowRunModel)
+                .where(WorkflowRunModel.id == workflow_run_id)
+                .with_for_update()
+            )
+            if run is None:
+                raise WorkflowRunNotFoundError(workflow_run_id)
+            if run.workflow_id != "assistant-deployment":
+                raise WorkflowRunConflictError("Workflow is not a deployment")
+            if run.status == WorkflowRunStatus.RUNNING.value:
+                return run
+            if run.status != WorkflowRunStatus.APPROVED.value:
+                raise WorkflowRunConflictError(
+                    "Deployment workflow must be approved before it can start"
+                )
+            if self.deployment_registry is None:
+                raise WorkflowRunConflictError("Deployment registry is not configured")
+            target = self.deployment_registry.get(
+                str(run.workflow_input["deployment_target_id"])
+            )
+            if not target.enabled or not target.workflow_file:
+                raise WorkflowRunConflictError(
+                    "Deployment target has no enabled GitHub Actions workflow"
+                )
+            repository = self.repository_registry.get(target.repository_id)
+            commit_sha = str(run.workflow_input["commit_sha"])
+            branch_head = github.get_branch_head(
+                repository=repository.github_repository,
+                branch=repository.base_branch,
+            )
+            if branch_head != commit_sha:
+                raise WorkflowRunConflictError(
+                    "Deployment commit is no longer the exact head of the trusted base branch"
+                )
+            display_title = f"Deploy {run.id}"
+            github.dispatch_workflow(
+                repository=repository.github_repository,
+                workflow_file=target.workflow_file,
+                ref=repository.base_branch,
+                inputs={"commit_sha": commit_sha, "workflow_run_id": run.id},
+            )
+            run.status = WorkflowRunStatus.RUNNING.value
+            run.current_stage = "deploy"
+            run.updated_at = utc_now()
+            self._append_event(
+                session,
+                run,
+                "DEPLOYMENT_DISPATCHED",
+                {
+                    "deployment_target_id": target.id,
+                    "repository": repository.github_repository,
+                    "workflow_file": target.workflow_file,
+                    "commit_sha": commit_sha,
+                    "display_title": display_title,
+                },
+            )
+            return run
+
+    def sync_deployment(
+        self,
+        workflow_run_id: str,
+        *,
+        github: GitHubClient,
+    ) -> WorkflowRunModel:
+        with self.database.session() as session, session.begin():
+            run = session.scalar(
+                select(WorkflowRunModel)
+                .where(WorkflowRunModel.id == workflow_run_id)
+                .with_for_update()
+            )
+            if run is None:
+                raise WorkflowRunNotFoundError(workflow_run_id)
+            if run.workflow_id != "assistant-deployment":
+                raise WorkflowRunConflictError("Workflow is not a deployment")
+            if run.status in {
+                WorkflowRunStatus.COMPLETED.value,
+                WorkflowRunStatus.FAILED.value,
+                WorkflowRunStatus.CANCELLED.value,
+                WorkflowRunStatus.REJECTED.value,
+            }:
+                return run
+            if run.status != WorkflowRunStatus.RUNNING.value:
+                raise WorkflowRunConflictError("Deployment workflow has not started")
+            if self.deployment_registry is None:
+                raise WorkflowRunConflictError("Deployment registry is not configured")
+            target = self.deployment_registry.get(
+                str(run.workflow_input["deployment_target_id"])
+            )
+            if not target.workflow_file:
+                raise WorkflowRunConflictError("Deployment target has no workflow file")
+            repository = self.repository_registry.get(target.repository_id)
+            workflow = github.find_workflow_run(
+                repository=repository.github_repository,
+                workflow_file=target.workflow_file,
+                branch=repository.base_branch,
+                commit_sha=str(run.workflow_input["commit_sha"]),
+                display_title=f"Deploy {run.id}",
+            )
+            if workflow is None:
+                return run
+            if workflow.status != "completed":
+                return run
+            succeeded = workflow.conclusion == "success"
+            run.status = (
+                WorkflowRunStatus.COMPLETED.value
+                if succeeded
+                else WorkflowRunStatus.FAILED.value
+            )
+            run.current_stage = "promote" if succeeded else "health_check"
+            run.updated_at = utc_now()
+            self._append_event(
+                session,
+                run,
+                "WORKFLOW_COMPLETED" if succeeded else "WORKFLOW_FAILED",
+                {
+                    "github_run_id": workflow.id,
+                    "url": workflow.url,
+                    "commit_sha": workflow.head_sha,
+                    "conclusion": workflow.conclusion,
+                    "stage": run.current_stage,
+                },
             )
             return run
 
