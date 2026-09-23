@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.capabilities.models import IDENTIFIER_PATTERN
 from app.domain.enums import EventType, ExecutionStatus, TaskStatus
@@ -17,11 +17,16 @@ from app.persistence.database import Database
 from app.persistence.models import (
     ChatMessageModel,
     ChatSessionModel,
+    CodingRunModel,
     ExecutionModel,
     TaskEventModel,
     TaskModel,
+    WorkflowRunEventModel,
+    WorkflowRunModel,
+    utc_now,
 )
 from app.persistence.repository import ChatMessageRepository, ChatSessionRepository, TaskRepository
+from app.workflows.models import WorkflowRunStatus
 
 
 class TaskNotFoundError(LookupError):
@@ -318,7 +323,19 @@ class TaskService:
         with self.database.session() as session:
             task = self._require_task(session, task_id)
             events = TaskRepository.list_events(session, task.id)
-            return build_task_context(task, events)
+            context = build_task_context(task, events)
+            checkpoint = session.get(CodingRunModel, task.id)
+            if checkpoint is not None:
+                context["coding_checkpoint"] = {
+                    "phase": checkpoint.phase,
+                    "branch": checkpoint.branch,
+                    "commit_sha": checkpoint.commit_sha,
+                    "pull_request_number": checkpoint.pull_request_number,
+                    "pull_request_head_sha": checkpoint.pull_request_head_sha,
+                    "validation": checkpoint.validation_results,
+                    "runner_attempts": checkpoint.runner_attempts,
+                }
+            return context
 
     def create_follow_up_task(
         self,
@@ -510,13 +527,35 @@ class TaskService:
             return "The previous phone action could not be started."
         return None
 
-    def claim_next_task(self, *, worker_id: str, lease_seconds: int) -> TaskModel | None:
+    def claim_next_task(
+        self,
+        *,
+        worker_id: str,
+        lease_seconds: int,
+        supports_coding: bool = True,
+        coding_only: bool = False,
+    ) -> TaskModel | None:
         with self.database.session() as session, session.begin():
             return TaskRepository.claim_next(
                 session,
                 worker_id=worker_id,
                 lease_seconds=lease_seconds,
+                supports_coding=supports_coding,
+                coding_only=coding_only,
             )
+
+    def recover_expired_tasks(self) -> list[str]:
+        with self.database.session() as session, session.begin():
+            return TaskRepository.recover_expired(session, now=datetime.now(UTC))
+
+    def renew_lease(self, task_id: str, *, worker_id: str, lease_seconds: int) -> bool:
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            if task.claimed_by != worker_id or TaskStatus(task.status) in TERMINAL_STATUSES:
+                return False
+            task.lease_expires_at = datetime.now(UTC) + timedelta(seconds=lease_seconds)
+            task.updated_at = datetime.now(UTC)
+            return True
 
     def record_plan(self, task_id: str, plan: list[str]) -> None:
         with self.database.session() as session, session.begin():
@@ -857,6 +896,24 @@ class TaskService:
             )
             return refreshed
 
+    def record_pull_request_status(
+        self, task_id: str, *, operation: str, snapshot: dict[str, Any]
+    ) -> None:
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.TOOL_RESULT_RECEIVED,
+                {
+                    "tool": "github",
+                    "operation": operation,
+                    "ok": snapshot.get("head_matches") is True
+                    and snapshot.get("required_checks_state") == "passed",
+                    "status": snapshot,
+                },
+            )
+
     def complete_pull_request_merge(
         self,
         task_id: str,
@@ -980,6 +1037,77 @@ class TaskService:
                 EventType.TASK_CANCELLED,
                 {"previous_status": TaskStatus.WAITING_FOR_APPROVAL.value},
             )
+            return task
+
+    def supersede_pull_request_approval(self, task_id: str, *, revision_task_id: str) -> TaskModel:
+        with self.database.session() as session, session.begin():
+            task = self._require_task(session, task_id, for_update=True)
+            revision = self._require_task(session, revision_task_id)
+            if revision.parent_task_id != task.id:
+                raise ApprovalConflictError("Revision task does not continue this task")
+            if TaskStatus(task.status) != TaskStatus.WAITING_FOR_APPROVAL:
+                raise ApprovalConflictError("Task is not waiting for approval")
+            approval = session.scalar(
+                select(TaskEventModel)
+                .where(TaskEventModel.task_id == task.id)
+                .where(TaskEventModel.event_type == EventType.APPROVAL_REQUESTED.value)
+                .order_by(TaskEventModel.sequence.desc())
+                .limit(1)
+            )
+            if approval is None:
+                raise ApprovalNotFoundError(task_id)
+            execution_id = approval.payload.get("execution_id")
+            if not isinstance(execution_id, str):
+                raise ApprovalNotFoundError(task_id)
+            execution = self._require_execution(session, execution_id)
+            ensure_transition(task.status, TaskStatus.SUPERSEDED)
+            task.status = TaskStatus.SUPERSEDED.value
+            task.superseded_by_task_id = revision.id
+            task.claimed_by = None
+            task.lease_expires_at = None
+            self._mark_execution_cancelled(execution)
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.REVISION_REQUESTED,
+                {
+                    "revision_task_id": revision.id,
+                    "previous_head_sha": approval.payload.get("expected_head_sha"),
+                },
+            )
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.TASK_SUPERSEDED,
+                {"superseded_by_task_id": revision.id},
+            )
+            run = session.scalar(
+                select(WorkflowRunModel)
+                .where(WorkflowRunModel.task_id == task.id)
+                .with_for_update()
+            )
+            if run is not None:
+                run.task_id = revision.id
+                run.status = WorkflowRunStatus.RUNNING.value
+                run.current_stage = "implement"
+                run.updated_at = utc_now()
+                sequence = session.scalar(
+                    select(func.max(WorkflowRunEventModel.sequence)).where(
+                        WorkflowRunEventModel.workflow_run_id == run.id
+                    )
+                )
+                session.add(
+                    WorkflowRunEventModel(
+                        workflow_run_id=run.id,
+                        sequence=(sequence or 0) + 1,
+                        event_type="WORKFLOW_REVISION_REQUESTED",
+                        payload={
+                            "previous_task_id": task.id,
+                            "task_id": revision.id,
+                            "stage": "implement",
+                        },
+                    )
+                )
             return task
 
     def complete_task(

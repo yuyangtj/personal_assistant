@@ -16,6 +16,7 @@ class Settings:
     worker_id: str = "worker-local"
     worker_poll_interval_seconds: float = 1.0
     worker_lease_seconds: int = 60
+    worker_coding_only: bool = False
     fake_executor_delay_seconds: float = 0.1
     capabilities_directory: Path = Path("capabilities")
     repositories_directory: Path = Path("repositories")
@@ -52,6 +53,7 @@ class Settings:
     code_agent_rate_limit_cooldown_seconds: int = 300
     code_agent_quota_cooldown_seconds: int = 3600
     code_agent_timeout_seconds: int = 1800
+    code_agent_preflight_enabled: bool = True
     github_token: str | None = None
     github_api_base_url: str = "https://api.github.com"
     github_repository: str | None = None
@@ -94,6 +96,9 @@ class Settings:
             ),
             worker_lease_seconds=int(
                 os.getenv("ASSISTANT_WORKER_LEASE_SECONDS", str(defaults.worker_lease_seconds))
+            ),
+            worker_coding_only=_as_bool(
+                os.getenv("ASSISTANT_WORKER_CODING_ONLY", str(defaults.worker_coding_only))
             ),
             fake_executor_delay_seconds=float(
                 os.getenv(
@@ -234,6 +239,12 @@ class Settings:
                 os.getenv(
                     "ASSISTANT_CODE_AGENT_TIMEOUT_SECONDS",
                     str(defaults.code_agent_timeout_seconds),
+                )
+            ),
+            code_agent_preflight_enabled=_as_bool(
+                os.getenv(
+                    "ASSISTANT_CODE_AGENT_PREFLIGHT_ENABLED",
+                    str(defaults.code_agent_preflight_enabled),
                 )
             ),
             github_token=os.getenv("ASSISTANT_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or None,

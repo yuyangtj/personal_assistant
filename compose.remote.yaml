@@ -99,28 +99,63 @@ services:
       ASSISTANT_MANAGER_MODEL_FALLBACK_PROVIDER: ${ASSISTANT_MANAGER_MODEL_FALLBACK_PROVIDER:-auto}
       ASSISTANT_MANAGER_MODEL_TIMEOUT_SECONDS: ${ASSISTANT_MANAGER_MODEL_TIMEOUT_SECONDS:-30}
       ASSISTANT_MANAGER_MODEL_MINIMUM_CONFIDENCE: ${ASSISTANT_MANAGER_MODEL_MINIMUM_CONFIDENCE:-0.5}
-      ASSISTANT_CODE_AGENT_ENABLED: ${ASSISTANT_CODE_AGENT_ENABLED:-false}
-      ASSISTANT_CODE_AGENT_PROVIDERS: ${ASSISTANT_CODE_AGENT_PROVIDERS:-kimi,minimax-claude,codex}
-      ASSISTANT_CODE_REPOSITORY_PATH: ${ASSISTANT_CODE_REPOSITORY_PATH:-}
-      ASSISTANT_CODE_WORKTREE_ROOT: ${ASSISTANT_CODE_WORKTREE_ROOT:-/tmp/personal-assistant-worktrees}
-      ASSISTANT_CODE_AGENT_EXECUTABLE: ${ASSISTANT_CODE_AGENT_EXECUTABLE:-codex}
-      ASSISTANT_CODE_AGENT_MODEL: ${ASSISTANT_CODE_AGENT_MODEL:-}
-      ASSISTANT_KIMI_CODE_EXECUTABLE: ${ASSISTANT_KIMI_CODE_EXECUTABLE:-kimi}
-      ASSISTANT_KIMI_CODE_MODEL: ${ASSISTANT_KIMI_CODE_MODEL:-}
-      ASSISTANT_CLAUDE_CODE_EXECUTABLE: ${ASSISTANT_CLAUDE_CODE_EXECUTABLE:-claude}
-      ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL: ${ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
-      ASSISTANT_MINIMAX_CODE_MODEL: ${ASSISTANT_MINIMAX_CODE_MODEL:-}
-      ASSISTANT_CODE_AGENT_RATE_LIMIT_COOLDOWN_SECONDS: ${ASSISTANT_CODE_AGENT_RATE_LIMIT_COOLDOWN_SECONDS:-300}
-      ASSISTANT_CODE_AGENT_QUOTA_COOLDOWN_SECONDS: ${ASSISTANT_CODE_AGENT_QUOTA_COOLDOWN_SECONDS:-3600}
-      ASSISTANT_CODE_AGENT_TIMEOUT_SECONDS: ${ASSISTANT_CODE_AGENT_TIMEOUT_SECONDS:-1800}
-      ASSISTANT_GITHUB_TOKEN: ${ASSISTANT_GITHUB_TOKEN:-}
-      ASSISTANT_GITHUB_API_BASE_URL: ${ASSISTANT_GITHUB_API_BASE_URL:-https://api.github.com}
-      ASSISTANT_GITHUB_REPOSITORY: ${ASSISTANT_GITHUB_REPOSITORY:-}
-      ASSISTANT_GITHUB_BASE_BRANCH: ${ASSISTANT_GITHUB_BASE_BRANCH:-main}
-      ASSISTANT_GITHUB_REMOTE: ${ASSISTANT_GITHUB_REMOTE:-origin}
-      ASSISTANT_GITHUB_DRAFT_PULL_REQUESTS: ${ASSISTANT_GITHUB_DRAFT_PULL_REQUESTS:-true}
+      ASSISTANT_CODE_AGENT_ENABLED: "false"
       ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS: ${ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS:-0.1}
     command: ["python", "-m", "app.worker"]
+    networks:
+      - private
+
+  coding-worker:
+    profiles: ["coding"]
+    build:
+      context: .
+      dockerfile: Dockerfile.coding-worker
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    user: "${ASSISTANT_CODING_WORKER_UID:-1000}:${ASSISTANT_CODING_WORKER_GID:-1000}"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      HOME: /tmp/assistant-home
+      GIT_ASKPASS: /usr/local/bin/assistant-git-askpass
+      GIT_TERMINAL_PROMPT: "0"
+      ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:${ASSISTANT_POSTGRES_PASSWORD}@postgres:5432/assistant
+      ASSISTANT_CAPABILITIES_DIRECTORY: /service/capabilities
+      ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
+      ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
+      ASSISTANT_CODING_RUNNERS_DIRECTORY: /service/coding-runners
+      ASSISTANT_VALIDATION_PROFILES_DIRECTORY: /service/validation-profiles
+      ASSISTANT_DEPLOYMENT_TARGETS_DIRECTORY: /service/deployment-targets
+      ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH: /workspace/repos/personal-assistant
+      ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH: /workspace/repos/analytics-agent-playground
+      ASSISTANT_CODE_WORKTREE_ROOT: /workspace/worktrees
+      ASSISTANT_CODE_AGENT_ENABLED: "true"
+      ASSISTANT_CODE_AGENT_PROVIDERS: kimi,minimax-claude
+      ASSISTANT_CODE_AGENT_PREFLIGHT_ENABLED: "true"
+      ASSISTANT_DEFAULT_REPOSITORY_ID: ${ASSISTANT_DEFAULT_REPOSITORY_ID:-personal-assistant}
+      ASSISTANT_WORKER_ID: coding-worker-remote
+      ASSISTANT_WORKER_CODING_ONLY: "true"
+      KIMI_API_KEY: ${KIMI_API_KEY:-}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL: ${ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
+      ASSISTANT_GITHUB_TOKEN: ${ASSISTANT_GITHUB_TOKEN:?set ASSISTANT_GITHUB_TOKEN}
+      ASSISTANT_GITHUB_API_BASE_URL: ${ASSISTANT_GITHUB_API_BASE_URL:-https://api.github.com}
+    volumes:
+      - type: bind
+        source: ${ASSISTANT_HOST_REPOSITORY_PERSONAL_ASSISTANT_PATH:-./.coding-repositories/personal-assistant}
+        target: /workspace/repos/personal-assistant
+      - type: bind
+        source: ${ASSISTANT_HOST_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH:-./.coding-repositories/analytics-agent-playground}
+        target: /workspace/repos/analytics-agent-playground
+      - type: bind
+        source: ${ASSISTANT_HOST_CODE_WORKTREE_ROOT:-./.coding-worktrees}
+        target: /workspace/worktrees
     networks:
       - private
 

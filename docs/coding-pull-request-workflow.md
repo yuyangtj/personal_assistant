@@ -15,7 +15,8 @@ flowchart LR
     commit --> push[Push dedicated branch]
     push --> draft[Create draft GitHub PR]
     draft --> wait[Task waits for approval]
-    wait --> review[Human review + mark ready]
+    wait --> ci[Exact-SHA GitHub CI gate]
+    ci --> review[Human review + mark ready]
     review --> sha[Approve exact head SHA]
     sha --> merge[GitHub merge API]
     merge --> complete[Complete task + audit events]
@@ -40,6 +41,13 @@ flowchart LR
 - The host rejects an empty change and runs `git diff --check` before committing.
 - A new `assistant/task-<id>` branch is pushed and a draft PR is created. The task moves to
   `waiting_for_approval`.
+- Validation results and each publication phase are persisted. A restarted worker resumes
+  from the last safe checkpoint, verifies the deterministic branch and exact SHA, reuses an
+  existing PR, and stops for manual reconciliation instead of overwriting divergence.
+- Worker leases are renewed during long agent and validation runs. Expired leases are
+  reclaimed without running a second active worker for the same task.
+- Each repository manifest declares authoritative `required_checks`. Ready-for-review and
+  merge remain disabled until every named check passes for the expected PR head SHA.
 - The console can mark that exact draft head ready for review through a separately
   authorized GitHub action. The task remains `waiting_for_approval`; ready-for-review is
   not merge approval.
@@ -47,15 +55,18 @@ flowchart LR
   the explicit approval API, and only for the PR recorded by the execution.
 - Approval must include the exact reviewed head SHA. If the branch changes, the gate is
   refreshed and a new approval is required.
-- Draft or closed PRs are refused. GitHub branch protection, required reviews, and status
-  checks remain authoritative and can reject the merge.
+- Draft or closed PRs, merge conflicts, stale SHA, and failed, pending, or missing checks
+  are refused. The decisive live GitHub snapshot is retained in the audit trail.
+- Revisions run only after an approval-token-authorized request. Unresolved GitHub review
+  comments are quoted as bounded untrusted context, the old task becomes `superseded`, and
+  a child task updates the same branch and PR before requesting a new exact-SHA approval.
 - `.github/workflows/ci.yml` runs lint, all backend tests, and Compose validation on each
   pull request. Configure that `backend` job as a required status check on the base branch.
 
 ## Configuration
 
-Run the coding worker on a machine that has the configured repository, Git, Codex CLI,
-Codex authentication, and Git push credentials:
+For local development, run the coding worker on a machine that has the configured
+repositories, Git, the selected CLIs, and Git push credentials:
 
 ```shell
 export ASSISTANT_CODE_AGENT_ENABLED=true
@@ -66,16 +77,18 @@ export ASSISTANT_CODE_WORKTREE_ROOT=/absolute/path/to/temporary-worktrees
 export ASSISTANT_GITHUB_TOKEN=github-token
 export ASSISTANT_APPROVAL_TOKEN=separate-long-random-secret
 export ASSISTANT_GITHUB_BASE_BRANCH=main
-export ASSISTANT_CODE_AGENT_PROVIDERS=kimi,minimax-claude,codex
+export ASSISTANT_CODE_AGENT_PROVIDERS=kimi,minimax-claude
 uv run python -m app.worker
 ```
 
 Repository definitions live in `repositories/*.yaml`. Each manifest fixes the GitHub
-`owner/repository`, base branch, remote name, aliases, and the environment variable that
-supplies its local checkout path. Adding a repository therefore has two explicit parts:
+`owner/repository`, base branch, remote name, required GitHub check names, aliases, and the
+environment variable that supplies its local checkout path. Adding a repository therefore
+has three explicit parts:
 
 1. Add and review its YAML manifest.
-2. Clone it on the worker host and set that manifest's `path_env` variable.
+2. Configure its required check names before automated merge is available.
+3. Clone it on the worker host and set that manifest's `path_env` variable.
 
 The initial registry contains `personal-assistant` and `analytics-agent-playground`.
 `ASSISTANT_CODE_REPOSITORY_PATH` and `ASSISTANT_GITHUB_REPOSITORY` remain compatible with
@@ -101,6 +114,7 @@ The coding runner settings are:
 | `ASSISTANT_CODE_AGENT_MODEL` | Codex default |
 | `ASSISTANT_CODE_AGENT_RATE_LIMIT_COOLDOWN_SECONDS` | `300` |
 | `ASSISTANT_CODE_AGENT_QUOTA_COOLDOWN_SECONDS` | `3600` |
+| `ASSISTANT_CODE_AGENT_PREFLIGHT_ENABLED` | `true` in the remote coding worker |
 
 The setting can narrow the allowed runner set, for example `minimax-claude,codex`.
 Ranking within that set comes from `coding-runners/*.yaml`, task fit, and runtime state.
@@ -108,13 +122,14 @@ A provider is only a coding runner here; MiniMax remains independently configura
 the manager model that infers required capabilities.
 
 For a personal installation, use a fine-grained token scoped to the configured repository.
-It needs **Pull requests: write** to create PRs and **Contents: write** to merge; Git push
-also needs write access through the repository's configured Git credentials. For a shared
-or production deployment, prefer a narrowly scoped GitHub App installation token.
+It needs **Pull requests: write** to create PRs, **Contents: write** to push and merge, and
+**Checks: read** to enforce the exact-SHA CI gate. For a shared or production deployment,
+prefer a narrowly scoped GitHub App installation token.
 
-The Compose worker does not bundle Codex or mount an arbitrary Git checkout. Therefore
-the coding adapter remains off by default there. A hardened deployment can supply both
-explicitly; the local worker is the intended MVP execution path.
+The remote Compose stack provides a dedicated non-root `coding-worker` image and optional
+`coding` profile. Its only repository mounts are fixed by host-path environment variables;
+it does not accept a checkout path from task input. Provisioning instructions are in
+[`remote-hosting.md`](remote-hosting.md).
 
 ## Create a coding task
 
@@ -130,8 +145,15 @@ curl -X POST http://localhost:8000/tasks \
   }'
 ```
 
-After the draft PR is created, inspect the `APPROVAL_REQUESTED` task event. Review the
-PR changes, then mark its exact head ready for review from the task console or API:
+After the draft PR is created, inspect the `APPROVAL_REQUESTED` task event. Review the PR
+changes and live CI status:
+
+```shell
+curl http://localhost:8000/tasks/TASK_ID/pull-request-status
+```
+
+When all manifest-required checks pass, mark its exact head ready for review from the task
+console or API:
 
 ```shell
 curl -X POST http://localhost:8000/tasks/TASK_ID/pull-request-ready \
@@ -140,9 +162,10 @@ curl -X POST http://localhost:8000/tasks/TASK_ID/pull-request-ready \
   -d '{"expected_head_sha":"REVIEWED_40_OR_64_CHARACTER_SHA"}'
 ```
 
-This operation validates the pending repository, PR number, open state, and exact head
-SHA before asking GitHub to remove draft status. It records the tool call and result and
-refreshes the pending approval with `draft: false`. It never merges the PR.
+This operation validates the pending repository, PR number, open state, exact head SHA,
+and required checks before asking GitHub to remove draft status. It records the tool call,
+GitHub check snapshot, and result and refreshes the pending approval with `draft: false`.
+It never merges the PR.
 
 After human review, approve the exact SHA from that event:
 
@@ -159,6 +182,19 @@ curl -X POST http://localhost:8000/tasks/TASK_ID/pull-request-approval \
 
 To stop without merging, send `{"decision":"reject"}`. The pull request and branch are
 left intact for manual inspection; the task becomes cancelled.
+
+To address review feedback, use the task console or authorize a revision explicitly:
+
+```shell
+curl -X POST http://localhost:8000/tasks/TASK_ID/revisions \
+  -H 'content-type: application/json' \
+  -H 'X-Assistant-Approval-Token: YOUR_SEPARATE_APPROVAL_SECRET' \
+  -d '{"request":"Address the review feedback and add the missing retry test"}'
+```
+
+Only unresolved review threads are included, with strict per-comment and total limits.
+The response identifies the new active task; the original task is terminally
+`superseded` and remains as immutable lineage for the previous SHA.
 
 ## Audit trail
 

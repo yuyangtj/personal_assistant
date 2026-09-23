@@ -129,6 +129,7 @@ def build_task_context(
         "chat_session_id": task.chat_session_id,
         "origin_message_id": task.origin_message_id,
         "parent_task_id": task.parent_task_id,
+        "superseded_by_task_id": task.superseded_by_task_id,
         "final_answer": final_answer,
         "summary": summary if summary != final_answer else None,
         "validation": _validation(events),

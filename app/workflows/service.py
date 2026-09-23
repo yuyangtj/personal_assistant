@@ -278,6 +278,8 @@ class WorkflowService:
             return WorkflowRunStatus.FAILED, "implement", "WORKFLOW_FAILED"
         if task_status == TaskStatus.CANCELLED:
             return WorkflowRunStatus.CANCELLED, "implement", "WORKFLOW_CANCELLED"
+        if task_status == TaskStatus.SUPERSEDED:
+            return WorkflowRunStatus.RUNNING, "implement", "WORKFLOW_REVISION_REQUESTED"
         return WorkflowRunStatus.RUNNING, "implement", "WORKFLOW_STAGE_CHANGED"
 
     @staticmethod

@@ -36,8 +36,10 @@ from app.api.schemas import (
     ProviderRuntimeStateListResponse,
     ProviderRuntimeStateResponse,
     PullRequestApprovalRequest,
+    PullRequestCheckResponse,
     PullRequestReadyRequest,
     PullRequestRevisionRequest,
+    PullRequestStatusResponse,
     RepositoryListResponse,
     RepositoryResponse,
     SpeechRequest,
@@ -98,6 +100,112 @@ def _repository_context(
             raise HTTPException(status_code=422, detail=str(error)) from error
         context["repository_id"] = manifest.id
     return context
+
+
+def _live_pull_request_status(
+    request: Request,
+    task_id: str,
+    approval: dict[str, object],
+    *,
+    include_review_threads: bool = True,
+) -> PullRequestStatusResponse:
+    github = request.app.state.github_client
+    if github is None:
+        raise HTTPException(status_code=503, detail="GitHub integration is not configured")
+    task = _service(request).get_task(task_id)
+    repository_id = str((task.source_context or {}).get("repository_id") or "")
+    if not repository_id:
+        raise ApprovalConflictError("Task has no trusted repository id")
+    manifest = request.app.state.repository_registry.get(repository_id)
+    repository = str(approval["repository"])
+    if repository != manifest.github_repository:
+        raise ApprovalConflictError("Approval repository does not match the trusted registry")
+    number = int(approval["number"])
+    expected_sha = str(approval["expected_head_sha"])
+    pull_request = github.get_pull_request(repository=repository, number=number)
+    if (
+        pull_request.repository != repository
+        or pull_request.head_branch != str(approval.get("head_branch") or "")
+        or pull_request.base_branch != manifest.base_branch
+    ):
+        raise ApprovalConflictError("Pull request identity does not match the trusted approval")
+    check_runs = github.list_check_runs(repository=repository, commit_sha=pull_request.head_sha)
+    required = set(manifest.required_checks)
+    by_name = {}
+    for check in check_runs:
+        by_name.setdefault(check.name, check)
+    missing = required - set(by_name)
+    if not required or missing:
+        aggregate = "missing"
+    elif any(by_name[name].status != "completed" for name in required):
+        aggregate = "pending"
+    elif any(
+        by_name[name].conclusion not in {"success", "neutral", "skipped"} for name in required
+    ):
+        aggregate = "failed"
+    else:
+        aggregate = "passed"
+    unresolved = (
+        github.list_unresolved_review_comments(repository=repository, number=number)
+        if include_review_threads
+        else ()
+    )
+    return PullRequestStatusResponse(
+        repository=repository,
+        number=number,
+        url=pull_request.url,
+        expected_head_sha=expected_sha,
+        current_head_sha=pull_request.head_sha,
+        head_matches=pull_request.head_sha == expected_sha,
+        state=pull_request.state,
+        draft=pull_request.draft,
+        mergeable=pull_request.mergeable,
+        required_checks_state=aggregate,
+        checks=[
+            PullRequestCheckResponse(
+                name=check.name,
+                status=check.status,
+                conclusion=check.conclusion,
+                url=check.url,
+                required=check.name in required,
+            )
+            for check in check_runs
+        ],
+        unresolved_thread_count=len(unresolved),
+    )
+
+
+def _require_mergeable_status(status: PullRequestStatusResponse) -> None:
+    if not status.head_matches:
+        raise ApprovalConflictError(
+            "Pull request changed; review the new head SHA before continuing"
+        )
+    if status.state != "open":
+        raise ApprovalConflictError("Pull request is not open")
+    if status.mergeable is not True:
+        raise ApprovalConflictError("Pull request is not confirmed mergeable")
+    if status.required_checks_state != "passed":
+        raise ApprovalConflictError(f"Required GitHub checks are {status.required_checks_state}")
+
+
+def _bounded_review_feedback(comments) -> list[dict[str, object]]:
+    remaining = 12_000
+    feedback: list[dict[str, object]] = []
+    for comment in comments:
+        if remaining <= 0:
+            break
+        body = comment.body[: min(2000, remaining)]
+        remaining -= len(body)
+        feedback.append(
+            {
+                "author": comment.author,
+                "body": body,
+                "path": comment.path,
+                "line": comment.line,
+                "url": comment.url,
+            }
+        )
+    return feedback
 
 
 @router.post(
@@ -298,6 +406,19 @@ def decide_pull_request_approval(
     if github is None:
         raise HTTPException(status_code=503, detail="GitHub integration is not configured")
     try:
+        pending = service.get_pending_approval(task_id)
+        if pending.get("expected_head_sha") != body.expected_head_sha:
+            raise ApprovalConflictError("Reviewed head SHA does not match the pending approval")
+        live_status = _live_pull_request_status(
+            request, task_id, pending, include_review_threads=False
+        )
+        service.record_pull_request_status(
+            task_id,
+            operation="merge_preflight",
+            snapshot=live_status.model_dump(mode="json"),
+        )
+        if live_status.head_matches:
+            _require_mergeable_status(live_status)
         approval = service.begin_pull_request_approval(
             task_id,
             expected_head_sha=body.expected_head_sha,
@@ -308,6 +429,8 @@ def decide_pull_request_approval(
         raise HTTPException(status_code=404, detail="Pull request approval not found") from error
     except ApprovalConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except GitHubError as error:
+        raise HTTPException(status_code=502, detail="GitHub operation failed") from error
 
     try:
         repository = str(approval["repository"])
@@ -346,6 +469,15 @@ def decide_pull_request_approval(
                     else "Pull request is not open"
                 ),
             )
+        decisive_status = _live_pull_request_status(
+            request, task_id, approval, include_review_threads=False
+        )
+        service.record_pull_request_status(
+            task_id,
+            operation="merge_decisive_preflight",
+            snapshot=decisive_status.model_dump(mode="json"),
+        )
+        _require_mergeable_status(decisive_status)
         service.record_pull_request_merge_call(
             task_id,
             repository=repository,
@@ -371,6 +503,9 @@ def decide_pull_request_approval(
         )
         request.app.state.workflow_service.sync_for_task(task_id)
         return TaskResponse.from_model(task)
+    except ApprovalConflictError as error:
+        service.return_to_pull_request_approval(task_id, reason="merge_preflight_changed")
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except HTTPException:
         raise
     except (GitHubError, KeyError, TypeError, ValueError) as error:
@@ -398,6 +533,15 @@ def mark_pull_request_ready(
             raise ApprovalNotFoundError(task_id)
         if approval.get("expected_head_sha") != body.expected_head_sha:
             raise ApprovalConflictError("Reviewed head SHA does not match the pending approval")
+        live_status = _live_pull_request_status(
+            request, task_id, approval, include_review_threads=False
+        )
+        service.record_pull_request_status(
+            task_id,
+            operation="ready_for_review_preflight",
+            snapshot=live_status.model_dump(mode="json"),
+        )
+        _require_mergeable_status(live_status)
         repository = str(approval["repository"])
         number = int(approval["number"])
         pull_request = github.get_pull_request(repository=repository, number=number)
@@ -437,6 +581,24 @@ def mark_pull_request_ready(
         raise HTTPException(status_code=502, detail="GitHub operation failed") from error
 
 
+@router.get(
+    "/tasks/{task_id}/pull-request-status",
+    response_model=PullRequestStatusResponse,
+)
+def get_pull_request_status(task_id: str, request: Request) -> PullRequestStatusResponse:
+    try:
+        approval = _service(request).get_pending_approval(task_id)
+        return _live_pull_request_status(request, task_id, approval)
+    except TaskNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+    except ApprovalNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Pull request approval not found") from error
+    except (ApprovalConflictError, LookupError, KeyError, TypeError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except GitHubError as error:
+        raise HTTPException(status_code=502, detail="GitHub operation failed") from error
+
+
 @router.post(
     "/tasks/{task_id}/pull-request-revision",
     response_model=TaskResponse,
@@ -452,15 +614,31 @@ def request_pull_request_revision(
         approval = service.get_pending_approval(task_id)
         if approval.get("expected_head_sha") != body.expected_head_sha:
             raise ApprovalConflictError("Reviewed head SHA does not match the pending approval")
+        live_status = _live_pull_request_status(
+            request, task_id, approval, include_review_threads=False
+        )
+        if not live_status.head_matches:
+            raise ApprovalConflictError(
+                "Pull request changed; review the new head SHA before requesting revision"
+            )
+        if live_status.state != "open":
+            raise ApprovalConflictError("Pull request is not open")
         repository_id = str((parent.source_context or {}).get("repository_id") or "")
         if not repository_id:
             raise ApprovalConflictError("The original task has no trusted repository id")
+        github = request.app.state.github_client
+        if github is None:
+            raise HTTPException(status_code=503, detail="GitHub integration is not configured")
+        comments = github.list_unresolved_review_comments(
+            repository=str(approval["repository"]), number=int(approval["number"])
+        )
         revision_context = {
             "repository_id": repository_id,
             "revision_pull_request": {
                 "number": int(approval["number"]),
                 "head_branch": str(approval.get("head_branch") or ""),
                 "expected_head_sha": body.expected_head_sha,
+                "review_feedback": _bounded_review_feedback(comments),
             },
         }
         if not revision_context["revision_pull_request"]["head_branch"]:
@@ -473,8 +651,7 @@ def request_pull_request_revision(
         )
         # The child now owns the PR. Retire the old exact-SHA approval so two
         # independently actionable merge gates cannot exist for one branch.
-        service.reject_approval(task_id)
-        request.app.state.workflow_service.sync_for_task(task_id)
+        service.supersede_pull_request_approval(task_id, revision_task_id=task.id)
         return TaskResponse.from_model(task)
     except TaskNotFoundError as error:
         raise HTTPException(status_code=404, detail="Task not found") from error
@@ -482,6 +659,8 @@ def request_pull_request_revision(
         raise HTTPException(status_code=404, detail="Pull request approval not found") from error
     except (ApprovalConflictError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except GitHubError as error:
+        raise HTTPException(status_code=502, detail="GitHub operation failed") from error
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
@@ -651,6 +830,7 @@ def list_repositories(request: Request) -> RepositoryListResponse:
                 base_branch=manifest.base_branch,
                 default=manifest.default,
                 configured=configured,
+                required_checks=list(manifest.required_checks),
             )
         )
     return RepositoryListResponse(repositories=repositories)

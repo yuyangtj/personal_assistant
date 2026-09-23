@@ -80,6 +80,9 @@ class TaskModel(Base):
     parent_task_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    superseded_by_task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     external_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     external_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     claimed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -220,6 +223,35 @@ class MemoryModel(Base):
         String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
     )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class CodingRunModel(Base):
+    __tablename__ = "coding_runs"
+
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    repository_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    github_repository: Mapped[str] = mapped_column(String(255), nullable=False)
+    branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    base_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    phase: Mapped[str] = mapped_column(String(32), nullable=False)
+    commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pull_request_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pull_request_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pull_request_head_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    validation_results: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    runner_attempts: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    report: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now

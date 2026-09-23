@@ -11,6 +11,7 @@ class TaskStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
 
 
 class EventType(StrEnum):
@@ -38,6 +39,12 @@ class EventType(StrEnum):
     TASK_COMPLETED = "TASK_COMPLETED"
     TASK_FAILED = "TASK_FAILED"
     TASK_CANCELLED = "TASK_CANCELLED"
+    TASK_SUPERSEDED = "TASK_SUPERSEDED"
+    REVISION_REQUESTED = "REVISION_REQUESTED"
+    CODING_CHECKPOINT = "CODING_CHECKPOINT"
+    CODING_RECONCILED = "CODING_RECONCILED"
+    WORKER_LEASE_RENEWED = "WORKER_LEASE_RENEWED"
+    TASK_RECOVERED = "TASK_RECOVERED"
 
 
 class ExecutionStatus(StrEnum):

@@ -26,8 +26,11 @@ one idempotent task requiring `coding` and `pull_request_creation`, fixed to the
 repository in the approved input. Its workflow stage is synchronized from persisted task
 state: execution maps to `implement`, validation to `validate`, PR approval to `review`,
 and a completed merge to `merge`. While at `review`, marking a draft ready and approving
-its merge remain two distinct, separately audited actions. Repository onboarding and deployment remain proposal-
-only until their narrower executors and rollback rules are implemented.
+its merge remain two distinct, separately audited actions gated by exact-SHA CI results.
+An explicitly authorized revision supersedes the previous task, transfers the workflow to
+a child task on the same PR branch, and loops the run back through implement, validate,
+CI, and review. Repository onboarding and deployment remain proposal-only until their
+narrower executors and rollback rules are implemented.
 
 Create a proposal:
 

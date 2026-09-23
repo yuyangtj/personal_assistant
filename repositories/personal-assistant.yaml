@@ -9,5 +9,7 @@ path_env: ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH
 base_branch: main
 remote: origin
 validation_profile: personal-assistant
+required_checks:
+  - backend
 enabled: true
 default: true

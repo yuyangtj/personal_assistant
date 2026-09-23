@@ -11,6 +11,7 @@ from app.domain.enums import EventType, TaskStatus
 from app.persistence.models import (
     ChatMessageModel,
     ChatSessionModel,
+    ExecutionModel,
     TaskEventModel,
     TaskModel,
     utc_now,
@@ -153,16 +154,32 @@ class TaskRepository:
         *,
         worker_id: str,
         lease_seconds: int,
+        supports_coding: bool = True,
+        coding_only: bool = False,
     ) -> TaskModel | None:
-        task = session.scalar(
-            select(TaskModel)
-            .where(
-                TaskModel.status == TaskStatus.CREATED.value,
-                TaskModel.cancel_requested.is_(False),
+        candidates = list(
+            session.scalars(
+                select(TaskModel)
+                .where(
+                    TaskModel.status == TaskStatus.CREATED.value,
+                    TaskModel.cancel_requested.is_(False),
+                )
+                .order_by(TaskModel.created_at)
+                .limit(100)
+                .with_for_update(skip_locked=True)
             )
-            .order_by(TaskModel.created_at)
-            .limit(1)
-            .with_for_update(skip_locked=True)
+        )
+        task = next(
+            (
+                candidate
+                for candidate in candidates
+                if (
+                    TaskRepository._is_coding_task(candidate)
+                    if coding_only
+                    else supports_coding or not TaskRepository._is_coding_task(candidate)
+                )
+            ),
+            None,
         )
         if task is None:
             return None
@@ -177,3 +194,59 @@ class TaskRepository:
             {"worker_id": worker_id},
         )
         return task
+
+    @staticmethod
+    def _is_coding_task(task: TaskModel) -> bool:
+        capabilities = set(task.required_capabilities or [])
+        return bool(
+            capabilities.intersection({"coding", "pull_request_creation", "coding-pull-request"})
+            or (task.source_context or {}).get("repository_id")
+        )
+
+    @staticmethod
+    def recover_expired(session: Session, *, now: datetime) -> list[str]:
+        tasks = list(
+            session.scalars(
+                select(TaskModel)
+                .where(
+                    TaskModel.status.in_(
+                        [
+                            TaskStatus.PLANNING.value,
+                            TaskStatus.EXECUTING.value,
+                            TaskStatus.VALIDATING.value,
+                        ]
+                    ),
+                    TaskModel.lease_expires_at.is_not(None),
+                    TaskModel.lease_expires_at < now,
+                    TaskModel.cancel_requested.is_(False),
+                )
+                .with_for_update(skip_locked=True)
+            )
+        )
+        for task in tasks:
+            previous = task.status
+            for execution in session.scalars(
+                select(ExecutionModel).where(
+                    ExecutionModel.task_id == task.id,
+                    ExecutionModel.status == "running",
+                )
+            ):
+                execution.status = "failed"
+                execution.error = "Worker lease expired; execution will be reconciled"
+                execution.completed_at = now
+            task.status = TaskStatus.CREATED.value
+            task.claimed_by = None
+            task.lease_expires_at = None
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.TASK_RECOVERED,
+                {"previous_status": previous, "reason": "worker_lease_expired"},
+            )
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.EXECUTION_RETRIED,
+                {"reason": "worker_lease_expired", "reconcile_checkpoint": True},
+            )
+        return [task.id for task in tasks]

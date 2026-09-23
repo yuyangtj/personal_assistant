@@ -132,10 +132,17 @@ function clearError() { $("error").textContent = ""; }
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const label = (s) => String(s || "").replace(/_/g, " ");
-const active = (t) => !["completed", "failed", "cancelled"].includes(t.status);
+const active = (t) => !["completed", "failed", "cancelled", "superseded"].includes(t.status);
 
 async function pendingApproval(taskId) {
   const res = await fetch(`/tasks/${taskId}/pending-approval`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+async function pullRequestStatus(taskId) {
+  const res = await fetch(`/tasks/${taskId}/pull-request-status`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
@@ -294,6 +301,11 @@ async function renderTask(id) {
       api(`/tasks/${id}`), api(`/tasks/${id}/context`), api(`/tasks/${id}/events`),
       pendingApproval(id),
     ]);
+    const prStatus = approval ? await pullRequestStatus(id) : null;
+    const ciReady = prStatus && prStatus.head_matches
+      && prStatus.state === "open" && prStatus.required_checks_state === "passed"
+      && prStatus.mergeable === true;
+    const revisionReady = prStatus && prStatus.head_matches && prStatus.state === "open";
     $("task-detail").innerHTML = `
       <dl class="kv">
         <dt>Status</dt><dd>${esc(label(task.status))}</dd>
@@ -303,11 +315,18 @@ async function renderTask(id) {
         <dt>Repository</dt><dd>${esc(task.source_context.repository_id || "—")}</dd>
         <dt>Origin msg</dt><dd>${task.origin_message_id ? esc(task.origin_message_id.slice(0, 8)) : "—"}</dd>
         <dt>Parent</dt><dd>${task.parent_task_id ? esc(task.parent_task_id.slice(0, 8)) : "—"}</dd>
+        <dt>Superseded by</dt><dd>${task.superseded_by_task_id ? esc(task.superseded_by_task_id.slice(0, 8)) : "—"}</dd>
         ${approval ? `<dt>Pull request</dt><dd><a href="${esc(approval.url)}" target="_blank" rel="noreferrer">#${esc(approval.number)}</a> · ${approval.draft ? "draft" : "ready for review"}</dd>` : ""}
+        ${prStatus ? `<dt>Required CI</dt><dd>${esc(label(prStatus.required_checks_state))}</dd>
+          <dt>Review threads</dt><dd>${esc(prStatus.unresolved_thread_count)}</dd>` : ""}
       </dl>
+      ${prStatus ? `<div class="sub">${prStatus.checks.map((check) =>
+        `${esc(check.name)}: ${esc(check.conclusion || check.status)}${check.required ? " (required)" : ""}`
+      ).join(" · ") || "No GitHub checks reported."}</div>` : ""}
       <div class="row" style="margin-top:10px">
-        ${approval && approval.draft ? `<button id="mark-ready">Mark ready for review</button>` : ""}
-        ${approval && approval.head_branch ? `<button class="quiet" id="request-revision">Request revision</button>` : ""}
+        ${approval && approval.draft ? `<button id="mark-ready" ${ciReady ? "" : "disabled"}>Mark ready for review</button>` : ""}
+        ${approval && !approval.draft ? `<button id="approve-merge" ${ciReady ? "" : "disabled"}>Approve and merge</button>` : ""}
+        ${approval && approval.head_branch ? `<button class="quiet" id="request-revision" ${revisionReady ? "" : "disabled"}>Request revision</button>` : ""}
         ${active(task) ? `<button class="quiet" id="cancel-task">Cancel</button>` : ""}
         <button class="ghost" id="discuss">Discuss in chat</button></div>
       <h2>Curated context</h2>
@@ -359,6 +378,27 @@ async function renderTask(id) {
         });
         await refreshTranscript();
         await renderTask(task.id);
+      } catch (e) { fail(e); }
+    };
+    const approveMerge = $("approve-merge");
+    if (approveMerge) approveMerge.onclick = async () => {
+      const token = window.prompt("Enter the separate assistant approval token");
+      if (!token) return;
+      try {
+        await api(`/tasks/${id}/pull-request-approval`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "X-Assistant-Approval-Token": token,
+          },
+          body: JSON.stringify({
+            decision: "approve",
+            expected_head_sha: approval.expected_head_sha,
+            merge_method: "squash",
+          }),
+        });
+        await refreshTranscript();
+        await renderTask(id);
       } catch (e) { fail(e); }
     };
     $("discuss").onclick = async () => {

@@ -1,7 +1,13 @@
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.integrations.github import GitHubMergeResult, GitHubPullRequest
+from app.integrations.github import (
+    GitHubCheckRun,
+    GitHubMergeResult,
+    GitHubPullRequest,
+    GitHubReviewComment,
+)
 from app.integrations.speech import SpeechAudio
 from app.persistence.models import ExecutionModel, TaskModel
 
@@ -459,6 +465,7 @@ def _pending_pull_request_task(client: TestClient, *, draft: bool = False) -> tu
     task = service.create_task(
         request="Implement a reviewed change",
         required_capabilities=["pull_request_creation"],
+        source_context={"repository_id": "personal-assistant"},
     )
     service.claim_next_task(worker_id="test-worker", lease_seconds=30)
     execution_id = service.start_execution(
@@ -475,9 +482,10 @@ def _pending_pull_request_task(client: TestClient, *, draft: bool = False) -> tu
         artifacts=[{"type": "github_pull_request", "number": 17}],
         approval={
             "type": "github_pull_request_merge",
-            "repository": "acme/widget",
+            "repository": "yuyangtj/personal_assistant",
             "number": 17,
-            "url": "https://github.com/acme/widget/pull/17",
+            "url": "https://github.com/yuyangtj/personal_assistant/pull/17",
+            "head_branch": "assistant/task-123",
             "expected_head_sha": "a" * 40,
             "draft": draft,
         },
@@ -500,9 +508,10 @@ def test_get_pending_approval_returns_latest_typed_payload(client: TestClient) -
     assert response.status_code == 200
     assert response.json() == {
         "type": "github_pull_request_merge",
-        "repository": "acme/widget",
+        "repository": "yuyangtj/personal_assistant",
         "number": 17,
-        "url": "https://github.com/acme/widget/pull/17",
+        "url": "https://github.com/yuyangtj/personal_assistant/pull/17",
+        "head_branch": "assistant/task-123",
         "expected_head_sha": "d" * 40,
         "draft": False,
         "execution_id": execution_id,
@@ -525,16 +534,20 @@ def test_pull_request_merge_requires_reviewed_sha_and_completes_task(
     class GitHub:
         def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
             return GitHubPullRequest(
-                repository="acme/widget",
+                repository="yuyangtj/personal_assistant",
                 number=17,
-                url="https://github.com/acme/widget/pull/17",
+                url="https://github.com/yuyangtj/personal_assistant/pull/17",
                 head_branch="assistant/task-123",
                 head_sha="a" * 40,
                 base_branch="main",
                 state="open",
                 draft=False,
                 merged=False,
+                mergeable=True,
             )
+
+        def list_check_runs(self, **_kwargs):
+            return (GitHubCheckRun("backend", "completed", "success", None),)
 
         def merge_pull_request(self, **kwargs) -> GitHubMergeResult:
             assert kwargs["expected_head_sha"] == "a" * 40
@@ -602,9 +615,9 @@ def test_pull_request_merge_refreshes_approval_when_remote_head_changed(
     class GitHub:
         def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
             return GitHubPullRequest(
-                repository="acme/widget",
+                repository="yuyangtj/personal_assistant",
                 number=17,
-                url="https://github.com/acme/widget/pull/17",
+                url="https://github.com/yuyangtj/personal_assistant/pull/17",
                 head_branch="assistant/task-123",
                 head_sha="d" * 40,
                 base_branch="main",
@@ -612,6 +625,9 @@ def test_pull_request_merge_refreshes_approval_when_remote_head_changed(
                 draft=False,
                 merged=False,
             )
+
+        def list_check_runs(self, **_kwargs):
+            return (GitHubCheckRun("backend", "completed", "success", None),)
 
         def merge_pull_request(self, **_kwargs):
             raise AssertionError("A changed pull request must require fresh approval")
@@ -637,16 +653,20 @@ def test_pull_request_merge_refuses_draft_and_reopens_approval(client: TestClien
     class GitHub:
         def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
             return GitHubPullRequest(
-                repository="acme/widget",
+                repository="yuyangtj/personal_assistant",
                 number=17,
-                url="https://github.com/acme/widget/pull/17",
+                url="https://github.com/yuyangtj/personal_assistant/pull/17",
                 head_branch="assistant/task-123",
                 head_sha="a" * 40,
                 base_branch="main",
                 state="open",
                 draft=True,
                 merged=False,
+                mergeable=True,
             )
+
+        def list_check_runs(self, **_kwargs):
+            return (GitHubCheckRun("backend", "completed", "success", None),)
 
         def merge_pull_request(self, **_kwargs):
             raise AssertionError("Draft pull requests must not be merged")
@@ -673,9 +693,9 @@ def test_mark_pull_request_ready_verifies_head_and_refreshes_approval(
         def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
             calls.append("get")
             return GitHubPullRequest(
-                repository="acme/widget",
+                repository="yuyangtj/personal_assistant",
                 number=17,
-                url="https://github.com/acme/widget/pull/17",
+                url="https://github.com/yuyangtj/personal_assistant/pull/17",
                 head_branch="assistant/task-123",
                 head_sha="a" * 40,
                 base_branch="main",
@@ -683,7 +703,11 @@ def test_mark_pull_request_ready_verifies_head_and_refreshes_approval(
                 draft=True,
                 merged=False,
                 node_id="PR_kwDOExample",
+                mergeable=True,
             )
+
+        def list_check_runs(self, **_kwargs):
+            return (GitHubCheckRun("backend", "completed", "success", None),)
 
         def mark_pull_request_ready_for_review(self, **kwargs) -> bool:
             calls.append("ready")
@@ -700,7 +724,7 @@ def test_mark_pull_request_ready_verifies_head_and_refreshes_approval(
     assert response.status_code == 200
     assert response.json()["draft"] is False
     assert response.json()["reason"] == "Pull request is ready for human review"
-    assert calls == ["get", "ready"]
+    assert calls == ["get", "get", "ready"]
     assert client.get(f"/tasks/{task_id}").json()["status"] == "waiting_for_approval"
     events = client.get(f"/tasks/{task_id}/events").json()["events"]
     operations = [
@@ -712,6 +736,69 @@ def test_mark_pull_request_ready_verifies_head_and_refreshes_approval(
         "mark_pull_request_ready_for_review",
         "mark_pull_request_ready_for_review",
     ]
+
+
+def test_pull_request_status_and_revision_use_only_unresolved_feedback(
+    client: TestClient,
+) -> None:
+    task_id, _ = _pending_pull_request_task(client, draft=True)
+    workflow = client.app.state.workflow_service.create_run(
+        workflow_id="coding-change",
+        workflow_input={
+            "repository_id": "personal-assistant",
+            "request": "Implement a reviewed change",
+        },
+    )
+    client.app.state.workflow_service.decide(workflow.id, approve=True)
+    client.app.state.workflow_service.attach_coding_task(workflow.id, task_id=task_id)
+
+    class GitHub:
+        def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
+            return GitHubPullRequest(
+                repository="yuyangtj/personal_assistant",
+                number=17,
+                url="https://github.com/yuyangtj/personal_assistant/pull/17",
+                head_branch="assistant/task-123",
+                head_sha="a" * 40,
+                base_branch="main",
+                state="open",
+                draft=True,
+                merged=False,
+                mergeable=True,
+            )
+
+        def list_check_runs(self, **_kwargs):
+            return (GitHubCheckRun("backend", "completed", "success", None),)
+
+        def list_unresolved_review_comments(self, **_kwargs):
+            return (
+                GitHubReviewComment(
+                    author="reviewer",
+                    body="Add a recovery assertion",
+                    path="tests/test_coding.py",
+                    line=10,
+                    url="https://example.test/comment",
+                ),
+            )
+
+    client.app.state.github_client = GitHub()
+    live = client.get(f"/tasks/{task_id}/pull-request-status")
+    assert live.status_code == 200
+    assert live.json()["required_checks_state"] == "passed"
+    assert live.json()["unresolved_thread_count"] == 1
+
+    revision = client.post(
+        f"/tasks/{task_id}/pull-request-revision",
+        headers={"X-Assistant-Approval-Token": "approval-secret"},
+        json={"instructions": "Please address the review", "expected_head_sha": "a" * 40},
+    )
+    assert revision.status_code == 201
+    assert client.get(f"/tasks/{task_id}").json()["status"] == "superseded"
+    transferred = client.get(f"/workflow-runs/{workflow.id}").json()
+    assert transferred["task_id"] == revision.json()["id"]
+    assert transferred["current_stage"] == "implement"
+    feedback = revision.json()["source_context"]["revision_pull_request"]["review_feedback"]
+    assert feedback[0]["body"] == "Add a recovery assertion"
 
 
 def test_mark_pull_request_ready_rejects_unreviewed_sha_without_github_call(
@@ -731,6 +818,108 @@ def test_mark_pull_request_ready_rejects_unreviewed_sha_without_github_call(
     )
 
     assert response.status_code == 409
+
+
+def test_mark_pull_request_ready_blocks_missing_required_ci(client: TestClient) -> None:
+    task_id, _ = _pending_pull_request_task(client, draft=True)
+
+    class GitHub:
+        def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
+            return GitHubPullRequest(
+                repository="yuyangtj/personal_assistant",
+                number=17,
+                url="https://github.com/yuyangtj/personal_assistant/pull/17",
+                head_branch="assistant/task-123",
+                head_sha="a" * 40,
+                base_branch="main",
+                state="open",
+                draft=True,
+                merged=False,
+                mergeable=True,
+            )
+
+        def list_check_runs(self, **_kwargs):
+            return ()
+
+        def mark_pull_request_ready_for_review(self, **_kwargs):
+            raise AssertionError("Missing required CI must block the trusted action")
+
+    client.app.state.github_client = GitHub()
+    response = client.post(
+        f"/tasks/{task_id}/pull-request-ready",
+        headers={"X-Assistant-Approval-Token": "approval-secret"},
+        json={"expected_head_sha": "a" * 40},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Required GitHub checks are missing"
+
+
+@pytest.mark.parametrize("operation,draft", [("ready", True), ("approval", False)])
+@pytest.mark.parametrize(
+    ("state", "mergeable", "check", "expected_detail"),
+    [
+        ("closed", True, ("completed", "success"), "not open"),
+        ("open", False, ("completed", "success"), "not confirmed mergeable"),
+        ("open", True, ("in_progress", None), "checks are pending"),
+        ("open", True, ("completed", "failure"), "checks are failed"),
+    ],
+)
+def test_trusted_pull_request_actions_reject_unsafe_live_state(
+    client: TestClient,
+    operation: str,
+    draft: bool,
+    state: str,
+    mergeable: bool,
+    check: tuple[str, str | None],
+    expected_detail: str,
+) -> None:
+    task_id, _ = _pending_pull_request_task(client, draft=draft)
+
+    class GitHub:
+        def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
+            return GitHubPullRequest(
+                repository="yuyangtj/personal_assistant",
+                number=17,
+                url="https://github.com/yuyangtj/personal_assistant/pull/17",
+                head_branch="assistant/task-123",
+                head_sha="a" * 40,
+                base_branch="main",
+                state=state,
+                draft=draft,
+                merged=False,
+                mergeable=mergeable,
+                node_id="PR_kwDOExample",
+            )
+
+        def list_check_runs(self, **_kwargs):
+            return (GitHubCheckRun("backend", check[0], check[1], None),)
+
+        def mark_pull_request_ready_for_review(self, **_kwargs):
+            raise AssertionError("Unsafe ready-for-review action must not reach GitHub")
+
+        def merge_pull_request(self, **_kwargs):
+            raise AssertionError("Unsafe merge action must not reach GitHub")
+
+    client.app.state.github_client = GitHub()
+    path = (
+        f"/tasks/{task_id}/pull-request-ready"
+        if operation == "ready"
+        else f"/tasks/{task_id}/pull-request-approval"
+    )
+    body = (
+        {"expected_head_sha": "a" * 40}
+        if operation == "ready"
+        else {"decision": "approve", "expected_head_sha": "a" * 40}
+    )
+    response = client.post(
+        path,
+        headers={"X-Assistant-Approval-Token": "approval-secret"},
+        json=body,
+    )
+
+    assert response.status_code == 409
+    assert expected_detail in response.json()["detail"]
 
 
 def test_pull_request_rejection_leaves_pr_unmerged_and_cancels_task(

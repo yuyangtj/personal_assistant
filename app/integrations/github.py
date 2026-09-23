@@ -24,6 +24,24 @@ class GitHubPullRequest:
     merged: bool
     merge_commit_sha: str | None = None
     node_id: str | None = None
+    mergeable: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GitHubCheckRun:
+    name: str
+    status: str
+    conclusion: str | None
+    url: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class GitHubReviewComment:
+    author: str
+    body: str
+    path: str | None
+    line: int | None
+    url: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +97,114 @@ class GitHubClient:
         owner, name = _repository_parts(repository)
         response = self._request("GET", f"/repos/{owner}/{name}/pulls/{number}")
         return _pull_request_from_json(repository, response)
+
+    def find_open_pull_request(
+        self, *, repository: str, head_branch: str
+    ) -> GitHubPullRequest | None:
+        owner, name = _repository_parts(repository)
+        response = self._request_list(
+            "GET",
+            f"/repos/{owner}/{name}/pulls",
+            params={"state": "open", "head": f"{owner}:{head_branch}", "per_page": 2},
+        )
+        if len(response) > 1:
+            raise GitHubError("GitHub returned multiple open pull requests for the branch")
+        return _pull_request_from_json(repository, response[0]) if response else None
+
+    def list_check_runs(self, *, repository: str, commit_sha: str) -> tuple[GitHubCheckRun, ...]:
+        owner, name = _repository_parts(repository)
+        checks: list[GitHubCheckRun] = []
+        page = 1
+        while True:
+            response = self._request(
+                "GET",
+                f"/repos/{owner}/{name}/commits/{commit_sha}/check-runs",
+                params={"per_page": 100, "page": page},
+            )
+            raw_runs = response.get("check_runs")
+            if not isinstance(raw_runs, list):
+                raise GitHubError("GitHub returned an unexpected check-runs response")
+            for raw in raw_runs:
+                if not isinstance(raw, dict) or not isinstance(raw.get("name"), str):
+                    raise GitHubError("GitHub returned an invalid check run")
+                checks.append(
+                    GitHubCheckRun(
+                        name=raw["name"],
+                        status=str(raw.get("status") or "unknown"),
+                        conclusion=(
+                            raw.get("conclusion")
+                            if isinstance(raw.get("conclusion"), str)
+                            else None
+                        ),
+                        url=(raw.get("html_url") if isinstance(raw.get("html_url"), str) else None),
+                    )
+                )
+            if len(raw_runs) < 100:
+                break
+            page += 1
+            if page > 20:
+                raise GitHubError("GitHub check-run pagination limit exceeded")
+        return tuple(checks)
+
+    def list_unresolved_review_comments(
+        self, *, repository: str, number: int
+    ) -> tuple[GitHubReviewComment, ...]:
+        owner, name = _repository_parts(repository)
+        comments: list[GitHubReviewComment] = []
+        cursor: str | None = None
+        for _page in range(20):
+            response = self._request(
+                "POST",
+                "/graphql",
+                json={
+                    "query": _REVIEW_THREADS_QUERY,
+                    "variables": {
+                        "owner": owner,
+                        "name": name,
+                        "number": number,
+                        "cursor": cursor,
+                    },
+                },
+            )
+            if response.get("errors"):
+                raise GitHubError("GitHub rejected the review-thread query")
+            try:
+                threads = response["data"]["repository"]["pullRequest"]["reviewThreads"]
+                nodes = threads["nodes"]
+                page_info = threads["pageInfo"]
+                if not isinstance(nodes, list) or not isinstance(page_info, dict):
+                    raise TypeError
+            except (KeyError, TypeError) as error:
+                raise GitHubError("GitHub returned unexpected review threads") from error
+            for thread in nodes:
+                if not isinstance(thread, dict) or thread.get("isResolved") is True:
+                    continue
+                raw_comments = (thread.get("comments") or {}).get("nodes")
+                if not isinstance(raw_comments, list):
+                    raise GitHubError("GitHub returned invalid review comments")
+                for raw in raw_comments:
+                    if not isinstance(raw, dict) or not isinstance(raw.get("body"), str):
+                        raise GitHubError("GitHub returned an invalid review comment")
+                    author = raw.get("author")
+                    comments.append(
+                        GitHubReviewComment(
+                            author=(
+                                str(author.get("login") or "unknown")
+                                if isinstance(author, dict)
+                                else "unknown"
+                            ),
+                            body=raw["body"][:2000],
+                            path=raw.get("path") if isinstance(raw.get("path"), str) else None,
+                            line=raw.get("line") if isinstance(raw.get("line"), int) else None,
+                            url=raw.get("url") if isinstance(raw.get("url"), str) else None,
+                        )
+                    )
+            if page_info.get("hasNextPage") is not True:
+                return tuple(comments)
+            cursor = page_info.get("endCursor")
+            if not isinstance(cursor, str):
+                raise GitHubError("GitHub omitted the review-thread cursor")
+        raise GitHubError("GitHub review-thread pagination limit exceeded")
 
     def merge_pull_request(
         self,
@@ -139,6 +265,18 @@ class GitHubClient:
         self._client.close()
 
     def _request(self, method: str, path: str, **kwargs: object) -> dict[str, object]:
+        body = self._request_value(method, path, **kwargs)
+        if not isinstance(body, dict):
+            raise GitHubError("GitHub returned an unexpected response shape")
+        return body
+
+    def _request_list(self, method: str, path: str, **kwargs: object) -> list[dict[str, object]]:
+        body = self._request_value(method, path, **kwargs)
+        if not isinstance(body, list) or any(not isinstance(item, dict) for item in body):
+            raise GitHubError("GitHub returned an unexpected response shape")
+        return body
+
+    def _request_value(self, method: str, path: str, **kwargs: object) -> object:
         try:
             response = self._client.request(method, path, **kwargs)
         except httpx.HTTPError as error:
@@ -149,8 +287,6 @@ class GitHubClient:
             body = response.json()
         except ValueError as error:
             raise GitHubError("GitHub returned invalid JSON") from error
-        if not isinstance(body, dict):
-            raise GitHubError("GitHub returned an unexpected response shape")
         return body
 
 
@@ -188,6 +324,26 @@ def _pull_request_from_json(repository: str, body: dict[str, object]) -> GitHubP
                 else None
             ),
             node_id=body.get("node_id") if isinstance(body.get("node_id"), str) else None,
+            mergeable=body.get("mergeable") if isinstance(body.get("mergeable"), bool) else None,
         )
     except (KeyError, TypeError, ValueError) as error:
         raise GitHubError("GitHub returned an unexpected pull request shape") from error
+
+
+_REVIEW_THREADS_QUERY = """
+query ReviewThreads($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        nodes {
+          isResolved
+          comments(first: 100) {
+            nodes { author { login } body path line url }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+"""

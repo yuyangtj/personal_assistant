@@ -17,6 +17,7 @@ class RepositoryManifest(BaseModel):
     base_branch: str = "main"
     remote: str = "origin"
     validation_profile: str
+    required_checks: tuple[str, ...] = ()
     enabled: bool = True
     default: bool = False
 
@@ -33,4 +34,12 @@ class RepositoryManifest(BaseModel):
         normalized = tuple(alias.strip().lower() for alias in values if alias.strip())
         if len(set(normalized)) != len(normalized):
             raise ValueError("repository aliases must be unique")
+        return normalized
+
+    @field_validator("required_checks")
+    @classmethod
+    def checks_are_unique(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(value.strip() for value in values if value.strip())
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("required checks must be unique")
         return normalized

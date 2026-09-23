@@ -214,8 +214,8 @@ Docker Compose backend.
 There is no Slack or general tool integration yet. Kimi or MiniMax can independently
 provide conversational execution and manager analysis. Manager analysis is opt-in; the
 production worker keeps deterministic routing by default. The coding adapter is opt-in,
-targets one operator-configured repository, and can try Kimi Code, Claude Code backed by
-MiniMax, and Codex in a configured order.
+targets only operator-registered repositories, and can try Kimi Code, Claude Code backed
+by MiniMax, and Codex in a configured order.
 
 ## Coding agent and GitHub review workflow
 
@@ -224,13 +224,17 @@ the configured base branch, creates an isolated worktree and `assistant/task-...
 runs the first available configured coding runner, validates and commits the result, pushes the
 branch, and opens a draft pull request. The task then pauses in `waiting_for_approval`.
 Quota and rate-limit failures fall back to the next runner after restoring the disposable
-worktree to its clean starting commit.
+worktree to its clean starting commit. Durable phase checkpoints and worker leases let an
+interrupted run reconcile its branch and PR without repeating completed publication steps.
 
-Merge is intentionally not a manager capability. After human review and marking the PR
-ready, `POST /tasks/{task_id}/pull-request-approval` requires the exact reviewed head SHA
-and a separate `X-Assistant-Approval-Token`, then asks GitHub to merge. A changed SHA,
-draft PR, closed PR, failed protection rule, or missing credential leaves the task
-unmerged. Configuration and examples are in
+Merge is intentionally not a manager capability. After human review,
+`GET /tasks/{task_id}/pull-request-status` reports live checks for the exact head. Both
+ready-for-review and `POST /tasks/{task_id}/pull-request-approval` require every
+manifest-declared check to pass. Merge approval also requires the exact reviewed head SHA
+and a separate `X-Assistant-Approval-Token`. A changed SHA, draft or closed PR, merge
+conflict, failed/missing check, or missing credential leaves the task unmerged. Explicit
+revisions supersede the old approval task, reuse the PR branch, and require a fresh
+exact-SHA approval. Configuration and examples are in
 [`docs/coding-pull-request-workflow.md`](docs/coding-pull-request-workflow.md).
 
 ## Optional manager-model analysis

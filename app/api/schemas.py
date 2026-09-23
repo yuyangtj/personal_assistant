@@ -123,6 +123,7 @@ class TaskContextResponse(BaseModel):
     chat_session_id: str | None
     origin_message_id: str | None
     parent_task_id: str | None
+    superseded_by_task_id: str | None = None
     final_answer: str | None
     summary: str | None
     validation: str
@@ -130,6 +131,7 @@ class TaskContextResponse(BaseModel):
     error: str | None
     created_at: datetime | None
     updated_at: datetime | None
+    coding_checkpoint: dict[str, Any] | None = None
 
 
 class SpeechRequest(BaseModel):
@@ -173,6 +175,29 @@ class PendingApprovalResponse(BaseModel):
     reason: str | None = None
 
 
+class PullRequestCheckResponse(BaseModel):
+    name: str
+    status: str
+    conclusion: str | None
+    url: str | None
+    required: bool
+
+
+class PullRequestStatusResponse(BaseModel):
+    repository: str
+    number: int
+    url: str
+    expected_head_sha: str
+    current_head_sha: str
+    head_matches: bool
+    state: str
+    draft: bool
+    mergeable: bool | None
+    required_checks_state: Literal["passed", "pending", "failed", "missing"]
+    checks: list[PullRequestCheckResponse]
+    unresolved_thread_count: int
+
+
 class TaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -186,6 +211,7 @@ class TaskResponse(BaseModel):
     chat_session_id: str | None
     origin_message_id: str | None
     parent_task_id: str | None
+    superseded_by_task_id: str | None
     claimed_by: str | None
     version: int
     created_at: datetime
@@ -249,6 +275,7 @@ class RepositoryResponse(BaseModel):
     base_branch: str
     default: bool
     configured: bool
+    required_checks: list[str]
 
 
 class RepositoryListResponse(BaseModel):
