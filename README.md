@@ -227,6 +227,19 @@ Quota and rate-limit failures fall back to the next runner after restoring the d
 worktree to its clean starting commit. Durable phase checkpoints and worker leases let an
 interrupted run reconcile its branch and PR without repeating completed publication steps.
 
+Local Compose keeps coding execution opt-in. The normal `docker compose up` starts only
+chat and non-coding work. To test an approved coding workflow locally, export the Kimi,
+MiniMax, and GitHub credentials, then start the isolated coding profile:
+
+```bash
+docker compose --profile coding up -d --build coding-worker
+```
+
+By default it mounts this checkout as the registered `personal-assistant` repository and
+uses `.coding-worktrees/` for disposable task worktrees. Override
+`ASSISTANT_HOST_REPOSITORY_PERSONAL_ASSISTANT_PATH` when the trusted checkout lives
+elsewhere. Coding tasks remain queued when this profile is not running.
+
 Merge is intentionally not a manager capability. After human review,
 `GET /tasks/{task_id}/pull-request-status` reports live checks for the exact head. Both
 ready-for-review and `POST /tasks/{task_id}/pull-request-approval` require every

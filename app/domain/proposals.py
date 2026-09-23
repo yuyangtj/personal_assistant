@@ -81,7 +81,24 @@ CONSEQUENTIAL_TERMS = frozenset(
     }
 )
 
-CODING_TERMS = CONSEQUENTIAL_TERMS - {"deploy", "production", "release", "rollback"}
+CODING_TERMS = (CONSEQUENTIAL_TERMS - {"deploy", "production", "release", "rollback"}) | {
+    "api",
+    "app",
+    "backend",
+    "bug",
+    "button",
+    "class",
+    "component",
+    "css",
+    "feature",
+    "frontend",
+    "function",
+    "html",
+    "javascript",
+    "python",
+    "theme",
+    "ui",
+}
 
 _OPENERS = (
     "can you",
@@ -153,7 +170,7 @@ def propose_task(content: str) -> TaskProposal | None:
         return None
 
     vocabulary = set(words)
-    consequential = bool(vocabulary & CONSEQUENTIAL_TERMS)
+    consequential = bool(vocabulary & (CONSEQUENTIAL_TERMS | CODING_TERMS))
     capabilities = ["coding"] if vocabulary & CODING_TERMS else []
     goal = (
         normalized

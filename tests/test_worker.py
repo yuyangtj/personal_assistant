@@ -86,6 +86,7 @@ def test_coding_only_worker_skips_regular_task(service: TaskService) -> None:
     regular = service.create_task(request="Say hello")
     coding = service.create_task(
         request="Implement a feature",
+        required_capabilities=["coding", "pull_request_creation"],
         source_context={"repository_id": "personal-assistant"},
     )
 
@@ -99,6 +100,34 @@ def test_coding_only_worker_skips_regular_task(service: TaskService) -> None:
     assert claimed is not None
     assert claimed.id == coding.id
     assert service.get_task(regular.id).status == TaskStatus.CREATED.value
+
+
+def test_workers_quarantine_repository_task_without_coding_capability(
+    service: TaskService,
+) -> None:
+    malformed = service.create_task(
+        request="Implement a feature",
+        source_context={"repository_id": "personal-assistant"},
+    )
+
+    assert (
+        service.claim_next_task(
+            worker_id="conversation-worker",
+            lease_seconds=30,
+            supports_coding=False,
+        )
+        is None
+    )
+    assert (
+        service.claim_next_task(
+            worker_id="coding-worker",
+            lease_seconds=30,
+            supports_coding=True,
+            coding_only=True,
+        )
+        is None
+    )
+    assert service.get_task(malformed.id).status == TaskStatus.CREATED.value
 
 
 def test_coding_worker_preflight_rejects_missing_registered_checkout(tmp_path) -> None:

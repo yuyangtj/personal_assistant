@@ -6,19 +6,19 @@
   :root {
     --bg: #071116; --surface: #102127; --raised: #16303a; --user: #145e5a;
     --accent: #49d9c6; --text: #e6f1f2; --muted: #9fb4b8;
-    --danger: #ff8e86; --warn: #ffc46b;
+    --danger: #ff8e86; --warn: #ffc46b; --success: #65dfb5;
+    --border: #23404b; --panel: #0b181d; --shadow: 0 18px 60px #0009;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    height: 100vh; display: grid; grid-template-columns: 260px 1fr 340px;
+    height: 100dvh; display: grid; grid-template-columns: 270px minmax(0, 1fr) 420px;
+    overflow: hidden;
   }
-  @media (max-width: 900px) { body { grid-template-columns: 1fr; height: auto; } }
-  aside, main, section.detail { height: 100vh; overflow-y: auto; }
-  @media (max-width: 900px) { aside, main, section.detail { height: auto; max-height: 70vh; } }
-  aside { border-right: 1px solid #1d3540; padding: 14px; }
-  section.detail { border-left: 1px solid #1d3540; padding: 14px; }
+  aside, main, section.detail { min-height: 0; height: 100dvh; overflow-y: auto; }
+  aside { border-right: 1px solid #1d3540; padding: 16px; background: #081419; }
+  section.detail { border-left: 1px solid #1d3540; padding: 18px; background: var(--panel); }
   h1 { font-size: 15px; margin: 0 0 4px; }
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
   .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
@@ -29,14 +29,22 @@
   button.ghost { background: transparent; color: var(--accent); padding: 6px 8px; }
   button.quiet { background: #23404b; color: var(--text); }
   button:disabled { opacity: .45; cursor: not-allowed; }
+  button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .mobile-only { display: none; }
   .chat-item {
+    display: block; width: 100%; text-align: left; color: var(--text); background: transparent;
     padding: 9px 10px; border-radius: 9px; cursor: pointer; margin-bottom: 4px;
     border: 1px solid transparent; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .chat-item:hover { background: var(--surface); }
   .chat-item.active { background: var(--surface); border-color: #2b4d59; }
   .chat-item .when { color: var(--muted); font-size: 11px; }
-  main { display: flex; flex-direction: column; padding: 14px; gap: 10px; }
+  main { display: flex; flex-direction: column; padding: 16px; gap: 10px; min-width: 0; }
+  .main-head { display: flex; gap: 12px; align-items: center; }
+  .repo-control { display: flex; align-items: center; gap: 7px; }
+  .repo-control label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
   #transcript { flex: 1; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
   .msg { max-width: 82%; }
   .msg .who { color: var(--muted); font-size: 11px; letter-spacing: .06em; margin-bottom: 3px; }
@@ -46,6 +54,7 @@
   .msg.system { align-self: center; max-width: 100%; width: 100%; }
   .msg.system .bubble { background: var(--raised); color: var(--muted); font-size: 12.5px; border-radius: 10px; }
   .taskcard {
+    width: 100%; color: var(--text); border: 0; text-align: left;
     margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: #00000033;
     display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12.5px;
   }
@@ -53,6 +62,8 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
   .dot.run { background: var(--warn); animation: pulse 1.1s infinite; }
   .dot.fail { background: var(--danger); }
+  .dot.pass { background: var(--success); }
+  .dot.muted { background: #547078; }
   @keyframes pulse { 50% { opacity: .3; } }
   .grow { flex: 1; }
   .proposal { border: 1px solid #2b4d59; background: var(--raised); border-radius: 12px; padding: 13px; }
@@ -72,6 +83,7 @@
     border-radius: 8px; padding: 6px 8px; font: inherit; max-width: 220px;
   }
   .row { display: flex; gap: 8px; align-items: center; }
+  .row.wrap { flex-wrap: wrap; }
   .kv { display: grid; grid-template-columns: 96px 1fr; gap: 3px 8px; font-size: 12.5px; }
   .kv dt { color: var(--muted); }
   .kv dd { margin: 0; word-break: break-word; }
@@ -83,10 +95,74 @@
   .err { color: var(--danger); font-size: 12.5px; }
   .empty { color: var(--muted); text-align: center; margin-top: 40px; }
   a { color: var(--accent); }
+  .scrim { display: none; position: fixed; inset: 0; background: #0009; z-index: 8; }
+  .scrim.open { display: block; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px;
+    border-radius: 999px; background: #173038; color: var(--muted); font-size: 11px;
+  }
+  .status-pill.pass { background: #123b32; color: var(--success); }
+  .status-pill.warn { background: #3a2c14; color: var(--warn); }
+  .status-pill.fail { background: #452526; color: var(--danger); }
+  .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+  .summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; min-width: 0; }
+  .summary-card .key { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
+  .summary-card .value { margin-top: 2px; font-size: 12.5px; overflow-wrap: anywhere; }
+  .workflow { display: grid; gap: 0; margin: 8px 0 14px; }
+  .workflow-step { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: start; position: relative; padding: 5px 0 9px; }
+  .workflow-step:not(:last-child)::after { content: ""; position: absolute; left: 6px; top: 20px; bottom: -2px; width: 2px; background: var(--border); }
+  .step-dot { width: 14px; height: 14px; margin-top: 2px; border-radius: 50%; border: 2px solid #547078; background: var(--panel); z-index: 1; }
+  .workflow-step.done .step-dot { border-color: var(--success); background: var(--success); }
+  .workflow-step.current .step-dot { border-color: var(--warn); background: var(--warn); box-shadow: 0 0 0 4px #ffc46b22; }
+  .workflow-step.failed .step-dot { border-color: var(--danger); background: var(--danger); }
+  .workflow-step .step-name { font-size: 12.5px; }
+  .workflow-step .step-note { color: var(--muted); font-size: 11px; }
+  .workflow-step .step-state { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+  .panel-card { background: var(--surface); border: 1px solid var(--border); border-radius: 11px; padding: 11px; margin: 8px 0; }
+  .panel-card h3 { margin: 0 0 8px; font-size: 13px; }
+  .check-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid #1d3540; font-size: 12px; }
+  .check-row:first-of-type { border-top: 0; }
+  .check-row .result { color: var(--muted); }
+  .gate-notice { margin: 9px 0; border-radius: 9px; padding: 9px 10px; background: #3a2c14; color: var(--warn); font-size: 12px; }
+  .gate-notice.pass { background: #123b32; color: var(--success); }
+  details { border-top: 1px solid #1d3540; padding: 8px 0; }
+  summary { cursor: pointer; color: var(--text); font-size: 12.5px; }
+  .validation-meta, .attempt { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+  .validation-output { max-height: 180px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .lineage { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+  .link-button { background: transparent; color: var(--accent); padding: 0; text-decoration: underline; border-radius: 2px; }
+  dialog { width: min(520px, calc(100vw - 28px)); border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text); padding: 18px; box-shadow: var(--shadow); }
+  dialog::backdrop { background: #000b; }
+  dialog h2 { color: var(--text); font-size: 16px; text-transform: none; letter-spacing: normal; margin: 0 0 8px; }
+  dialog form { display: block; }
+  dialog label { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; }
+  dialog input, dialog textarea { width: 100%; margin-top: 5px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 9px 10px; font: inherit; }
+  dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+  @media (max-width: 1180px) {
+    body { grid-template-columns: 250px minmax(0, 1fr); }
+    section.detail { position: fixed; z-index: 10; right: 0; top: 0; width: min(460px, 92vw); transform: translateX(105%); transition: transform .2s ease; box-shadow: var(--shadow); }
+    section.detail.open { transform: translateX(0); }
+  }
+  @media (max-width: 720px) {
+    body { display: block; }
+    aside { display: none; position: fixed; inset: 0; z-index: 12; height: 100dvh; border: 0; }
+    aside.open { display: block; }
+    main { height: 100dvh; padding: 12px; }
+    section.detail { width: 100vw; }
+    .mobile-only { display: inline-flex; }
+    .main-head { align-items: flex-start; flex-wrap: wrap; }
+    .main-head h1 { min-width: calc(100% - 70px); }
+    .repo-control { width: 100%; }
+    .repo-control select { flex: 1; max-width: none; }
+    .msg { max-width: 94%; }
+    .summary-grid { grid-template-columns: 1fr 1fr; }
+  }
 </style>
 
 <aside>
-  <h1>Conversations</h1>
+  <div class="row"><h1 class="grow">Conversations</h1>
+    <button class="ghost mobile-only" id="close-chats" aria-label="Close conversations">Close</button></div>
   <div class="sub">Chat is free. Tasks are confirmed.</div>
   <div class="row"><button id="new-chat">New conversation</button>
     <button class="ghost" id="reload-chats">Refresh</button></div>
@@ -94,8 +170,10 @@
 </aside>
 
 <main>
-  <div class="row"><h1 id="chat-title" class="grow">No conversation open</h1>
-    <select id="repository" aria-label="Repository"><option value="">No repository</option></select>
+  <div class="main-head"><button class="ghost mobile-only" id="open-chats">Chats</button>
+    <h1 id="chat-title" class="grow">No conversation open</h1>
+    <div class="repo-control"><label for="repository">Repository</label>
+    <select id="repository"><option value="">No repository</option></select></div>
     <span id="status" class="sub" style="margin:0"></span></div>
   <div id="transcript"><div class="empty">Start or pick a conversation on the left.</div></div>
   <div id="proposal-slot"></div>
@@ -106,15 +184,31 @@
   </form>
 </main>
 
-<section class="detail">
+<div class="scrim" id="detail-scrim"></div>
+<section class="detail" id="task-panel" aria-label="Task details">
   <div class="row"><h1 class="grow">Task</h1><button class="ghost" id="close-task">Close</button></div>
   <div id="task-detail"><div class="sub">Select a task card in the transcript.</div></div>
 </section>
 
+<dialog id="action-dialog" aria-labelledby="action-title">
+  <form id="action-form">
+    <h2 id="action-title">Confirm action</h2>
+    <div id="action-summary" class="sub"></div>
+    <label id="revision-label" for="revision-instructions">Revision instructions</label>
+    <textarea id="revision-instructions" rows="5" placeholder="Describe exactly what should change…"></textarea>
+    <label for="approval-token">Assistant approval token</label>
+    <input id="approval-token" type="password" autocomplete="off" required>
+    <div id="action-error" class="err" role="alert"></div>
+    <div class="actions"><button type="button" class="quiet" id="cancel-action">Cancel</button>
+      <button type="submit" id="confirm-action">Confirm</button></div>
+  </form>
+</dialog>
+
 <script>
 const $ = (id) => document.getElementById(id);
 const state = { chats: [], repositories: [], repositoryId: null, chatId: null, messages: [], tasks: [], proposal: null,
-                proposalFor: null, workflowRun: null, taskId: null, busy: false, timer: null };
+                proposalFor: null, workflowRun: null, taskId: null, busy: false, timer: null,
+                taskTimer: null, prPollAttempts: 0, pendingAction: null };
 
 async function api(path, options) {
   const res = await fetch(path, {
@@ -133,6 +227,15 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const label = (s) => String(s || "").replace(/_/g, " ");
 const active = (t) => !["completed", "failed", "cancelled", "superseded"].includes(t.status);
+const shortSha = (sha) => sha ? String(sha).slice(0, 8) : "—";
+const tone = (value) => {
+  const normalized = String(value || "").toLowerCase();
+  if (["passed", "pass", "success", "succeeded", "completed", "mergeable"].includes(normalized)) return "pass";
+  if (["failed", "failure", "error", "cancelled", "missing", "stale"].includes(normalized)) return "fail";
+  if (["pending", "in_progress", "queued", "waiting", "waiting_for_approval", "draft"].includes(normalized)) return "warn";
+  return "";
+};
+const statusPill = (value, text = label(value)) => `<span class="status-pill ${tone(value)}"><span class="dot ${tone(value) || "muted"}"></span>${esc(text)}</span>`;
 
 async function pendingApproval(taskId) {
   const res = await fetch(`/tasks/${taskId}/pending-approval`);
@@ -152,10 +255,10 @@ async function loadChats() {
   try {
     state.chats = (await api("/chat-sessions")).sessions;
     $("chat-list").innerHTML = state.chats.map((c) => `
-      <div class="chat-item ${c.id === state.chatId ? "active" : ""}" data-chat="${c.id}">
+      <button class="chat-item ${c.id === state.chatId ? "active" : ""}" data-chat="${c.id}" type="button">
         <div>${esc(c.title)}</div>
         <div class="when">${new Date(c.updated_at).toLocaleString()}</div>
-      </div>`).join("") || `<div class="sub">No conversations yet.</div>`;
+      </button>`).join("") || `<div class="sub">No conversations yet.</div>`;
     clearError();
   } catch (e) { fail(e); }
 }
@@ -163,8 +266,6 @@ async function loadChats() {
 async function loadRepositories() {
   try {
     state.repositories = (await api("/repositories")).repositories;
-    const defaultRepository = state.repositories.find((repository) => repository.default);
-    state.repositoryId = state.repositoryId || (defaultRepository ? defaultRepository.id : null);
     $("repository").innerHTML = `<option value="">No repository</option>`
       + state.repositories.map((repository) => `<option value="${esc(repository.id)}"
         ${repository.id === state.repositoryId ? "selected" : ""}>
@@ -174,6 +275,7 @@ async function loadRepositories() {
 
 async function openChat(id) {
   state.chatId = id; state.proposal = null; state.proposalFor = null; state.workflowRun = null;
+  document.querySelector("aside").classList.remove("open");
   await Promise.all([loadChats(), refreshTranscript()]);
 }
 
@@ -189,10 +291,12 @@ async function refreshTranscript() {
     $("chat-title").textContent = chat ? chat.title : "Conversation";
     renderTranscript();
     // Keep polling only while something is actually running.
-    const running = state.tasks.some(active);
-    $("status").textContent = running ? "task running…" : "";
+    const running = state.tasks.some((task) =>
+      ["planning", "executing", "validating"].includes(task.status));
+    const queued = state.tasks.some((task) => task.status === "created");
+    $("status").textContent = running ? "task running…" : queued ? "task queued…" : "";
     clearInterval(state.timer);
-    if (running) state.timer = setInterval(refreshTranscript, 2000);
+    if (running || queued) state.timer = setInterval(refreshTranscript, 2000);
     if (state.taskId) renderTask(state.taskId);
     clearError();
   } catch (e) { fail(e); }
@@ -211,10 +315,10 @@ function renderTranscript() {
       <div class="bubble">${esc(m.content)}
         ${canCreate ? `<div style="margin-top:6px">
           <button class="ghost" data-create="${m.id}">Create task</button></div>` : ""}
-        ${task ? `<div class="taskcard" data-task="${task.id}">
+        ${task ? `<button class="taskcard" data-task="${task.id}" type="button" aria-label="View task: ${esc(label(task.status))}">
           <span class="dot ${active(task) ? "run" : task.status === "failed" ? "fail" : ""}"></span>
           <span class="grow">Task · ${esc(label(task.status))}</span><span>View ›</span>
-        </div>` : ""}
+        </button>` : ""}
       </div></div>`;
   }).join("") || `<div class="empty">No messages yet.</div>`;
   if (atBottom) $("transcript").scrollTop = $("transcript").scrollHeight;
@@ -224,23 +328,36 @@ function renderTranscript() {
 function renderProposal() {
   if (state.workflowRun) {
     const run = state.workflowRun;
+    const proposed = run.status === "proposed";
+    const approved = run.status === "approved";
+    const runningTask = run.task_id;
     $("proposal-slot").innerHTML = `<div class="proposal">
-      <strong>Coding workflow proposed</strong><span class="badge">${esc(run.status)}</span>
-      <div class="why">Run ${esc(run.id.slice(0, 8))} is persisted and waiting for a separately authorized decision.</div>
-      <div class="row" style="margin-top:10px"><button class="quiet" id="dismiss-workflow">Dismiss</button></div></div>`;
+      <strong>Coding workflow</strong><span class="badge">${esc(run.status)}</span>
+      <div class="why">Run ${esc(run.id.slice(0, 8))} ${proposed ? "is waiting for your separate approval before any code runs." : `is at ${esc(label(run.current_stage || run.status))}.`}</div>
+      <div class="row wrap" style="margin-top:10px">
+        ${proposed ? `<button id="approve-workflow">Approve and start</button>` : ""}
+        ${approved ? `<button id="start-workflow">Start workflow</button>` : ""}
+        ${runningTask ? `<button class="quiet" data-task-nav="${esc(runningTask)}">View task</button>` : ""}
+        <button class="ghost" id="dismiss-workflow">Dismiss</button></div></div>`;
+    const approve = $("approve-workflow");
+    if (approve) approve.onclick = () => openActionDialog("workflow", run.id, run);
+    const start = $("start-workflow");
+    if (start) start.onclick = () => startCodingWorkflow(run.id);
     $("dismiss-workflow").onclick = () => { state.workflowRun = null; renderProposal(); };
     return;
   }
   if (!state.proposal) { $("proposal-slot").innerHTML = ""; return; }
   const p = state.proposal;
-  const codingWorkflow = p.consequential && p.required_capabilities.includes("coding");
+  const codingWorkflow = p.required_capabilities.includes("coding") || Boolean(state.repositoryId);
+  const missingRepository = codingWorkflow && !state.repositoryId;
   $("proposal-slot").innerHTML = `<div class="proposal">
     <strong>${codingWorkflow ? "Propose coding workflow?" : "Create a task?"}</strong>${p.consequential ? `<span class="badge">consequential</span>` : ""}
     <div class="why">${esc(p.reason)}</div>
     <div class="goal">${esc(p.suggested_goal)}</div>
     ${p.required_capabilities.length ? `<div class="why">Needs: ${esc(p.required_capabilities.join(", "))}</div>` : ""}
+    ${missingRepository ? `<div class="gate-notice">Select the repository this coding workflow may change.</div>` : ""}
     <div class="row" style="margin-top:10px">
-      <button id="confirm">${codingWorkflow ? "Propose workflow" : "Create task"}</button>
+      <button id="confirm" ${missingRepository ? "disabled" : ""}>${codingWorkflow ? "Propose workflow" : "Create task"}</button>
       <button class="quiet" id="decline">Not now</button></div></div>`;
   $("confirm").onclick = () => codingWorkflow
     ? createCodingWorkflow(state.proposalFor)
@@ -258,7 +375,10 @@ async function send(text) {
     state.proposal = posted.proposal; state.proposalFor = posted.message.id;
     await refreshTranscript();
     // Ordinary conversation runs straight through; consequential work waits for a tap.
-    if (!posted.proposal || !posted.proposal.consequential) {
+    const codingRequested = posted.proposal && (
+      posted.proposal.required_capabilities.includes("coding") || state.repositoryId
+    );
+    if (!posted.proposal || (!posted.proposal.consequential && !codingRequested)) {
       state.proposal = null;
       await createTask(posted.message.id, posted.proposal);
     }
@@ -271,7 +391,6 @@ async function createTask(messageId, proposal) {
   try {
     const body = {
       required_capabilities: proposal ? proposal.required_capabilities : [],
-      repository_id: state.repositoryId,
       source_context: { client: "web-console",
         local_time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     };
@@ -294,112 +413,238 @@ async function createCodingWorkflow(messageId) {
   } catch (e) { fail(e); }
 }
 
+async function startCodingWorkflow(runId) {
+  try {
+    const run = await api(`/workflow-runs/${runId}/start`, { method: "POST", body: "{}" });
+    state.workflowRun = run;
+    await refreshTranscript();
+    if (run.task_id) await renderTask(run.task_id);
+    renderProposal();
+    return run;
+  } catch (error) {
+    fail(error);
+    renderProposal();
+    throw error;
+  }
+}
+
+function openTaskPanel() {
+  const panel = $("task-panel");
+  panel.classList.add("open");
+  panel.inert = false;
+  panel.removeAttribute("aria-hidden");
+  if (window.matchMedia("(max-width: 1180px)").matches) $("detail-scrim").classList.add("open");
+}
+
+function closeTaskPanel() {
+  const panel = $("task-panel");
+  panel.classList.remove("open");
+  $("detail-scrim").classList.remove("open");
+  if (window.matchMedia("(max-width: 1180px)").matches) {
+    panel.inert = true;
+    panel.setAttribute("aria-hidden", "true");
+  }
+}
+
+function syncResponsivePanels() {
+  const panel = $("task-panel");
+  if (window.matchMedia("(max-width: 1180px)").matches && !panel.classList.contains("open")) {
+    panel.inert = true;
+    panel.setAttribute("aria-hidden", "true");
+  } else {
+    panel.inert = false;
+    panel.removeAttribute("aria-hidden");
+  }
+}
+
+function codingWorkflow(ctx, task, prStatus) {
+  const checkpoint = ctx.coding_checkpoint;
+  if (!checkpoint) return "";
+  const phase = checkpoint.phase;
+  const rank = { preparing: 0, agent_running: 1, validated: 2, validation_failed: 2,
+    committed: 3, pushed: 4, pr_created: 5 }[phase] ?? 0;
+  const validationFailed = phase === "validation_failed" || ctx.validation === "failed";
+  const ciState = prStatus ? prStatus.required_checks_state : "waiting";
+  const reviewDone = Boolean(prStatus && !prStatus.draft);
+  const merged = task.status === "completed" && Boolean(checkpoint.pull_request_number);
+  const steps = [
+    { name: "Implement", note: checkpoint.runner_attempts?.length
+      ? `Provider: ${checkpoint.runner_attempts.at(-1).provider}` : "Coding agent", state: rank >= 2 ? "done" : task.status === "failed" ? "failed" : "current" },
+    { name: "Validate", note: ctx.validation || "Not started", state: validationFailed ? "failed" : rank >= 2 ? "done" : rank === 1 ? "current" : "pending" },
+    { name: "Commit", note: shortSha(checkpoint.commit_sha), state: checkpoint.commit_sha ? "done" : rank >= 2 ? "current" : "pending" },
+    { name: "Push", note: checkpoint.branch || "Waiting for commit", state: rank >= 4 ? "done" : rank === 3 ? "current" : "pending" },
+    { name: "Draft PR", note: checkpoint.pull_request_number ? `#${checkpoint.pull_request_number}` : "Not created", state: checkpoint.pull_request_number ? "done" : rank === 4 ? "current" : "pending" },
+    { name: "CI", note: prStatus ? label(ciState) : "Awaiting live PR status", state: ciState === "passed" ? "done" : ciState === "failed" || ciState === "missing" ? "failed" : checkpoint.pull_request_number ? "current" : "pending" },
+    { name: "Review", note: prStatus ? `${prStatus.unresolved_thread_count} unresolved thread${prStatus.unresolved_thread_count === 1 ? "" : "s"}` : "Not ready", state: reviewDone ? "done" : prStatus && ciState === "passed" ? "current" : "pending" },
+    { name: "Merge", note: merged ? "Task completed" : "Requires explicit approval", state: merged ? "done" : reviewDone && ciState === "passed" ? "current" : "pending" },
+  ];
+  return `<h2>Coding progress</h2><div class="workflow">${steps.map((step) => `
+    <div class="workflow-step ${step.state}"><span class="step-dot"></span>
+      <div><div class="step-name">${esc(step.name)}</div><div class="step-note">${esc(step.note)}</div></div>
+      <span class="step-state">${esc(step.state)}</span></div>`).join("")}</div>`;
+}
+
+function validationPanel(ctx) {
+  const checkpoint = ctx.coding_checkpoint;
+  if (!checkpoint) return "";
+  const validations = checkpoint.validation || [];
+  const attempts = checkpoint.runner_attempts || [];
+  return `<h2>Execution evidence</h2>
+    <div class="panel-card"><h3>Agent attempts</h3>
+      ${attempts.map((attempt) => `<div class="attempt">${statusPill(attempt.outcome)}
+        ${esc(attempt.provider || "unknown provider")}${attempt.category ? ` · ${esc(label(attempt.category))}` : ""}</div>`).join("") || `<div class="sub">No provider attempts recorded yet.</div>`}
+    </div>
+    <div class="panel-card"><h3>Local validation</h3>
+      ${validations.map((item) => `<details ${item.passed ? "" : "open"}>
+        <summary>${statusPill(item.passed ? "passed" : "failed")} ${esc(item.id || "Validation step")}</summary>
+        <div class="validation-meta">${item.required ? "Required" : "Optional"} · exit ${esc(item.exit_code ?? "—")} · ${esc(item.duration_ms ?? "—")} ms</div>
+        ${item.output ? `<pre class="validation-output">${esc(item.output)}</pre>` : ""}
+      </details>`).join("") || `<div class="sub">Validation has not produced results yet.</div>`}
+    </div>`;
+}
+
+function pullRequestPanel(prStatus, approval) {
+  if (!prStatus) return "";
+  const checks = prStatus.checks.map((check) => {
+    const result = check.conclusion || check.status;
+    const name = check.url ? `<a href="${esc(check.url)}" target="_blank" rel="noreferrer">${esc(check.name)}</a>` : esc(check.name);
+    return `<div class="check-row"><span class="dot ${tone(result) || "muted"}"></span><span>${name}${check.required ? " · required" : ""}</span><span class="result">${esc(label(result))}</span></div>`;
+  }).join("") || `<div class="sub">No GitHub checks reported.</div>`;
+  return `<h2>Pull request gate</h2><div class="panel-card">
+    <div class="row wrap"><a href="${esc(prStatus.url)}" target="_blank" rel="noreferrer"><strong>${esc(prStatus.repository)} #${esc(prStatus.number)}</strong></a>
+      ${statusPill(prStatus.draft ? "draft" : prStatus.state, prStatus.draft ? "draft" : prStatus.state)}
+      <button type="button" class="ghost" id="refresh-pr-status">Refresh CI</button></div>
+    <div class="summary-grid">
+      <div class="summary-card"><div class="key">Required CI</div><div class="value">${statusPill(prStatus.required_checks_state)}</div></div>
+      <div class="summary-card"><div class="key">Mergeable</div><div class="value">${statusPill(prStatus.mergeable === true ? "mergeable" : prStatus.mergeable === false ? "failed" : "pending", prStatus.mergeable === true ? "yes" : prStatus.mergeable === false ? "no" : "unknown")}</div></div>
+      <div class="summary-card"><div class="key">Expected SHA</div><div class="value">${esc(shortSha(prStatus.expected_head_sha))}</div></div>
+      <div class="summary-card"><div class="key">Current SHA</div><div class="value">${esc(shortSha(prStatus.current_head_sha))} ${prStatus.head_matches ? "" : statusPill("stale", "mismatch")}</div></div>
+    </div>${checks}
+    <div class="sub" style="margin:8px 0 0">${esc(prStatus.unresolved_thread_count)} unresolved review thread${prStatus.unresolved_thread_count === 1 ? "" : "s"}.</div>
+  </div>`;
+}
+
+function gateReason(prStatus, action) {
+  if (!prStatus) return "Live GitHub status is unavailable.";
+  if (!prStatus.head_matches) return "The pull request head no longer matches the approved commit.";
+  if (prStatus.state !== "open") return `The pull request is ${label(prStatus.state)}, not open.`;
+  if (action === "revision") return "";
+  if (prStatus.required_checks_state === "missing") return "A required GitHub check is missing.";
+  if (prStatus.required_checks_state === "pending") return "Required GitHub checks are still running.";
+  if (prStatus.required_checks_state === "failed") return "A required GitHub check failed.";
+  if (prStatus.mergeable !== true) return "GitHub does not currently report this pull request as mergeable.";
+  return "";
+}
+
+function openActionDialog(mode, taskId, approval) {
+  const titles = { workflow: "Approve coding workflow", ready: "Mark pull request ready", revision: "Request a revision", merge: "Approve and merge" };
+  state.pendingAction = { mode, taskId, approval };
+  $("action-title").textContent = titles[mode];
+  $("action-summary").textContent = mode === "workflow"
+    ? `Workflow ${approval.id.slice(0, 8)} will start a coding task in ${approval.input.repository_id}. The agent may edit code, validate it, push a branch, and create a draft pull request.`
+    : `PR #${approval.number} at ${shortSha(approval.expected_head_sha)}. This action is explicitly authorized and recorded.`;
+  const revision = mode === "revision";
+  $("revision-label").hidden = !revision;
+  $("revision-instructions").hidden = !revision;
+  $("revision-instructions").required = revision;
+  $("revision-instructions").value = "";
+  $("approval-token").value = "";
+  $("action-error").textContent = "";
+  $("confirm-action").textContent = mode === "workflow" ? "Approve and start" : mode === "merge" ? "Approve and merge" : mode === "revision" ? "Request revision" : "Mark ready";
+  $("action-dialog").showModal();
+  (revision ? $("revision-instructions") : $("approval-token")).focus();
+}
+
+function closeActionDialog() {
+  state.pendingAction = null;
+  $("action-dialog").close();
+}
+
 async function renderTask(id) {
+  const taskChanged = state.taskId !== id;
   state.taskId = id;
+  clearTimeout(state.taskTimer);
+  state.taskTimer = null;
+  if (taskChanged) state.prPollAttempts = 0;
   try {
     const [task, ctx, events, approval] = await Promise.all([
       api(`/tasks/${id}`), api(`/tasks/${id}/context`), api(`/tasks/${id}/events`),
       pendingApproval(id),
     ]);
-    const prStatus = approval ? await pullRequestStatus(id) : null;
+    let prStatus = null;
+    let prStatusError = null;
+    if (approval) {
+      try { prStatus = await pullRequestStatus(id); }
+      catch (error) { prStatusError = error.message || String(error); }
+    }
     const ciReady = prStatus && prStatus.head_matches
       && prStatus.state === "open" && prStatus.required_checks_state === "passed"
       && prStatus.mergeable === true;
     const revisionReady = prStatus && prStatus.head_matches && prStatus.state === "open";
+    const primaryGate = approval ? gateReason(prStatus, approval.draft ? "ready" : "merge") : "";
+    const repository = task.source_context.repository_id || "No repository";
+    const codingTask = task.required_capabilities.some((capability) =>
+      ["coding", "pull_request_creation", "coding-pull-request"].includes(capability));
+    const malformedRepositoryTask = task.status === "created"
+      && task.source_context.repository_id && !codingTask;
+    const codingQueueNotice = task.status === "created" && codingTask
+      ? "Queued for a coding worker. For local testing, start the Compose coding profile if it is not already running."
+      : "";
+    const lineage = task.parent_task_id || task.superseded_by_task_id ? `<h2>Revision lineage</h2><div class="lineage">
+      ${task.parent_task_id ? `<span>Previous</span><button type="button" class="link-button" data-task-nav="${esc(task.parent_task_id)}">${esc(task.parent_task_id.slice(0, 8))}</button>` : `<span>Original task</span>`}
+      <span>→</span><strong>${esc(task.id.slice(0, 8))}</strong>
+      ${task.superseded_by_task_id ? `<span>→ Active revision</span><button type="button" class="link-button" data-task-nav="${esc(task.superseded_by_task_id)}">${esc(task.superseded_by_task_id.slice(0, 8))}</button>` : ""}
+    </div>` : "";
     $("task-detail").innerHTML = `
-      <dl class="kv">
-        <dt>Status</dt><dd>${esc(label(task.status))}</dd>
-        <dt>Request</dt><dd>${esc(task.original_request)}</dd>
-        <dt>Goal</dt><dd>${esc(task.current_goal)}</dd>
-        <dt>Needs</dt><dd>${esc(task.required_capabilities.join(", ") || "—")}</dd>
-        <dt>Repository</dt><dd>${esc(task.source_context.repository_id || "—")}</dd>
-        <dt>Origin msg</dt><dd>${task.origin_message_id ? esc(task.origin_message_id.slice(0, 8)) : "—"}</dd>
-        <dt>Parent</dt><dd>${task.parent_task_id ? esc(task.parent_task_id.slice(0, 8)) : "—"}</dd>
-        <dt>Superseded by</dt><dd>${task.superseded_by_task_id ? esc(task.superseded_by_task_id.slice(0, 8)) : "—"}</dd>
-        ${approval ? `<dt>Pull request</dt><dd><a href="${esc(approval.url)}" target="_blank" rel="noreferrer">#${esc(approval.number)}</a> · ${approval.draft ? "draft" : "ready for review"}</dd>` : ""}
-        ${prStatus ? `<dt>Required CI</dt><dd>${esc(label(prStatus.required_checks_state))}</dd>
-          <dt>Review threads</dt><dd>${esc(prStatus.unresolved_thread_count)}</dd>` : ""}
-      </dl>
-      ${prStatus ? `<div class="sub">${prStatus.checks.map((check) =>
-        `${esc(check.name)}: ${esc(check.conclusion || check.status)}${check.required ? " (required)" : ""}`
-      ).join(" · ") || "No GitHub checks reported."}</div>` : ""}
-      <div class="row" style="margin-top:10px">
-        ${approval && approval.draft ? `<button id="mark-ready" ${ciReady ? "" : "disabled"}>Mark ready for review</button>` : ""}
-        ${approval && !approval.draft ? `<button id="approve-merge" ${ciReady ? "" : "disabled"}>Approve and merge</button>` : ""}
-        ${approval && approval.head_branch ? `<button class="quiet" id="request-revision" ${revisionReady ? "" : "disabled"}>Request revision</button>` : ""}
+      <div class="row wrap">${statusPill(task.status)}
+        ${task.required_capabilities.map((capability) => `<span class="status-pill">${esc(label(capability))}</span>`).join("")}</div>
+      ${malformedRepositoryTask ? `<div class="gate-notice">This older task was created with a repository but without the coding capability, so no worker can safely run it. Cancel it and send the request again to use the coding workflow.</div>` : ""}
+      ${codingQueueNotice ? `<div class="gate-notice">${esc(codingQueueNotice)}</div>` : ""}
+      <h2 style="margin-top:12px">Request</h2><div>${esc(task.original_request)}</div>
+      ${task.current_goal !== task.original_request ? `<div class="sub" style="margin-top:6px">Current goal: ${esc(task.current_goal)}</div>` : ""}
+      <div class="summary-grid">
+        <div class="summary-card"><div class="key">Repository</div><div class="value">${esc(repository)}</div></div>
+        <div class="summary-card"><div class="key">Validation</div><div class="value">${statusPill(ctx.validation)}</div></div>
+        <div class="summary-card"><div class="key">Task</div><div class="value">${esc(task.id.slice(0, 8))}</div></div>
+        <div class="summary-card"><div class="key">Updated</div><div class="value">${new Date(task.updated_at).toLocaleString()}</div></div>
+      </div>
+      ${lineage}
+      ${codingWorkflow(ctx, task, prStatus)}
+      ${pullRequestPanel(prStatus, approval)}
+      ${prStatusError ? `<div class="gate-notice">Could not load live GitHub status: ${esc(prStatusError)}</div>` : ""}
+      ${approval ? `<div id="gate-reason" class="gate-notice ${primaryGate ? "" : "pass"}">${primaryGate ? `Action blocked: ${esc(primaryGate)}` : "Exact commit and required checks are ready for an authorized action."}</div>` : ""}
+      <div class="row wrap" style="margin-top:10px">
+        ${approval && approval.draft ? `<button id="mark-ready" ${ciReady ? "" : "disabled"} title="${esc(primaryGate)}">Mark ready for review</button>` : ""}
+        ${approval && !approval.draft ? `<button id="approve-merge" ${ciReady ? "" : "disabled"} title="${esc(primaryGate)}">Approve and merge</button>` : ""}
+        ${approval && approval.head_branch ? `<button class="quiet" id="request-revision" ${revisionReady ? "" : "disabled"} title="${esc(gateReason(prStatus, "revision"))}">Request revision</button>` : ""}
         ${active(task) ? `<button class="quiet" id="cancel-task">Cancel</button>` : ""}
         <button class="ghost" id="discuss">Discuss in chat</button></div>
-      <h2>Curated context</h2>
-      <div class="sub">Exactly what a follow-up prompt is given.</div>
-      <pre>${esc(JSON.stringify(ctx, null, 2))}</pre>
+      ${ctx.final_answer ? `<h2>Result</h2><div class="panel-card">${esc(ctx.final_answer)}</div>` : ""}
+      ${validationPanel(ctx)}
       <h2>Follow-up task</h2>
       <form id="followup-form"><textarea id="followup" rows="2"
         placeholder="Continue this work…"></textarea><button type="submit">Start</button></form>
-      <h2>Events (${events.events.length})</h2>
-      ${events.events.map((e) => `<div class="ev">${e.sequence}. ${esc(e.event_type)}</div>`).join("")}`;
+      <details><summary>Curated context</summary>
+        <div class="sub">Exactly what a follow-up prompt is given.</div>
+        <pre>${esc(JSON.stringify(ctx, null, 2))}</pre></details>
+      <details><summary>Audit events (${events.events.length})</summary>
+        ${events.events.map((e) => `<div class="ev">${e.sequence}. ${esc(e.event_type)}</div>`).join("")}</details>`;
+    openTaskPanel();
     const cancel = $("cancel-task");
     if (cancel) cancel.onclick = async () => {
       try { await api(`/tasks/${id}/cancel`, { method: "POST" }); await refreshTranscript(); }
       catch (e) { fail(e); }
     };
     const markReady = $("mark-ready");
-    if (markReady) markReady.onclick = async () => {
-      const token = window.prompt("Enter the separate assistant approval token");
-      if (!token) return;
-      try {
-        await api(`/tasks/${id}/pull-request-ready`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "X-Assistant-Approval-Token": token,
-          },
-          body: JSON.stringify({ expected_head_sha: approval.expected_head_sha }),
-        });
-        await renderTask(id);
-      } catch (e) { fail(e); }
-    };
+    if (markReady) markReady.onclick = () => openActionDialog("ready", id, approval);
     const requestRevision = $("request-revision");
-    if (requestRevision) requestRevision.onclick = async () => {
-      const instructions = window.prompt("What should the coding agent revise?");
-      if (!instructions || !instructions.trim()) return;
-      const token = window.prompt("Enter the separate assistant approval token");
-      if (!token) return;
-      try {
-        const task = await api(`/tasks/${id}/pull-request-revision`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "X-Assistant-Approval-Token": token,
-          },
-          body: JSON.stringify({
-            instructions: instructions.trim(),
-            expected_head_sha: approval.expected_head_sha,
-          }),
-        });
-        await refreshTranscript();
-        await renderTask(task.id);
-      } catch (e) { fail(e); }
-    };
+    if (requestRevision) requestRevision.onclick = () => openActionDialog("revision", id, approval);
     const approveMerge = $("approve-merge");
-    if (approveMerge) approveMerge.onclick = async () => {
-      const token = window.prompt("Enter the separate assistant approval token");
-      if (!token) return;
-      try {
-        await api(`/tasks/${id}/pull-request-approval`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "X-Assistant-Approval-Token": token,
-          },
-          body: JSON.stringify({
-            decision: "approve",
-            expected_head_sha: approval.expected_head_sha,
-            merge_method: "squash",
-          }),
-        });
-        await refreshTranscript();
-        await renderTask(id);
-      } catch (e) { fail(e); }
+    if (approveMerge) approveMerge.onclick = () => openActionDialog("merge", id, approval);
+    const refreshPrStatus = $("refresh-pr-status");
+    if (refreshPrStatus) refreshPrStatus.onclick = () => {
+      state.prPollAttempts = 0;
+      renderTask(id);
     };
     $("discuss").onclick = async () => {
       try {
@@ -419,12 +664,23 @@ async function renderTask(id) {
         await renderTask(task.id);
       } catch (e) { fail(e); }
     };
+    const unsettledPr = approval && task.status === "waiting_for_approval"
+      && (!prStatus || ["missing", "pending"].includes(prStatus.required_checks_state)
+        || prStatus.mergeable === null);
+    if (unsettledPr && state.prPollAttempts < 24) {
+      state.prPollAttempts += 1;
+      state.taskTimer = setTimeout(() => {
+        if (state.taskId === id) renderTask(id);
+      }, 5000);
+    }
   } catch (e) { fail(e); }
 }
 
 document.addEventListener("click", (e) => {
   const chat = e.target.closest("[data-chat]");
   if (chat) return openChat(chat.dataset.chat);
+  const taskNav = e.target.closest("[data-task-nav]");
+  if (taskNav) return renderTask(taskNav.dataset.taskNav);
   const task = e.target.closest("[data-task]");
   if (task) return renderTask(task.dataset.task);
   const create = e.target.closest("[data-create]");
@@ -444,10 +700,71 @@ $("new-chat").onclick = async () => {
   catch (e) { fail(e); }
 };
 $("reload-chats").onclick = loadChats;
-$("repository").onchange = (event) => { state.repositoryId = event.target.value || null; };
+$("repository").onchange = (event) => {
+  state.repositoryId = event.target.value || null;
+  renderProposal();
+};
 $("close-task").onclick = () => {
   state.taskId = null;
+  clearTimeout(state.taskTimer);
+  state.taskTimer = null;
+  state.prPollAttempts = 0;
   $("task-detail").innerHTML = `<div class="sub">Select a task card in the transcript.</div>`;
+  closeTaskPanel();
 };
+$("detail-scrim").onclick = closeTaskPanel;
+$("open-chats").onclick = () => document.querySelector("aside").classList.add("open");
+$("close-chats").onclick = () => document.querySelector("aside").classList.remove("open");
+$("cancel-action").onclick = closeActionDialog;
+$("action-dialog").addEventListener("close", () => { state.pendingAction = null; });
+$("action-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const pending = state.pendingAction;
+  if (!pending) return;
+  const token = $("approval-token").value;
+  const instructions = $("revision-instructions").value.trim();
+  const button = $("confirm-action");
+  button.disabled = true;
+  $("action-error").textContent = "";
+  try {
+    const headers = { "content-type": "application/json", "X-Assistant-Approval-Token": token };
+    if (pending.mode === "workflow") {
+      state.workflowRun = await api(`/workflow-runs/${pending.taskId}/decision`, {
+        method: "POST", headers, body: JSON.stringify({ decision: "approve" }),
+      });
+      await startCodingWorkflow(pending.taskId);
+      closeActionDialog();
+    } else if (pending.mode === "ready") {
+      await api(`/tasks/${pending.taskId}/pull-request-ready`, {
+        method: "POST", headers,
+        body: JSON.stringify({ expected_head_sha: pending.approval.expected_head_sha }),
+      });
+      closeActionDialog();
+      await renderTask(pending.taskId);
+    } else if (pending.mode === "revision") {
+      const task = await api(`/tasks/${pending.taskId}/pull-request-revision`, {
+        method: "POST", headers,
+        body: JSON.stringify({ instructions, expected_head_sha: pending.approval.expected_head_sha }),
+      });
+      closeActionDialog();
+      await refreshTranscript();
+      await renderTask(task.id);
+    } else {
+      await api(`/tasks/${pending.taskId}/pull-request-approval`, {
+        method: "POST", headers,
+        body: JSON.stringify({ decision: "approve", expected_head_sha: pending.approval.expected_head_sha, merge_method: "squash" }),
+      });
+      closeActionDialog();
+      await refreshTranscript();
+      await renderTask(pending.taskId);
+    }
+  } catch (error) {
+    $("action-error").textContent = error.message || String(error);
+  } finally {
+    button.disabled = false;
+  }
+};
+window.addEventListener("resize", syncResponsivePanels);
+syncResponsivePanels();
 Promise.all([loadChats(), loadRepositories()]);
 </script>

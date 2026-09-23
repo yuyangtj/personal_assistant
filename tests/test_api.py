@@ -951,6 +951,24 @@ def test_web_console_is_served(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "<title>Assistant Console</title>" in response.text
+    assert 'id="task-panel"' in response.text
+    assert 'id="action-dialog"' in response.text
+    assert "Coding progress" in response.text
+    assert "Action blocked:" in response.text
+    assert "Approve and start" in response.text
+    assert "Refresh CI" in response.text
+    assert "prPollAttempts" in response.text
+    assert "defaultRepository" not in response.text
+    assert "window.prompt" not in response.text
+
+
+def test_web_console_uses_accessible_navigation_controls(client: TestClient) -> None:
+    response = client.get("/ui")
+
+    assert '<button class="chat-item ${c.id === state.chatId ? "active" : ""}"' in response.text
+    assert '<button class="taskcard"' in response.text
+    assert 'aria-label="Task details"' in response.text
+    assert 'type="password" autocomplete="off" required' in response.text
 
 
 def test_root_redirects_to_web_console(client: TestClient) -> None:

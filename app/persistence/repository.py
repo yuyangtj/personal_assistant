@@ -173,7 +173,8 @@ class TaskRepository:
             (
                 candidate
                 for candidate in candidates
-                if (
+                if not TaskRepository._is_malformed_repository_task(candidate)
+                and (
                     TaskRepository._is_coding_task(candidate)
                     if coding_only
                     else supports_coding or not TaskRepository._is_coding_task(candidate)
@@ -201,6 +202,15 @@ class TaskRepository:
         return bool(
             capabilities.intersection({"coding", "pull_request_creation", "coding-pull-request"})
             or (task.source_context or {}).get("repository_id")
+        )
+
+    @staticmethod
+    def _is_malformed_repository_task(task: TaskModel) -> bool:
+        capabilities = set(task.required_capabilities or [])
+        coding_capabilities = {"coding", "pull_request_creation", "coding-pull-request"}
+        return bool(
+            (task.source_context or {}).get("repository_id")
+            and not capabilities.intersection(coding_capabilities)
         )
 
     @staticmethod

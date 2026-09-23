@@ -270,6 +270,11 @@ def test_conversation_is_left_alone(content: str) -> None:
     ("content", "consequential", "capabilities"),
     [
         ("Refactor the payments module.", True, ["coding"]),
+        (
+            "can you add button in the http://127.0.0.1:8000/ui to toggle dark and light themes",
+            True,
+            ["coding"],
+        ),
         ("Can you research three hosting options?", False, []),
         ("Let's deploy to production.", True, []),
         ("please write the release notes", True, []),
