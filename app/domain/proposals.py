@@ -148,17 +148,17 @@ def propose_task(content: str) -> TaskProposal | None:
         return None
 
     is_question = normalized.endswith("?")
-    asks_for_work = leading[0] in WORK_VERBS and not (
-        is_question and words[0] in _QUESTION_OPENERS
-    )
+    asks_for_work = leading[0] in WORK_VERBS and not (is_question and words[0] in _QUESTION_OPENERS)
     if not asks_for_work:
         return None
 
     vocabulary = set(words)
     consequential = bool(vocabulary & CONSEQUENTIAL_TERMS)
     capabilities = ["coding"] if vocabulary & CODING_TERMS else []
-    goal = normalized if len(normalized) <= MAX_GOAL_CHARACTERS else (
-        normalized[: MAX_GOAL_CHARACTERS - 1].rstrip() + "…"
+    goal = (
+        normalized
+        if len(normalized) <= MAX_GOAL_CHARACTERS
+        else (normalized[: MAX_GOAL_CHARACTERS - 1].rstrip() + "…")
     )
     reason = (
         "This asks for work that changes code or infrastructure."

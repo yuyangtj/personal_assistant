@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import signal
+import subprocess
 import threading
 from collections.abc import Mapping
 from pathlib import Path
 
 from app.capabilities import CapabilityRegistry
+from app.coding_runs import CodingRunStore
 from app.config import Settings
+from app.decision import CodingDecisionEngine, CodingRunnerRegistry
+from app.deployments import DeploymentRegistry
 from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.coding import (
     ClaudeCodeMiniMaxRunner,
@@ -28,9 +33,13 @@ from app.integrations.minimax import MiniMaxChatClient, MiniMaxManagerModelClien
 from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
 from app.manager.decisions import DelegateDecision, FailDecision
 from app.manager.model import ManagerModelClient, ValidatedManagerModelAdapter
+from app.memory import MemoryService
 from app.persistence.database import Database
+from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.service import TaskService
+from app.validation import ValidationProfileRegistry
+from app.workflows import WorkflowRegistry, WorkflowService
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +48,48 @@ class ExecutorAdapterNotFoundError(LookupError):
     pass
 
 
-def build_coding_executor(settings: Settings) -> RepositoryCodingExecutor | None:
+class _LeaseHeartbeat:
+    def __init__(
+        self,
+        service: TaskService,
+        *,
+        task_id: str,
+        worker_id: str,
+        lease_seconds: int,
+    ):
+        self.service = service
+        self.task_id = task_id
+        self.worker_id = worker_id
+        self.lease_seconds = lease_seconds
+        self.stop_event = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        self.thread.join(timeout=2)
+
+    def _run(self) -> None:
+        interval = max(1.0, self.lease_seconds / 3)
+        while not self.stop_event.wait(interval):
+            try:
+                if not self.service.renew_lease(
+                    self.task_id,
+                    worker_id=self.worker_id,
+                    lease_seconds=self.lease_seconds,
+                ):
+                    return
+            except Exception:
+                logger.exception("Could not renew lease for task %s", self.task_id)
+
+
+def build_coding_executor(
+    settings: Settings,
+    *,
+    provider_state_store: ProviderStateStore | None = None,
+) -> RepositoryCodingExecutor | None:
     """Builds the opt-in isolated coding-to-draft-PR workflow."""
     if not settings.code_agent_enabled:
         return None
@@ -54,8 +104,25 @@ def build_coding_executor(settings: Settings) -> RepositoryCodingExecutor | None
         runners,
         rate_limit_cooldown_seconds=settings.code_agent_rate_limit_cooldown_seconds,
         quota_cooldown_seconds=settings.code_agent_quota_cooldown_seconds,
+        state_store=provider_state_store,
+        decision_engine=(
+            CodingDecisionEngine(
+                CodingRunnerRegistry.from_directory(settings.coding_runners_directory),
+                provider_state_store,
+            )
+            if provider_state_store is not None
+            else None
+        ),
     )
     registry = RepositoryRegistry.from_directory(settings.repositories_directory)
+    checkpoint_store = (
+        CodingRunStore(provider_state_store.database)
+        if isinstance(provider_state_store, DatabaseProviderStateStore)
+        else None
+    )
+    validation_registry = ValidationProfileRegistry.from_directory(
+        settings.validation_profiles_directory
+    )
     executors: dict[str, CodingPullRequestExecutor] = {}
     for manifest in registry.list():
         configured_path = os.getenv(manifest.path_env)
@@ -90,6 +157,9 @@ def build_coding_executor(settings: Settings) -> RepositoryCodingExecutor | None
             remote=remote,
             timeout_seconds=settings.code_agent_timeout_seconds,
             draft_pull_requests=settings.github_draft_pull_requests,
+            validation_profile=validation_registry.get(manifest.validation_profile),
+            repository_id=manifest.id,
+            checkpoint_store=checkpoint_store,
         )
     if not executors:
         expected = ", ".join(manifest.path_env for manifest in registry.list())
@@ -121,6 +191,7 @@ def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
                 KimiCodeCliRunner(
                     executable=settings.kimi_code_executable,
                     model=settings.kimi_code_model,
+                    api_key=settings.kimi_api_key,
                 )
             )
         elif provider == "minimax-claude":
@@ -144,8 +215,60 @@ def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
             )
     if not runners:
         raise ValueError("No configured coding runner is usable")
-    logger.info("Coding runner order: %s", " -> ".join(runner.provider for runner in runners))
+    logger.info("Configured coding runners: %s", ", ".join(runner.provider for runner in runners))
     return runners
+
+
+def preflight_coding_executor(executor: RepositoryCodingExecutor) -> None:
+    problems: list[str] = []
+    checked_executables: set[str] = set()
+    for repository_id, configured in executor.executors.items():
+        path = configured.repository_path
+        if not (path / ".git").exists():
+            problems.append(f"{repository_id}: checkout is not a Git repository")
+            continue
+        for arguments, label in (
+            (("status", "--porcelain"), "status"),
+            (("remote", "get-url", configured.remote), "remote"),
+            (
+                (
+                    "push",
+                    "--dry-run",
+                    configured.remote,
+                    "HEAD:refs/heads/assistant/preflight-check",
+                ),
+                "push access",
+            ),
+        ):
+            completed = subprocess.run(
+                ["git", "-C", str(path), *arguments],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if completed.returncode != 0:
+                problems.append(f"{repository_id}: Git {label} check failed")
+            elif label == "status" and completed.stdout.strip():
+                problems.append(f"{repository_id}: checkout has uncommitted changes")
+            elif label == "remote":
+                expected = configured.github_repository.removesuffix(".git")
+                actual = completed.stdout.strip().removesuffix(".git")
+                if not actual.endswith(expected):
+                    problems.append(f"{repository_id}: remote does not match {expected}")
+        for step in configured.validation_profile.steps if configured.validation_profile else ():
+            executable = step.command[0]
+            if executable not in checked_executables and shutil.which(executable) is None:
+                problems.append(f"{repository_id}: validation executable not found: {executable}")
+            checked_executables.add(executable)
+    first_executor = next(iter(executor.executors.values()))
+    for runner in getattr(first_executor.agent, "runners", (first_executor.agent,)):
+        executable = getattr(runner, "executable", None)
+        if isinstance(executable, str) and shutil.which(executable) is None:
+            problems.append(f"coding runner executable not found: {executable}")
+        if isinstance(runner, KimiCodeCliRunner) and not runner.api_key:
+            problems.append("Kimi coding runner requires KIMI_API_KEY")
+    if problems:
+        raise ValueError("Coding worker preflight failed: " + "; ".join(problems))
 
 
 def _provider_order(primary: str, fallback: str | None) -> tuple[str, ...]:
@@ -252,8 +375,7 @@ def build_manager(settings: Settings, registry: CapabilityRegistry) -> TaskManag
     ]
     if not clients:
         raise ValueError(
-            "Manager analysis requires credentials for a configured provider: "
-            + ", ".join(order)
+            "Manager analysis requires credentials for a configured provider: " + ", ".join(order)
         )
     client: ManagerModelClient = (
         clients[0] if len(clients) == 1 else FallbackManagerModelClient(clients)
@@ -279,6 +401,10 @@ class TaskWorker:
         worker_id: str,
         lease_seconds: int = 60,
         poll_interval_seconds: float = 1.0,
+        workflow_service: WorkflowService | None = None,
+        memory_service: MemoryService | None = None,
+        supports_coding: bool = True,
+        coding_only: bool = False,
     ):
         self.service = service
         self.manager = manager
@@ -286,16 +412,32 @@ class TaskWorker:
         self.worker_id = worker_id
         self.lease_seconds = lease_seconds
         self.poll_interval_seconds = poll_interval_seconds
+        self.workflow_service = workflow_service
+        self.memory_service = memory_service
+        self.supports_coding = supports_coding
+        self.coding_only = coding_only
         self._stop_event = threading.Event()
 
     def run_once(self) -> bool:
+        recovered = self.service.recover_expired_tasks()
+        if recovered:
+            logger.warning("Recovered expired tasks: %s", ", ".join(recovered))
         task = self.service.claim_next_task(
             worker_id=self.worker_id,
             lease_seconds=self.lease_seconds,
+            supports_coding=self.supports_coding,
+            coding_only=self.coding_only,
         )
         if task is None:
             return False
 
+        heartbeat = _LeaseHeartbeat(
+            self.service,
+            task_id=task.id,
+            worker_id=self.worker_id,
+            lease_seconds=self.lease_seconds,
+        )
+        heartbeat.start()
         execution_id: str | None = None
         try:
             outcome = self.manager.decide(task)
@@ -346,12 +488,17 @@ class TaskWorker:
             if execution_id is None:
                 return True
 
+            execution_context = dict(task.source_context or {})
+            if self.memory_service is not None and executor.id == "model-conversation":
+                execution_context["memories"] = [
+                    memory.content for memory in self.memory_service.relevant(task.original_request)
+                ]
             result = executor.execute(
                 task_id=task.id,
                 request=task.original_request,
                 is_cancelled=lambda: self.service.is_cancelled(task.id),
                 history=self.service.conversation_history(task),
-                context=task.source_context or {},
+                context=execution_context,
             )
             if not self.service.start_validation(
                 task.id,
@@ -359,6 +506,7 @@ class TaskWorker:
                 output=result.output,
             ):
                 return True
+            self._sync_workflow(task.id)
             if not result.output or not result.output.get("summary"):
                 raise ValueError("Executor produced no summary")
             approval = result.output.get("approval_request")
@@ -393,7 +541,18 @@ class TaskWorker:
                 error=str(error),
                 execution_id=execution_id,
             )
+        finally:
+            heartbeat.stop()
+            self._sync_workflow(task.id)
         return True
+
+    def _sync_workflow(self, task_id: str) -> None:
+        if self.workflow_service is None:
+            return
+        try:
+            self.workflow_service.sync_for_task(task_id)
+        except Exception:
+            logger.exception("Could not synchronize workflow for task %s", task_id)
 
     def run_forever(self) -> None:
         logger.info("Worker %s started", self.worker_id)
@@ -427,8 +586,14 @@ def main() -> None:
             "%s conversation credentials are not set; conversation falls back to fake",
             settings.conversation_model_provider,
         )
-    coding_executor = build_coding_executor(settings)
+    provider_state_store = DatabaseProviderStateStore(database)
+    coding_executor = build_coding_executor(
+        settings,
+        provider_state_store=provider_state_store,
+    )
     if coding_executor is not None:
+        if settings.code_agent_preflight_enabled:
+            preflight_coding_executor(coding_executor)
         executors[coding_executor.id] = coding_executor
         logger.info(
             "Coding pull-request agent enabled for repositories: %s",
@@ -439,6 +604,12 @@ def main() -> None:
         settings.capabilities_directory
     ).restricted_to_adapters(executors)
     manager = build_manager(settings, registry)
+    workflow_service = WorkflowService(
+        database,
+        WorkflowRegistry.from_directory(settings.workflows_directory),
+        RepositoryRegistry.from_directory(settings.repositories_directory),
+        DeploymentRegistry.from_directory(settings.deployment_targets_directory),
+    )
     worker = TaskWorker(
         service=TaskService(database),
         manager=manager,
@@ -446,6 +617,10 @@ def main() -> None:
         worker_id=settings.worker_id,
         lease_seconds=settings.worker_lease_seconds,
         poll_interval_seconds=settings.worker_poll_interval_seconds,
+        workflow_service=workflow_service,
+        memory_service=MemoryService(database),
+        supports_coding=coding_executor is not None,
+        coding_only=settings.worker_coding_only,
     )
 
     def stop_worker(_signum, _frame) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -10,6 +11,7 @@ from app.capabilities import CapabilityRegistry
 from app.config import Settings
 from app.domain.enums import TaskStatus
 from app.execution.base import ExecutionResult
+from app.execution.coding import CodingPullRequestExecutor, RepositoryCodingExecutor
 from app.execution.fake import FakeExecutor
 from app.integrations.fallback import FallbackChatClient, FallbackManagerModelClient
 from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
@@ -21,6 +23,7 @@ from app.worker import (
     build_coding_executor,
     build_conversation_executor,
     build_manager,
+    preflight_coding_executor,
 )
 
 
@@ -41,6 +44,79 @@ def make_worker(
         lease_seconds=30,
         poll_interval_seconds=0.01,
     )
+
+
+def test_expired_worker_lease_is_recovered_and_reclaimed(
+    service: TaskService, database: Database
+) -> None:
+    task = service.create_task(request="Recover this task")
+    claimed = service.claim_next_task(worker_id="dead-worker", lease_seconds=30)
+    assert claimed is not None
+    with database.session() as session, session.begin():
+        stored = session.get(type(task), task.id)
+        stored.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    assert service.recover_expired_tasks() == [task.id]
+    recovered = service.claim_next_task(worker_id="replacement", lease_seconds=30)
+    assert recovered is not None
+    assert recovered.id == task.id
+    assert recovered.claimed_by == "replacement"
+    assert "TASK_RECOVERED" in [event.event_type for event in service.list_events(task.id)]
+
+
+def test_non_coding_worker_skips_registered_repository_task(service: TaskService) -> None:
+    coding = service.create_task(
+        request="Implement a feature",
+        source_context={"repository_id": "personal-assistant"},
+    )
+    regular = service.create_task(request="Say hello")
+
+    claimed = service.claim_next_task(
+        worker_id="conversation-worker",
+        lease_seconds=30,
+        supports_coding=False,
+    )
+
+    assert claimed is not None
+    assert claimed.id == regular.id
+    assert service.get_task(coding.id).status == TaskStatus.CREATED.value
+
+
+def test_coding_only_worker_skips_regular_task(service: TaskService) -> None:
+    regular = service.create_task(request="Say hello")
+    coding = service.create_task(
+        request="Implement a feature",
+        source_context={"repository_id": "personal-assistant"},
+    )
+
+    claimed = service.claim_next_task(
+        worker_id="coding-worker",
+        lease_seconds=30,
+        supports_coding=True,
+        coding_only=True,
+    )
+
+    assert claimed is not None
+    assert claimed.id == coding.id
+    assert service.get_task(regular.id).status == TaskStatus.CREATED.value
+
+
+def test_coding_worker_preflight_rejects_missing_registered_checkout(tmp_path) -> None:
+    class Agent:
+        provider = "test-agent"
+
+    configured = CodingPullRequestExecutor(
+        repository_path=tmp_path / "missing",
+        worktree_root=tmp_path / "worktrees",
+        github_repository="acme/widget",
+        github=object(),  # type: ignore[arg-type]
+        agent=Agent(),  # type: ignore[arg-type]
+        repository_id="widget",
+    )
+    executor = RepositoryCodingExecutor({"widget": configured})
+
+    with pytest.raises(ValueError, match="checkout is not a Git repository"):
+        preflight_coding_executor(executor)
 
 
 def test_runtime_conversation_uses_kimi_when_minimax_is_not_configured() -> None:

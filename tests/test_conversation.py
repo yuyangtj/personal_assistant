@@ -52,9 +52,7 @@ def test_kimi_client_posts_chat_completion_and_reads_usage() -> None:
     client = KimiChatClient(api_key="sk-test", transport=httpx.MockTransport(handler))
     completion = client.complete([ChatMessage("user", "Hi")], max_tokens=50)
 
-    assert completion == ChatCompletion(
-        "Hello there.", "kimi-for-coding-highspeed", 12, 3, "kimi"
-    )
+    assert completion == ChatCompletion("Hello there.", "kimi-for-coding-highspeed", 12, 3, "kimi")
     assert seen["path"].endswith("/chat/completions")
     assert seen["authorization"] == "Bearer sk-test"
     assert seen["body"]["messages"] == [{"role": "user", "content": "Hi"}]
@@ -220,9 +218,7 @@ def test_conversation_history_is_not_displaced_by_unrelated_tasks(
     service: TaskService,
 ) -> None:
     replies = ['{"reply":"Remember this.","emotion":"Warm"}']
-    replies.extend(
-        f'{{"reply":"Unrelated {index}.","emotion":"Neutral"}}' for index in range(101)
-    )
+    replies.extend(f'{{"reply":"Unrelated {index}.","emotion":"Neutral"}}' for index in range(101))
     replies.append('{"reply":"I remember.","emotion":"Warm"}')
     client = RecordingChatClient(replies)
     worker = _conversation_worker(service, client)

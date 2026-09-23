@@ -2,6 +2,7 @@ id: assistant-deployment
 name: Assistant deployment
 description: Deploy an immutable reviewed assistant commit while preserving persistent state.
 required_inputs:
+  - deployment_target_id
   - commit_sha
 stages:
   - id: build

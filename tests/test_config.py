@@ -20,6 +20,7 @@ def test_manager_model_settings_are_loaded_from_environment(monkeypatch) -> None
     monkeypatch.setenv("ASSISTANT_CODE_AGENT_ENABLED", "true")
     monkeypatch.setenv("ASSISTANT_REPOSITORIES_DIRECTORY", "/srv/repository-registry")
     monkeypatch.setenv("ASSISTANT_WORKFLOWS_DIRECTORY", "/srv/workflow-registry")
+    monkeypatch.setenv("ASSISTANT_CODING_RUNNERS_DIRECTORY", "/srv/coding-runners")
     monkeypatch.setenv("ASSISTANT_DEFAULT_REPOSITORY_ID", "analytics-agent-playground")
     monkeypatch.setenv("ASSISTANT_CODE_AGENT_PROVIDERS", "kimi,minimax-claude,codex")
     monkeypatch.setenv("ASSISTANT_CODE_REPOSITORY_PATH", "/srv/repositories/widget")
@@ -29,9 +30,7 @@ def test_manager_model_settings_are_loaded_from_environment(monkeypatch) -> None
     monkeypatch.setenv("ASSISTANT_KIMI_CODE_EXECUTABLE", "/usr/local/bin/kimi")
     monkeypatch.setenv("ASSISTANT_KIMI_CODE_MODEL", "kimi-code-model")
     monkeypatch.setenv("ASSISTANT_CLAUDE_CODE_EXECUTABLE", "/usr/local/bin/claude")
-    monkeypatch.setenv(
-        "ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL", "https://minimax.example/anthropic"
-    )
+    monkeypatch.setenv("ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL", "https://minimax.example/anthropic")
     monkeypatch.setenv("ASSISTANT_MINIMAX_CODE_MODEL", "MiniMax-M3")
     monkeypatch.setenv("ASSISTANT_CODE_AGENT_RATE_LIMIT_COOLDOWN_SECONDS", "120")
     monkeypatch.setenv("ASSISTANT_CODE_AGENT_QUOTA_COOLDOWN_SECONDS", "7200")
@@ -71,6 +70,7 @@ def test_manager_model_settings_are_loaded_from_environment(monkeypatch) -> None
     assert settings.code_agent_enabled is True
     assert settings.repositories_directory == Path("/srv/repository-registry")
     assert settings.workflows_directory == Path("/srv/workflow-registry")
+    assert settings.coding_runners_directory == Path("/srv/coding-runners")
     assert settings.default_repository_id == "analytics-agent-playground"
     assert settings.code_agent_providers == "kimi,minimax-claude,codex"
     assert settings.code_repository_path == Path("/srv/repositories/widget")

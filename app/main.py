@@ -5,12 +5,17 @@ from fastapi import FastAPI
 from app.api.routes import router
 from app.capabilities import CapabilityRegistry
 from app.config import Settings
+from app.decision import CodingRunnerRegistry
+from app.deployments import DeploymentRegistry
 from app.integrations.gemini_tts import GeminiTtsClient
 from app.integrations.github import GitHubClient
 from app.integrations.speech import CachedSpeechSynthesizer
+from app.memory import MemoryService
 from app.persistence.database import Database
+from app.providers import DatabaseProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.service import TaskService
+from app.validation import ValidationProfileRegistry
 from app.workflows import WorkflowRegistry, WorkflowService
 
 
@@ -26,6 +31,15 @@ def create_app(
         resolved_settings.repositories_directory
     )
     workflow_registry = WorkflowRegistry.from_directory(resolved_settings.workflows_directory)
+    coding_runner_registry = CodingRunnerRegistry.from_directory(
+        resolved_settings.coding_runners_directory
+    )
+    validation_profile_registry = ValidationProfileRegistry.from_directory(
+        resolved_settings.validation_profiles_directory
+    )
+    deployment_registry = DeploymentRegistry.from_directory(
+        resolved_settings.deployment_targets_directory
+    )
     database = Database(resolved_settings.database_url)
     if resolved_settings.auto_create_schema:
         database.create_schema()
@@ -38,14 +52,20 @@ def create_app(
     application.state.settings = resolved_settings
     application.state.database = database
     application.state.task_service = TaskService(database)
+    application.state.memory_service = MemoryService(database)
     application.state.capability_registry = registry
     application.state.repository_registry = repository_registry
     application.state.workflow_registry = workflow_registry
+    application.state.coding_runner_registry = coding_runner_registry
+    application.state.validation_profile_registry = validation_profile_registry
+    application.state.deployment_registry = deployment_registry
     application.state.workflow_service = WorkflowService(
         database,
         workflow_registry,
         repository_registry,
+        deployment_registry,
     )
+    application.state.provider_state_store = DatabaseProviderStateStore(database)
     application.state.speech_synthesizer = (
         CachedSpeechSynthesizer(
             GeminiTtsClient(

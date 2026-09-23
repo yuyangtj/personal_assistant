@@ -39,13 +39,51 @@ Edit `.env.remote`. Set the real domain, login name, single-quoted Caddy hash, t
 random secrets, and at least one routine model key (`KIMI_API_KEY` or
 `MINIMAX_API_KEY`). `.env.remote` is ignored by Git through the existing `.env` pattern.
 
+## Provision the optional coding worker
+
+The normal `worker` handles chat and non-coding tasks. The separate `coding-worker`
+profile contains Git, uv, Kimi Code, and Claude Code and has no public port or Docker
+socket. It runs with all Linux capabilities dropped and only receives the two explicitly
+registered repository mounts plus its worktree directory.
+
+Create operator-managed clones and a worktree directory on the server:
+
+```bash
+sudo install -d -o "$USER" -g "$USER" /srv/personal-assistant/repos
+sudo install -d -o "$USER" -g "$USER" /srv/personal-assistant/worktrees
+git clone https://github.com/yuyangtj/personal_assistant.git \
+  /srv/personal-assistant/repos/personal_assistant
+git clone https://github.com/yuyangtj/analytics-agent-playground.git \
+  /srv/personal-assistant/repos/analytics-agent-playground
+id -u
+id -g
+```
+
+Set these `.env.remote` fields to the printed UID/GID and the paths above:
+
+```dotenv
+ASSISTANT_CODING_WORKER_UID=1000
+ASSISTANT_CODING_WORKER_GID=1000
+ASSISTANT_HOST_REPOSITORY_PERSONAL_ASSISTANT_PATH=/srv/personal-assistant/repos/personal_assistant
+ASSISTANT_HOST_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH=/srv/personal-assistant/repos/analytics-agent-playground
+ASSISTANT_HOST_CODE_WORKTREE_ROOT=/srv/personal-assistant/worktrees
+KIMI_API_KEY=...
+MINIMAX_API_KEY=...
+ASSISTANT_GITHUB_TOKEN=...
+```
+
+Use clean HTTPS clones whose `origin` matches the repository manifests. The fine-grained
+GitHub token must be restricted to the registered repositories with Contents and Pull
+requests write and Checks read. Keep `ASSISTANT_APPROVAL_TOKEN` separate; it is supplied
+only to the API and is never available to either coding CLI.
+
 ## Start and verify
 
 Validate the rendered Compose file before starting it:
 
 ```bash
 docker compose --env-file .env.remote -f compose.remote.yaml config --quiet
-docker compose --env-file .env.remote -f compose.remote.yaml up -d --build
+docker compose --env-file .env.remote -f compose.remote.yaml --profile coding up -d --build
 docker compose --env-file .env.remote -f compose.remote.yaml ps
 ```
 
@@ -56,7 +94,7 @@ proposals, inspect task status/results, continue a task, and return to its chat.
 Useful operational commands:
 
 ```bash
-docker compose --env-file .env.remote -f compose.remote.yaml logs -f api worker caddy
+docker compose --env-file .env.remote -f compose.remote.yaml logs -f api worker coding-worker caddy
 docker compose --env-file .env.remote -f compose.remote.yaml pull
 docker compose --env-file .env.remote -f compose.remote.yaml up -d --build
 ```
@@ -105,8 +143,9 @@ the PostgreSQL container.
 - PostgreSQL and the worker are reachable only on the private Compose network.
 - The merge-approval token is separate from the browser password.
 - Provider and GitHub keys stay in the server-only `.env.remote` file.
-- Leave `ASSISTANT_CODE_AGENT_ENABLED=false` until a remote coding runtime and target
-  repository are deliberately provisioned.
+- The general worker keeps code execution disabled. Coding runs only in the explicit
+  `coding` Compose profile after startup preflight verifies clean repository identity,
+  required executables, validation commands, and push access.
 
 For a public multi-user service, replace this single-operator login with real accounts,
 per-user authorization, rate limiting, and audit/retention policies. The Phase 1 stack

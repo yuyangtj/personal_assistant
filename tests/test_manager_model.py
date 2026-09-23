@@ -50,11 +50,7 @@ def test_kimi_manager_client_sends_contract_and_reads_usage() -> None:
             json={
                 "model": "kimi-manager-test",
                 "choices": [
-                    {
-                        "message": {
-                            "content": f"```json\n{json.dumps(valid_analysis())}\n```"
-                        }
-                    }
+                    {"message": {"content": f"```json\n{json.dumps(valid_analysis())}\n```"}}
                 ],
                 "usage": {"prompt_tokens": 31, "completion_tokens": 17},
             },
@@ -124,13 +120,13 @@ def test_validated_adapter_returns_analysis_and_usage() -> None:
     assert "ability names" in client.requests[0].system_prompt
     assert "fake-executor" in client.requests[0].user_prompt
     assert "not manifest IDs" in client.requests[0].user_prompt
-    assert client.requests[0].response_schema["properties"]["required_capabilities"][
-        "items"
-    ]["enum"] == [
-            "coding",
-            "conversation",
-            "pull_request_creation",
-            "repository_analysis",
+    assert client.requests[0].response_schema["properties"]["required_capabilities"]["items"][
+        "enum"
+    ] == [
+        "coding",
+        "conversation",
+        "pull_request_creation",
+        "repository_analysis",
         "shell_execution",
         "task_execution",
         "testing",

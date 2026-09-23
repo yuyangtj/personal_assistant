@@ -9,6 +9,7 @@ TERMINAL_STATUSES = {
     TaskStatus.COMPLETED,
     TaskStatus.FAILED,
     TaskStatus.CANCELLED,
+    TaskStatus.SUPERSEDED,
 }
 
 ALLOWED_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
@@ -41,10 +42,12 @@ ALLOWED_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
         TaskStatus.EXECUTING,
         TaskStatus.FAILED,
         TaskStatus.CANCELLED,
+        TaskStatus.SUPERSEDED,
     },
     TaskStatus.COMPLETED: set(),
     TaskStatus.FAILED: set(),
     TaskStatus.CANCELLED: set(),
+    TaskStatus.SUPERSEDED: set(),
 }
 
 

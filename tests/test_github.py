@@ -18,6 +18,7 @@ def _pull_request_json(*, draft: bool = True, merged: bool = False) -> dict[str,
         "draft": draft,
         "merged": merged,
         "merge_commit_sha": "b" * 40 if merged else None,
+        "node_id": "PR_kwDOExample",
     }
 
 
@@ -96,9 +97,7 @@ def test_github_rejects_invalid_repository_names(repository: str) -> None:
 
 
 def test_github_accepts_repository_names_with_dots() -> None:
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(200, json=_pull_request_json())
-    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=_pull_request_json()))
     client = GitHubClient(token="secret", transport=transport)
     try:
         pull_request = client.get_pull_request(repository="acme/widget.py", number=17)
@@ -106,3 +105,168 @@ def test_github_accepts_repository_names_with_dots() -> None:
         client.close()
 
     assert pull_request.repository == "acme/widget.py"
+
+
+def test_github_marks_pull_request_ready_for_review_with_graphql() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        assert request.url.path == "/graphql"
+        return httpx.Response(
+            200,
+            json={"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}}},
+        )
+
+    client = GitHubClient(token="secret", transport=httpx.MockTransport(handler))
+    try:
+        ready = client.mark_pull_request_ready_for_review(node_id="PR_kwDOExample")
+    finally:
+        client.close()
+
+    assert ready is True
+    assert captured["variables"] == {"pullRequestId": "PR_kwDOExample"}
+
+
+def test_github_lists_paginated_check_runs() -> None:
+    pages: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params["page"])
+        pages.append(page)
+        count = 100 if page == 1 else 1
+        return httpx.Response(
+            200,
+            json={
+                "check_runs": [
+                    {
+                        "name": f"check-{page}-{index}",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": f"https://example.test/{page}/{index}",
+                    }
+                    for index in range(count)
+                ]
+            },
+        )
+
+    client = GitHubClient(token="secret", transport=httpx.MockTransport(handler))
+    try:
+        checks = client.list_check_runs(repository="acme/widget", commit_sha="a" * 40)
+    finally:
+        client.close()
+
+    assert pages == [1, 2]
+    assert len(checks) == 101
+    assert checks[-1].name == "check-2-0"
+
+
+def test_github_rejects_malformed_check_run_response() -> None:
+    client = GitHubClient(
+        token="secret",
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={"checks": []})),
+    )
+    try:
+        with pytest.raises(GitHubError, match="unexpected check-runs"):
+            client.list_check_runs(repository="acme/widget", commit_sha="a" * 40)
+    finally:
+        client.close()
+
+
+def test_github_returns_only_unresolved_review_comments() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    {
+                                        "isResolved": True,
+                                        "comments": {"nodes": [{"body": "old"}]},
+                                    },
+                                    {
+                                        "isResolved": False,
+                                        "comments": {
+                                            "nodes": [
+                                                {
+                                                    "author": {"login": "reviewer"},
+                                                    "body": "Please cover the retry case",
+                                                    "path": "app/worker.py",
+                                                    "line": 42,
+                                                    "url": "https://example.test/comment",
+                                                }
+                                            ]
+                                        },
+                                    },
+                                ],
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            }
+                        }
+                    }
+                }
+            },
+        )
+
+    client = GitHubClient(token="secret", transport=httpx.MockTransport(handler))
+    try:
+        comments = client.list_unresolved_review_comments(repository="acme/widget", number=17)
+    finally:
+        client.close()
+
+    assert len(comments) == 1
+    assert comments[0].author == "reviewer"
+    assert comments[0].path == "app/worker.py"
+
+
+def test_github_paginates_and_truncates_unresolved_review_comments() -> None:
+    cursors: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        cursor = json.loads(request.content)["variables"]["cursor"]
+        cursors.append(cursor)
+        final = cursor == "page-2"
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    {
+                                        "isResolved": False,
+                                        "comments": {
+                                            "nodes": [
+                                                {
+                                                    "author": {"login": "reviewer"},
+                                                    "body": ("second" if final else "x" * 3000),
+                                                    "path": "app/worker.py",
+                                                    "line": 12,
+                                                    "url": "https://example.test/comment",
+                                                }
+                                            ]
+                                        },
+                                    }
+                                ],
+                                "pageInfo": {
+                                    "hasNextPage": not final,
+                                    "endCursor": None if final else "page-2",
+                                },
+                            }
+                        }
+                    }
+                }
+            },
+        )
+
+    client = GitHubClient(token="secret", transport=httpx.MockTransport(handler))
+    try:
+        comments = client.list_unresolved_review_comments(repository="acme/widget", number=17)
+    finally:
+        client.close()
+
+    assert cursors == [None, "page-2"]
+    assert [len(comment.body) for comment in comments] == [2000, 6]

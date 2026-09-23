@@ -10,4 +10,6 @@ __pycache__/
 *.sqlite3
 artifacts/
 backups/
+.coding-repositories/
+.coding-worktrees/
 hetzner-mcp/

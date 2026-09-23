@@ -108,6 +108,17 @@ class ConversationExecutor:
                     f"{render_task_context(parent)}",
                 )
             )
+        memories = context.get("memories")
+        if isinstance(memories, list) and memories:
+            lines = [str(item) for item in memories if str(item).strip()][:8]
+            if lines:
+                messages.append(
+                    ChatMessage(
+                        "system",
+                        "User-approved saved memories. Use only when relevant:\n- "
+                        + "\n- ".join(lines),
+                    )
+                )
         for turn in history:
             messages.append(ChatMessage("user", turn.request))
             messages.append(ChatMessage("assistant", json.dumps({"reply": turn.reply})))

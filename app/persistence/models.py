@@ -41,9 +41,7 @@ class ChatSessionModel(Base):
 
 class ChatMessageModel(Base):
     __tablename__ = "chat_messages"
-    __table_args__ = (
-        Index("ix_chat_messages_session_created", "chat_session_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_chat_messages_session_created", "chat_session_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     chat_session_id: Mapped[str] = mapped_column(
@@ -80,6 +78,9 @@ class TaskModel(Base):
         String(36), ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True, index=True
     )
     parent_task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    superseded_by_task_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
     )
     external_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -140,7 +141,10 @@ class ExecutionModel(Base):
 
 class WorkflowRunModel(Base):
     __tablename__ = "workflow_runs"
-    __table_args__ = (Index("ix_workflow_runs_status_created", "status", "created_at"),)
+    __table_args__ = (
+        UniqueConstraint("origin_message_id", name="uq_workflow_runs_origin_message_id"),
+        Index("ix_workflow_runs_status_created", "status", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workflow_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
@@ -152,6 +156,12 @@ class WorkflowRunModel(Base):
     )
     task_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    origin_message_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("chat_messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
@@ -177,4 +187,72 @@ class WorkflowRunEventModel(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
+class ProviderRuntimeStateModel(Base):
+    __tablename__ = "provider_runtime_states"
+
+    provider_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    cooldown_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    last_error_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_successes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class MemoryModel(Base):
+    __tablename__ = "memories"
+    __table_args__ = (Index("ix_memories_active_created", "active", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    source_chat_session_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("chat_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    source_task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class CodingRunModel(Base):
+    __tablename__ = "coding_runs"
+
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    repository_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    github_repository: Mapped[str] = mapped_column(String(255), nullable=False)
+    branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    base_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    phase: Mapped[str] = mapped_column(String(32), nullable=False)
+    commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pull_request_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pull_request_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pull_request_head_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    validation_results: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    runner_attempts: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    report: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )

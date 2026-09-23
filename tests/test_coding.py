@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
+from app.coding_runs import CodingRunPhase, CodingRunStore
 from app.execution.coding import (
     CodeAgentReport,
     CodingAgentError,
@@ -12,6 +17,10 @@ from app.execution.coding import (
     _text_report,
 )
 from app.integrations.github import GitHubPullRequest
+from app.persistence.database import Database
+from app.providers import DatabaseProviderStateStore
+from app.service import TaskService
+from app.validation import ValidationProfile, ValidationStep
 
 
 def _git(directory: Path, *arguments: str) -> str:
@@ -63,7 +72,7 @@ def test_coding_executor_isolates_changes_pushes_branch_and_opens_draft(tmp_path
 
         def create_pull_request(self, **kwargs) -> GitHubPullRequest:
             self.calls.append(kwargs)
-            sha = _git(repository, "rev-parse", kwargs["head"])
+            sha = _git(repository, "rev-parse", f"origin/{kwargs['head']}")
             return GitHubPullRequest(
                 repository="acme/widget",
                 number=9,
@@ -101,6 +110,125 @@ def test_coding_executor_isolates_changes_pushes_branch_and_opens_draft(tmp_path
     assert github.calls[0]["draft"] is True
 
 
+def test_coding_executor_recovers_push_without_duplicate_agent_or_pr(
+    tmp_path: Path, database: Database
+) -> None:
+    repository, _remote = _repository(tmp_path)
+    task = TaskService(database).create_task(request="Implement recoverable feature")
+    calls = {"agent": 0, "create": 0, "find": 0}
+
+    class Agent:
+        provider = "test-agent"
+
+        def run(self, *, worktree: Path, **_kwargs) -> CodeAgentReport:
+            calls["agent"] += 1
+            (worktree / "feature.txt").write_text("implemented\n", encoding="utf-8")
+            return CodeAgentReport(summary="Implemented recoverably")
+
+    class GitHub:
+        def create_pull_request(self, **kwargs) -> GitHubPullRequest:
+            calls["create"] += 1
+            if calls["create"] == 1:
+                raise RuntimeError("simulated crash after push")
+            sha = _git(repository, "rev-parse", f"origin/{kwargs['head']}")
+            return GitHubPullRequest(
+                repository="acme/widget",
+                number=9,
+                url="https://github.com/acme/widget/pull/9",
+                head_branch=str(kwargs["head"]),
+                head_sha=sha,
+                base_branch="main",
+                state="open",
+                draft=True,
+                merged=False,
+            )
+
+        def find_open_pull_request(self, **_kwargs):
+            calls["find"] += 1
+            return None
+
+        def get_pull_request(self, **_kwargs):
+            raise AssertionError("No completed PR checkpoint exists yet")
+
+    executor = CodingPullRequestExecutor(
+        repository_path=repository,
+        worktree_root=tmp_path / "worktrees",
+        github_repository="acme/widget",
+        github=GitHub(),  # type: ignore[arg-type]
+        agent=Agent(),
+        repository_id="widget",
+        checkpoint_store=CodingRunStore(database),
+    )
+
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        executor.execute(
+            task_id=task.id,
+            request=task.original_request,
+            is_cancelled=lambda: False,
+        )
+    assert CodingRunStore(database).get(task.id).phase == CodingRunPhase.PUSHED.value
+
+    result = executor.execute(
+        task_id=task.id,
+        request=task.original_request,
+        is_cancelled=lambda: False,
+    )
+
+    assert result.output["approval_request"]["number"] == 9
+    assert calls == {"agent": 1, "create": 2, "find": 1}
+    assert CodingRunStore(database).get(task.id).phase == CodingRunPhase.PR_CREATED.value
+
+
+def test_failed_validation_output_is_truncated_persisted_and_exposed(
+    tmp_path: Path, database: Database
+) -> None:
+    repository, _remote = _repository(tmp_path)
+    task = TaskService(database).create_task(request="Implement invalid feature")
+
+    class Agent:
+        provider = "test-agent"
+
+        def run(self, *, worktree: Path, **_kwargs) -> CodeAgentReport:
+            (worktree / "feature.txt").write_text("invalid\n", encoding="utf-8")
+            return CodeAgentReport(summary="Implemented invalid feature")
+
+    profile = ValidationProfile(
+        id="test-validation",
+        name="Test validation",
+        steps=(
+            ValidationStep(
+                id="failing-check",
+                command=(sys.executable, "-c", "print('x' * 6000); raise SystemExit(2)"),
+                timeout_seconds=30,
+            ),
+        ),
+    )
+    executor = CodingPullRequestExecutor(
+        repository_path=repository,
+        worktree_root=tmp_path / "worktrees",
+        github_repository="acme/widget",
+        github=object(),  # type: ignore[arg-type]
+        agent=Agent(),  # type: ignore[arg-type]
+        repository_id="widget",
+        checkpoint_store=CodingRunStore(database),
+        validation_profile=profile,
+    )
+
+    with pytest.raises(CodingAgentError, match="Required validation step failed"):
+        executor.execute(
+            task_id=task.id,
+            request=task.original_request,
+            is_cancelled=lambda: False,
+        )
+
+    checkpoint = CodingRunStore(database).get(task.id)
+    assert checkpoint is not None
+    assert checkpoint.phase == CodingRunPhase.VALIDATION_FAILED.value
+    assert len(checkpoint.validation_results[0]["output"]) == 4000
+    context = TaskService(database).task_context(task.id)
+    assert context["coding_checkpoint"]["validation"] == checkpoint.validation_results
+
+
 def test_coding_runner_falls_back_from_quota_limit_with_clean_worktree(tmp_path: Path) -> None:
     repository, _remote = _repository(tmp_path)
 
@@ -133,6 +261,57 @@ def test_coding_runner_falls_back_from_quota_limit_with_clean_worktree(tmp_path:
     assert "limited=failed(quota_exhausted)" in report.notes[-1]
     assert not (repository / "partial.txt").exists()
     assert (repository / "complete.txt").exists()
+
+
+def test_coding_runner_cooldown_survives_runner_recreation(
+    tmp_path: Path,
+    database: Database,
+) -> None:
+    repository, _remote = _repository(tmp_path)
+    calls = {"limited": 0, "backup": 0}
+
+    class LimitedAgent:
+        provider = "limited"
+
+        def run(self, **_kwargs) -> CodeAgentReport:
+            calls["limited"] += 1
+            raise CodingAgentError("rate limited", category="rate_limited")
+
+    class BackupAgent:
+        provider = "backup"
+
+        def run(self, **_kwargs) -> CodeAgentReport:
+            calls["backup"] += 1
+            return CodeAgentReport(summary="fallback succeeded")
+
+    def clock() -> datetime:
+        return datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+
+    first = FallbackCodeAgentRunner(
+        [LimitedAgent(), BackupAgent()],
+        state_store=DatabaseProviderStateStore(database, clock=clock),
+    )
+    first.run(
+        worktree=repository,
+        request="Implement feature",
+        timeout_seconds=60,
+        is_cancelled=lambda: False,
+    )
+
+    second = FallbackCodeAgentRunner(
+        [LimitedAgent(), BackupAgent()],
+        state_store=DatabaseProviderStateStore(database, clock=clock),
+    )
+    second.run(
+        worktree=repository,
+        request="Implement another feature",
+        timeout_seconds=60,
+        is_cancelled=lambda: False,
+    )
+
+    assert calls == {"limited": 1, "backup": 2}
+    assert second.attempts[0].outcome == "skipped"
+    assert second.attempts[0].category == "cooldown"
 
 
 def test_text_report_normalizes_kimi_fenced_json() -> None:

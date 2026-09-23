@@ -73,14 +73,14 @@ assistant: "Assistant platform" {
     task_store: "Tasks + event log" { class: current }
     profiler: "Task profiler\nMiniMax manager" { class: current }
     decision: "Decision engine\nfilter → score → select" { class: current }
-    workflow: "Workflow engine" { class: planned }
+    workflow: "Controlled workflow engine" { class: current }
   }
 
   registries: "Trusted registries" {
     class: boundary
     direction: right
     capabilities: "Capability registry" { class: current }
-    repositories: "Repository registry" { class: planned }
+    repositories: "Repository registry" { class: current }
     runners: "Coding runner registry" { class: current }
     tools: "Tool + MCP registry" { class: planned }
   }
@@ -110,14 +110,14 @@ coding: "Isolated coding workflow" {
   agents: "Coding runners" {
     class: boundary
     direction: right
-    kimi: "1 · Kimi Code" { class: current }
-    minimax: "2 · Claude Code + MiniMax" { class: current }
-    codex: "3 · Codex" { class: current }
+    kimi: "Kimi Code" { class: current }
+    minimax: "Claude Code + MiniMax" { class: current }
+    codex: "Codex" { class: current }
   }
   validation: "Independent validation" { class: current }
   draft: "Commit → push → draft PR" { class: current }
   review: "Human review" { class: current }
-  ready: "Ready for review" { class: planned }
+  ready: "Ready for review" { class: current }
   merge: "Exact-SHA merge approval" { class: current }
   deploy: "Deploy + health check + rollback" { class: planned }
 }

@@ -16,10 +16,14 @@ class Settings:
     worker_id: str = "worker-local"
     worker_poll_interval_seconds: float = 1.0
     worker_lease_seconds: int = 60
+    worker_coding_only: bool = False
     fake_executor_delay_seconds: float = 0.1
     capabilities_directory: Path = Path("capabilities")
     repositories_directory: Path = Path("repositories")
     workflows_directory: Path = Path("workflows")
+    coding_runners_directory: Path = Path("coding-runners")
+    validation_profiles_directory: Path = Path("validation-profiles")
+    deployment_targets_directory: Path = Path("deployment-targets")
     default_repository_id: str | None = None
     kimi_api_key: str | None = None
     kimi_base_url: str = "https://api.kimi.com/coding/v1"
@@ -49,6 +53,7 @@ class Settings:
     code_agent_rate_limit_cooldown_seconds: int = 300
     code_agent_quota_cooldown_seconds: int = 3600
     code_agent_timeout_seconds: int = 1800
+    code_agent_preflight_enabled: bool = True
     github_token: str | None = None
     github_api_base_url: str = "https://api.github.com"
     github_repository: str | None = None
@@ -92,6 +97,9 @@ class Settings:
             worker_lease_seconds=int(
                 os.getenv("ASSISTANT_WORKER_LEASE_SECONDS", str(defaults.worker_lease_seconds))
             ),
+            worker_coding_only=_as_bool(
+                os.getenv("ASSISTANT_WORKER_CODING_ONLY", str(defaults.worker_coding_only))
+            ),
             fake_executor_delay_seconds=float(
                 os.getenv(
                     "ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS",
@@ -114,6 +122,24 @@ class Settings:
                 os.getenv(
                     "ASSISTANT_WORKFLOWS_DIRECTORY",
                     str(defaults.workflows_directory),
+                )
+            ),
+            coding_runners_directory=Path(
+                os.getenv(
+                    "ASSISTANT_CODING_RUNNERS_DIRECTORY",
+                    str(defaults.coding_runners_directory),
+                )
+            ),
+            validation_profiles_directory=Path(
+                os.getenv(
+                    "ASSISTANT_VALIDATION_PROFILES_DIRECTORY",
+                    str(defaults.validation_profiles_directory),
+                )
+            ),
+            deployment_targets_directory=Path(
+                os.getenv(
+                    "ASSISTANT_DEPLOYMENT_TARGETS_DIRECTORY",
+                    str(defaults.deployment_targets_directory),
                 )
             ),
             default_repository_id=os.getenv("ASSISTANT_DEFAULT_REPOSITORY_ID") or None,
@@ -215,9 +241,13 @@ class Settings:
                     str(defaults.code_agent_timeout_seconds),
                 )
             ),
-            github_token=os.getenv("ASSISTANT_GITHUB_TOKEN")
-            or os.getenv("GITHUB_TOKEN")
-            or None,
+            code_agent_preflight_enabled=_as_bool(
+                os.getenv(
+                    "ASSISTANT_CODE_AGENT_PREFLIGHT_ENABLED",
+                    str(defaults.code_agent_preflight_enabled),
+                )
+            ),
+            github_token=os.getenv("ASSISTANT_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or None,
             github_api_base_url=os.getenv(
                 "ASSISTANT_GITHUB_API_BASE_URL", defaults.github_api_base_url
             ),
@@ -242,8 +272,7 @@ class Settings:
                 defaults.conversation_model_fallback_provider,
             )
             or None,
-            conversation_model_base_url=os.getenv("ASSISTANT_CONVERSATION_MODEL_BASE_URL")
-            or None,
+            conversation_model_base_url=os.getenv("ASSISTANT_CONVERSATION_MODEL_BASE_URL") or None,
             conversation_model_name=os.getenv("ASSISTANT_CONVERSATION_MODEL") or None,
             conversation_model_timeout_seconds=(
                 float(value)

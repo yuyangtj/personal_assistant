@@ -6,6 +6,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.capabilities.models import CapabilityManifest
+from app.decision import CodingRunnerManifest
+from app.deployments import DeploymentTarget
 from app.domain.enums import EventType, TaskStatus
 from app.persistence.models import (
     ChatMessageModel,
@@ -14,6 +16,7 @@ from app.persistence.models import (
     WorkflowRunEventModel,
     WorkflowRunModel,
 )
+from app.validation import ValidationProfile
 from app.workflows.models import WorkflowManifest, WorkflowRunStatus
 
 
@@ -120,6 +123,7 @@ class TaskContextResponse(BaseModel):
     chat_session_id: str | None
     origin_message_id: str | None
     parent_task_id: str | None
+    superseded_by_task_id: str | None = None
     final_answer: str | None
     summary: str | None
     validation: str
@@ -127,6 +131,7 @@ class TaskContextResponse(BaseModel):
     error: str | None
     created_at: datetime | None
     updated_at: datetime | None
+    coding_checkpoint: dict[str, Any] | None = None
 
 
 class SpeechRequest(BaseModel):
@@ -145,15 +150,52 @@ class PullRequestApprovalRequest(BaseModel):
     merge_method: Literal["merge", "squash", "rebase"] = "squash"
 
 
+class PullRequestReadyRequest(BaseModel):
+    expected_head_sha: str = Field(
+        min_length=40,
+        max_length=64,
+        pattern=r"^[0-9a-f]+$",
+    )
+
+
+class PullRequestRevisionRequest(BaseModel):
+    instructions: str = Field(min_length=1, max_length=20_000)
+    expected_head_sha: str = Field(min_length=40, max_length=64, pattern=r"^[0-9a-f]+$")
+
+
 class PendingApprovalResponse(BaseModel):
     type: Literal["github_pull_request_merge"]
     repository: str
     number: int
     url: str
+    head_branch: str | None = None
     expected_head_sha: str
     draft: bool
     execution_id: str
     reason: str | None = None
+
+
+class PullRequestCheckResponse(BaseModel):
+    name: str
+    status: str
+    conclusion: str | None
+    url: str | None
+    required: bool
+
+
+class PullRequestStatusResponse(BaseModel):
+    repository: str
+    number: int
+    url: str
+    expected_head_sha: str
+    current_head_sha: str
+    head_matches: bool
+    state: str
+    draft: bool
+    mergeable: bool | None
+    required_checks_state: Literal["passed", "pending", "failed", "missing"]
+    checks: list[PullRequestCheckResponse]
+    unresolved_thread_count: int
 
 
 class TaskResponse(BaseModel):
@@ -169,6 +211,7 @@ class TaskResponse(BaseModel):
     chat_session_id: str | None
     origin_message_id: str | None
     parent_task_id: str | None
+    superseded_by_task_id: str | None
     claimed_by: str | None
     version: int
     created_at: datetime
@@ -232,10 +275,65 @@ class RepositoryResponse(BaseModel):
     base_branch: str
     default: bool
     configured: bool
+    required_checks: list[str]
 
 
 class RepositoryListResponse(BaseModel):
     repositories: list[RepositoryResponse]
+
+
+class ValidationProfileListResponse(BaseModel):
+    profiles: list[ValidationProfile]
+
+
+class DeploymentTargetListResponse(BaseModel):
+    targets: list[DeploymentTarget]
+
+
+class CreateMemoryRequest(BaseModel):
+    kind: Literal["fact", "preference", "project"]
+    content: str = Field(min_length=1, max_length=4000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    chat_session_id: str | None = None
+    task_id: str | None = None
+
+
+class MemoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    kind: str
+    content: str
+    tags: list[str]
+    source_chat_session_id: str | None
+    source_task_id: str | None
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoryListResponse(BaseModel):
+    memories: list[MemoryResponse]
+
+
+class ProviderRuntimeStateResponse(BaseModel):
+    provider_key: str
+    available: bool
+    cooldown_until: datetime | None
+    last_error_category: str | None
+    consecutive_failures: int
+    total_successes: int
+    total_failures: int
+    last_success_at: datetime | None
+    last_failure_at: datetime | None
+    updated_at: datetime | None
+
+
+class ProviderRuntimeStateListResponse(BaseModel):
+    providers: list[ProviderRuntimeStateResponse]
+
+
+class CodingRunnerListResponse(BaseModel):
+    runners: list[CodingRunnerManifest]
 
 
 class WorkflowListResponse(BaseModel):
@@ -247,6 +345,10 @@ class CreateWorkflowRunRequest(BaseModel):
     input: dict[str, Any] = Field(default_factory=dict)
     chat_session_id: str | None = Field(default=None, min_length=36, max_length=36)
     task_id: str | None = Field(default=None, min_length=36, max_length=36)
+
+
+class CreateCodingWorkflowFromMessageRequest(BaseModel):
+    repository_id: str = Field(min_length=1, max_length=120)
 
 
 class WorkflowDecisionRequest(BaseModel):
@@ -263,6 +365,7 @@ class WorkflowRunResponse(BaseModel):
     current_stage: str | None
     chat_session_id: str | None
     task_id: str | None
+    origin_message_id: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -276,6 +379,7 @@ class WorkflowRunResponse(BaseModel):
             current_stage=run.current_stage,
             chat_session_id=run.chat_session_id,
             task_id=run.task_id,
+            origin_message_id=run.origin_message_id,
             created_at=run.created_at,
             updated_at=run.updated_at,
         )

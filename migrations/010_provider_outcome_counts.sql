@@ -1,0 +1,3 @@
+ALTER TABLE provider_runtime_states
+    ADD COLUMN IF NOT EXISTS total_successes INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS total_failures INTEGER NOT NULL DEFAULT 0;
