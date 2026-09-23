@@ -121,5 +121,55 @@ services:
       ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS: ${ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS:-0.1}
     command: ["python", "-m", "app.worker"]
 
+  coding-worker:
+    profiles: ["coding"]
+    build:
+      context: .
+      dockerfile: Dockerfile.coding-worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    user: "${ASSISTANT_CODING_WORKER_UID:-10001}:${ASSISTANT_CODING_WORKER_GID:-10001}"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      HOME: /tmp/assistant-home
+      GIT_ASKPASS: /usr/local/bin/assistant-git-askpass
+      GIT_TERMINAL_PROMPT: "0"
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /workspace/repos/personal-assistant
+      ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:assistant@postgres:5432/assistant
+      ASSISTANT_CAPABILITIES_DIRECTORY: /service/capabilities
+      ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
+      ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
+      ASSISTANT_CODING_RUNNERS_DIRECTORY: /service/coding-runners
+      ASSISTANT_VALIDATION_PROFILES_DIRECTORY: /service/validation-profiles
+      ASSISTANT_DEPLOYMENT_TARGETS_DIRECTORY: /service/deployment-targets
+      ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH: /workspace/repos/personal-assistant
+      ASSISTANT_CODE_WORKTREE_ROOT: /workspace/worktrees
+      ASSISTANT_CODE_AGENT_ENABLED: "true"
+      ASSISTANT_CODE_AGENT_PROVIDERS: ${ASSISTANT_CODE_AGENT_PROVIDERS:-kimi,minimax-claude}
+      ASSISTANT_CODE_AGENT_PREFLIGHT_ENABLED: "false"
+      ASSISTANT_DEFAULT_REPOSITORY_ID: personal-assistant
+      ASSISTANT_WORKER_ID: coding-worker-local
+      ASSISTANT_WORKER_CODING_ONLY: "true"
+      KIMI_API_KEY: ${KIMI_API_KEY:-}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL: ${ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
+      ASSISTANT_GITHUB_TOKEN: ${ASSISTANT_GITHUB_TOKEN:-}
+      ASSISTANT_GITHUB_API_BASE_URL: ${ASSISTANT_GITHUB_API_BASE_URL:-https://api.github.com}
+    volumes:
+      - type: bind
+        source: ${ASSISTANT_HOST_REPOSITORY_PERSONAL_ASSISTANT_PATH:-.}
+        target: /workspace/repos/personal-assistant
+      - type: bind
+        source: ${ASSISTANT_HOST_CODE_WORKTREE_ROOT:-./.coding-worktrees}
+        target: /workspace/worktrees
+
 volumes:
   assistant-postgres:
