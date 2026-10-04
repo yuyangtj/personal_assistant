@@ -18,9 +18,10 @@ from app.providers import DatabaseProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.schedules import ScheduleService
 from app.service import TaskService
+from app.spaces import SpaceRegistry
 from app.triage import Triager
 from app.validation import ValidationProfileRegistry
-from app.work_items import WorkItemService
+from app.work_items import WorkItemService, configure_spaces
 from app.workflows import WorkflowRegistry, WorkflowService
 
 
@@ -45,6 +46,8 @@ def create_app(
     deployment_registry = DeploymentRegistry.from_directory(
         resolved_settings.deployment_targets_directory
     )
+    space_registry = SpaceRegistry.from_directory(resolved_settings.spaces_directory)
+    configure_spaces(space_registry)
     database = Database(resolved_settings.database_url)
     if resolved_settings.auto_create_schema:
         database.create_schema()
@@ -60,6 +63,7 @@ def create_app(
     application.state.memory_service = MemoryService(database)
     application.state.work_item_service = WorkItemService(database)
     application.state.schedule_service = ScheduleService(database)
+    application.state.space_registry = space_registry
     application.state.triager = Triager(
         repository_registry,
         triage_client(resolved_settings) if resolved_settings.triage_model_enabled else None,
@@ -67,6 +71,7 @@ def create_app(
         research_available=bool(
             resolved_settings.tavily_api_key or resolved_settings.brave_search_api_key
         ),
+        spaces=space_registry,
     )
     application.state.capability_registry = registry
     application.state.repository_registry = repository_registry

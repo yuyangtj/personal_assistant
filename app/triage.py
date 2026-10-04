@@ -23,6 +23,7 @@ from app.integrations.chat import ChatClient, ChatMessage
 from app.integrations.model_json import extract_json_object
 from app.repositories import RepositoryRegistry
 from app.repositories.models import RepositoryManifest
+from app.spaces import SpaceRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ class TriageDecision(BaseModel):
     action: DirectAction | None = None
     #: Capabilities a confirmed task should require, e.g. web_research for research.
     capabilities: tuple[str, ...] = ()
+    #: The space a work item created from this message should live in.
+    space: str | None = None
     source: Literal["model", "rules"]
 
 
@@ -85,6 +88,7 @@ class ModelSuggestion(BaseModel):
     repository_id: str | None = Field(default=None, max_length=120)
     action: DirectAction | None = None
     needs_web_search: bool = False
+    space: str | None = Field(default=None, max_length=64)
     goal: str = Field(default="", max_length=600)
     confidence: float = Field(ge=0, le=1)
     reason: str = Field(default="", max_length=300)
@@ -110,6 +114,7 @@ Decide what the message needs:
   mum"); {"type": "routine", ...same fields} when something should be done for the user
   on a schedule ("every Monday at 8, summarize my open work"). Resolve relative dates
   from the user's local time. Use tags from work_items; null when the list is not named.
+For propose_task, set "space" to the best-fitting slug from spaces (or null).
 Pick repository_id only from the catalog ids, using names, aliases, and descriptions;
 use null when no repository fits or you are unsure. Write goal as one short imperative
 sentence. Set confidence from 0 to 1.
@@ -177,8 +182,10 @@ class Triager:
         min_confidence: float = 0.6,
         max_attempts: int = 2,
         research_available: bool = False,
+        spaces: SpaceRegistry | None = None,
     ):
         self.research_available = research_available
+        self.spaces = spaces
         self.repositories = repositories
         self.client = client
         self.min_confidence = min_confidence
@@ -239,6 +246,10 @@ class Triager:
             raise ValueError("no triage model configured")
         request = {
             "repositories": self._catalog(),
+            "spaces": [
+                {"slug": space.slug, "name": space.name, "description": space.description}
+                for space in (self.spaces.list() if self.spaces else [])
+            ],
             "selected_repository": selected.id if selected else None,
             "work_items_in_focus": [
                 {"tag": item.get("slug"), "title": item.get("title"), "space": item.get("space")}
@@ -269,9 +280,7 @@ class Triager:
                 messages.extend(
                     [
                         ChatMessage("assistant", completion.text[:1000]),
-                        ChatMessage(
-                            "user", f"Invalid ({reason}). Return only the JSON object."
-                        ),
+                        ChatMessage("user", f"Invalid ({reason}). Return only the JSON object."),
                     ]
                 )
         raise ValueError(f"No valid triage after {self.max_attempts} attempts: {reason}")
@@ -401,12 +410,16 @@ class Triager:
             and suggestion.needs_web_search
             and self.research_available
         )
+        space = (
+            suggestion.space if self.spaces and self.spaces.get(suggestion.space or "") else None
+        )
         return TriageDecision(
             intent=intent,
             goal=goal,
             reason=reason,
             confidence=suggestion.confidence,
             capabilities=("web_research",) if research else (),
+            space=space if intent == TriageIntent.PROPOSE_TASK else None,
             source="model",
         )
 

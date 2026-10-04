@@ -233,7 +233,7 @@
   <div id="items-pane" hidden>
     <div class="sub">Goals that chats and runs build on. Mention one with #tag.</div>
     <form id="new-item-form"><input id="new-item-title" maxlength="160" placeholder="New work item…" aria-label="New work item title">
-      <select id="new-item-space" aria-label="Space"><option value="general">General</option><option value="coding">Coding</option></select>
+      <select id="new-item-space" aria-label="Space"><option value="general">General</option></select>
       <button type="submit">Add</button></form>
     <div id="item-list"></div>
   </div>
@@ -515,12 +515,12 @@ function renderProposal() {
   const confirm = $("confirm");
   if (confirm) confirm.onclick = () => d.intent === "propose_coding"
     ? createCodingWorkflow(messageId, d.repository_id)
-    : createTask(messageId, d.goal, true, d.capabilities || []);
+    : createTask(messageId, d.goal, true, d.capabilities || [], d.space);
   document.querySelectorAll("[data-option]").forEach((button) => {
     button.onclick = () => {
       const option = d.options[Number(button.dataset.option)];
       if (option.intent === "propose_coding") return createCodingWorkflow(messageId, option.repository_id);
-      if (option.intent === "propose_task") return createTask(messageId, d.goal, true, d.capabilities || []);
+      if (option.intent === "propose_task") return createTask(messageId, d.goal, true, d.capabilities || [], d.space);
       return createTask(messageId);
     };
   });
@@ -562,10 +562,11 @@ function localIsoTime() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
-async function createTask(messageId, goal = null, makeWorkItem = false, capabilities = []) {
+async function createTask(messageId, goal = null, makeWorkItem = false, capabilities = [], space = null) {
   state.proposal = null;
   try {
     const body = {
+      space,
       // Confirmed work is worth keeping: it joins the chat's work item.
       create_work_item: makeWorkItem,
       required_capabilities: capabilities,
@@ -617,6 +618,14 @@ function showTab(tab) {
   $("tab-chats").setAttribute("aria-selected", String(!items));
   $("tab-items").setAttribute("aria-selected", String(items));
   if (items) loadItems();
+}
+
+async function loadSpaces() {
+  try {
+    const spaces = (await api("/spaces")).spaces;
+    $("new-item-space").innerHTML = spaces.map((space) =>
+      `<option value="${esc(space.slug)}" ${space.slug === "general" ? "selected" : ""}>${esc(space.name)}</option>`).join("");
+  } catch (e) { fail(e); }
 }
 
 async function loadItems() {
@@ -1239,5 +1248,5 @@ const theme = {
 };
 theme.init();
 $("theme-toggle").onclick = () => theme.toggle();
-Promise.all([loadChats(), loadRepositories(), loadDeploymentTargets(), loadItems()]);
+Promise.all([loadChats(), loadRepositories(), loadDeploymentTargets(), loadItems(), loadSpaces()]);
 </script>

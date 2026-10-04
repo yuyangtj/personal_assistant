@@ -1,0 +1,7 @@
+slug: shopping
+name: Shopping
+kind: shopping
+description: Things to buy, shopping lists, product research, and price comparisons. Purchases always need your confirmation.
+aliases:
+  - groceries
+  - buy

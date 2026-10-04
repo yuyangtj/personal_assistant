@@ -414,6 +414,11 @@ def create_task_from_chat_message(
             source_context=_repository_context(request, body.source_context, body.repository_id),
             work_item_id=body.work_item_id,
             create_work_item=body.create_work_item,
+            space=(
+                body.space
+                if body.space and request.app.state.space_registry.get(body.space)
+                else None
+            ),
         )
     except ChatSessionNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error

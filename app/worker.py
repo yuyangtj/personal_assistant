@@ -44,8 +44,10 @@ from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.schedules import Scheduler
 from app.service import TaskService
+from app.spaces import SpaceRegistry
 from app.tools.search import build_search
 from app.validation import ValidationProfileRegistry
+from app.work_items import configure_spaces
 from app.workflows import WorkflowRegistry, WorkflowService
 
 logger = logging.getLogger(__name__)
@@ -642,6 +644,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     settings = Settings.from_env()
+    configure_spaces(SpaceRegistry.from_directory(settings.spaces_directory))
     database = Database(settings.database_url)
     if settings.auto_create_schema:
         database.create_schema()

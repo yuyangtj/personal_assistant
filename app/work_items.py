@@ -53,6 +53,7 @@ from app.persistence.models import (
     utc_now,
 )
 from app.persistence.repository import ChatMessageRepository, TaskRepository
+from app.spaces import SpaceRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -99,14 +100,26 @@ def item_title(text: str) -> str:
     return normalized[:77].rstrip() + "…"
 
 
+_SPACE_CATALOG: dict[str, tuple[str, str]] = {
+    slug: (name, kind) for slug, name, kind in DEFAULT_SPACES
+}
+
+
+def configure_spaces(registry: SpaceRegistry) -> None:
+    """Use the space packs from ``spaces/*.yaml`` as the catalog of known spaces."""
+    _SPACE_CATALOG.clear()
+    _SPACE_CATALOG.update(
+        {manifest.slug: (manifest.name, manifest.kind) for manifest in registry.list()}
+    )
+
+
 def get_space(session: Session, slug: str) -> SpaceModel:
     space = session.scalar(select(SpaceModel).where(SpaceModel.slug == slug))
     if space is not None:
         return space
-    defaults = {default_slug: (name, kind) for default_slug, name, kind in DEFAULT_SPACES}
-    if slug not in defaults:
+    if slug not in _SPACE_CATALOG:
         raise SpaceNotFoundError(slug)
-    name, kind = defaults[slug]
+    name, kind = _SPACE_CATALOG[slug]
     space = SpaceModel(id=str(uuid4()), slug=slug, name=name, kind=kind)
     session.add(space)
     session.flush()
@@ -565,7 +578,7 @@ class WorkItemService:
 
     def list_spaces(self) -> list[SpaceModel]:
         with self.database.session() as session, session.begin():
-            for slug, _name, _kind in DEFAULT_SPACES:
+            for slug in list(_SPACE_CATALOG):
                 get_space(session, slug)
             return list(session.scalars(select(SpaceModel).order_by(SpaceModel.slug)))
 
