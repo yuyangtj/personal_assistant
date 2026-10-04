@@ -189,3 +189,14 @@ def test_posting_a_message_returns_a_decision(client: TestClient) -> None:
 def test_chat_model_hands_coding_requests_to_the_workflow() -> None:
     assert "coding workflow" in CONVERSATION_PROMPT
     assert "never say you cannot work on their" in CONVERSATION_PROMPT
+
+
+def test_null_goal_and_reason_are_accepted(repositories: RepositoryRegistry) -> None:
+    chat = ScriptedChat(
+        json.dumps({"intent": "answer", "goal": None, "reason": None, "confidence": 1})
+    )
+
+    decision = Triager(repositories, chat).decide("how are you today?")
+
+    assert (decision.intent, decision.source) == (TriageIntent.ANSWER, "model")
+    assert decision.goal == "how are you today?"
