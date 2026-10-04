@@ -48,6 +48,8 @@ class EventType(StrEnum):
     CODING_CHECKPOINT = "CODING_CHECKPOINT"
     CODING_RECONCILED = "CODING_RECONCILED"
     WORKER_LEASE_RENEWED = "WORKER_LEASE_RENEWED"
+    #: What a running agent is doing: its plan, a step, or a worktree summary.
+    TASK_PROGRESS = "TASK_PROGRESS"
     TASK_RECOVERED = "TASK_RECOVERED"
 
 

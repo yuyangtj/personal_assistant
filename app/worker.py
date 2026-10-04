@@ -6,7 +6,8 @@ import shutil
 import signal
 import subprocess
 import threading
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from time import monotonic
 
@@ -23,6 +24,7 @@ from app.execution.coding import (
     CodexCliRunner,
     CodingPullRequestExecutor,
     FallbackCodeAgentRunner,
+    KimiAcpRunner,
     KimiCodeCliRunner,
     RepositoryCodingExecutor,
 )
@@ -55,6 +57,40 @@ logger = logging.getLogger(__name__)
 
 class ExecutorAdapterNotFoundError(LookupError):
     pass
+
+
+class ProgressReporter:
+    """Turns an agent's progress into task events without flooding them.
+
+    Plans and milestones are always kept (when they change); steps and worktree
+    summaries at most every ``interval`` seconds.
+    """
+
+    def __init__(
+        self,
+        service: TaskService,
+        task_id: str,
+        *,
+        interval: float = 10.0,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        self.service = service
+        self.task_id = task_id
+        self.interval = interval
+        self.clock = clock
+        self._last_step_at: float | None = None
+        self._last: dict[str, str] = {}
+
+    def __call__(self, text: str, kind: str) -> None:
+        if self._last.get(kind) == text:
+            return
+        if kind in {"tool", "worktree"}:
+            now = self.clock()
+            if self._last_step_at is not None and now - self._last_step_at < self.interval:
+                return
+            self._last_step_at = now
+        self._last[kind] = text
+        self.service.record_progress(self.task_id, text, kind)
 
 
 class _LeaseHeartbeat:
@@ -197,8 +233,11 @@ def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
     for provider in providers:
         if provider == "kimi":
             if settings.kimi_api_key:
+                kimi_runner = (
+                    KimiCodeCliRunner if settings.kimi_code_protocol == "prompt" else KimiAcpRunner
+                )
                 runners.append(
-                    KimiCodeCliRunner(
+                    kimi_runner(
                         api_key=settings.kimi_api_key,
                         base_url=settings.kimi_base_url,
                         executable=settings.kimi_code_executable,
@@ -461,6 +500,8 @@ class TaskWorker:
                 return True
 
             execution_context = dict(task.source_context or {})
+            if executor.id == "coding-pull-request":
+                execution_context["progress"] = ProgressReporter(self.service, task.id)
             if executor.id in {"model-conversation", "coding-pull-request", "tool-agent"}:
                 work_items = self.service.work_item_context(task)
                 if work_items:

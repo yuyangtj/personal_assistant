@@ -167,7 +167,10 @@ def list_work_item_runs(
         runs = _items(request).runs(reference, limit=limit)
     except WorkItemNotFoundError as error:
         raise _not_found(error) from error
-    return TaskListResponse(tasks=[TaskResponse.from_model(task) for task in runs])
+    progress = request.app.state.task_service.task_progress([task.id for task in runs])
+    return TaskListResponse(
+        tasks=[TaskResponse.from_model(task, progress.get(task.id)) for task in runs]
+    )
 
 
 @router.get("/work-items/{reference}/timeline", response_model=TimelineResponse)

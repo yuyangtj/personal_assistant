@@ -144,6 +144,7 @@
   .choices button:disabled { opacity: .4; }
   .choices button.picked:disabled { opacity: 1; box-shadow: 0 0 0 2px var(--accent) inset; }
   .block-link { display: block; margin-top: 7px; }
+  .plan { white-space: pre-wrap; font-size: 12.5px; margin-bottom: 8px; }
   .bubble .chip { margin-top: 7px; padding: 2px 9px; }
   .badge {
     display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 999px;
@@ -506,6 +507,8 @@ function taskCardLabel(task) {
   if (task.status === "waiting_for_approval") return `${kind} · waiting for your review`;
   if (task.status === "created") return `${kind} queued…`;
   if (!active(task)) return `${kind} · ${label(task.status)}`;
+  // What the agent itself last reported, e.g. "Writing app/web/index.html".
+  if (task.progress) return `${kind} · ${task.progress}`;
   return research ? "Researching…" : kind === "Reply" ? "Thinking…" : `${kind} working…`;
 }
 
@@ -791,6 +794,17 @@ function hideTask() {
   closeTaskPanel();
 }
 
+// The agent's own plan and its latest steps, while it works and after.
+function liveProgress(task, events) {
+  const steps = events.filter((event) => event.event_type === "TASK_PROGRESS"
+    && event.payload.kind !== "plan").slice(-8);
+  if (!task.plan && !steps.length) return "";
+  return `<h2>${active(task) ? "Live progress" : "What the agent did"}</h2><div class="panel-card">`
+    + (task.plan ? `<div class="plan">${esc(task.plan)}</div>` : "")
+    + steps.map((event) => `<div class="ev">${esc(new Date(event.created_at).toLocaleTimeString())} · ${esc(event.payload.text)}</div>`).join("")
+    + `</div>`;
+}
+
 function codingWorkflow(ctx, task, prStatus) {
   const checkpoint = ctx.coding_checkpoint;
   if (!checkpoint) return "";
@@ -991,6 +1005,7 @@ async function renderTask(id) {
         <div class="summary-card"><div class="key">Updated</div><div class="value">${new Date(task.updated_at).toLocaleString()}</div></div>
       </div>
       ${lineage}
+      ${liveProgress(task, events.events)}
       ${codingWorkflow(ctx, task, prStatus)}
       ${pullRequestPanel(prStatus, approval)}
       ${deploymentPanel(task, ctx, deploymentRun, deploymentEvents)}
