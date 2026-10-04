@@ -441,7 +441,11 @@ function renderTranscript() {
   const atBottom = $("transcript").scrollHeight - $("transcript").scrollTop
     - $("transcript").clientHeight < 80;
   $("transcript").innerHTML = state.messages.map((m) => {
-    const task = m.linked_task_id ? byId[m.linked_task_id] : null;
+    const linked = m.linked_task_id ? byId[m.linked_task_id] : null;
+    // Every chat reply runs as a small task; only real work, running, or failed tasks
+    // earn a card, so ordinary conversation reads like a chat.
+    const task = linked && (active(linked) || linked.status !== "completed"
+      || (linked.required_capabilities || []).length || linked.work_item_id) ? linked : null;
     const who = m.role === "user" ? "YOU" : m.role === "system" ? "TASK REFERENCE" : "ASSISTANT";
     const action = m.role === "user" && !m.linked_task_id ? messageAction(m) : "";
     // The bubble keeps the message's own line breaks (pre-wrap), so no template

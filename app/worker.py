@@ -653,6 +653,10 @@ def main() -> None:
     }
     conversation_executor = build_conversation_executor(settings)
     if conversation_executor is not None:
+        conversation_executor.research_available = bool(
+            settings.tavily_api_key or settings.brave_search_api_key
+        )
+    if conversation_executor is not None:
         executors[conversation_executor.id] = conversation_executor
     else:
         logger.warning(

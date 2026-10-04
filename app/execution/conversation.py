@@ -49,14 +49,28 @@ Respond with only a JSON object: {"reply": "<spoken reply>", "emotion": "<one of
 Curious, Excited, Concerned, Neutral>", "action": <one action object or null>}."""
 
 
+#: Added when the web research agent is installed, instead of a flat "can't browse".
+RESEARCH_HANDOFF = """
+You cannot browse the web yourself, but the assistant's research agent can. If the user
+asks you to find, look up, or compare something online, say you can research it for
+them and that they can confirm the research card; never just say you cannot browse."""
+
+
 class ConversationExecutor:
     """Answers requests conversationally with a chat model, as short speakable replies."""
 
     id = "model-conversation"
 
-    def __init__(self, client: ChatClient, *, now: Callable[[], datetime] | None = None):
+    def __init__(
+        self,
+        client: ChatClient,
+        *,
+        now: Callable[[], datetime] | None = None,
+        research_available: bool = False,
+    ):
         self.client = client
         self._now = now or (lambda: datetime.now(UTC))
+        self.research_available = research_available
 
     def execute(
         self,
@@ -102,7 +116,8 @@ class ConversationExecutor:
         history: Sequence[ConversationTurn],
         context: Mapping[str, Any],
     ) -> list[ChatMessage]:
-        messages = [ChatMessage("system", f"{SYSTEM_PROMPT}\n{self._clock(context)}")]
+        prompt = SYSTEM_PROMPT + (RESEARCH_HANDOFF if self.research_available else "")
+        messages = [ChatMessage("system", f"{prompt}\n{self._clock(context)}")]
         parent = context.get("parent_task")
         if isinstance(parent, dict):
             # A curated snapshot assembled by the backend, never raw task output.
