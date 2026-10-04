@@ -8,7 +8,7 @@ from app.capabilities import CapabilityRegistry
 from app.config import Settings
 from app.decision import CodingRunnerRegistry
 from app.deployments import DeploymentRegistry, HostDeployerSpool
-from app.integrations.factory import chat_client_chain
+from app.integrations.factory import triage_client
 from app.integrations.gemini_tts import GeminiTtsClient
 from app.integrations.github import GitHubClient
 from app.integrations.speech import CachedSpeechSynthesizer
@@ -60,13 +60,7 @@ def create_app(
     application.state.work_item_service = WorkItemService(database)
     application.state.triager = Triager(
         repository_registry,
-        (
-            chat_client_chain(
-                resolved_settings, timeout_seconds=resolved_settings.triage_timeout_seconds
-            )
-            if resolved_settings.triage_model_enabled
-            else None
-        ),
+        triage_client(resolved_settings) if resolved_settings.triage_model_enabled else None,
         min_confidence=resolved_settings.triage_min_confidence,
     )
     application.state.capability_registry = registry

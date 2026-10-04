@@ -27,6 +27,7 @@ class Settings:
     deploy_spool_directory: Path | None = None
     brief_writeback_enabled: bool = False
     triage_model_enabled: bool = False
+    triage_provider: str = "kimi"
     triage_timeout_seconds: float = 8.0
     triage_min_confidence: float = 0.6
     brief_writeback_idle_seconds: int = 600
@@ -159,6 +160,7 @@ class Settings:
             triage_model_enabled=_as_bool(
                 os.getenv("ASSISTANT_TRIAGE_MODEL_ENABLED", str(defaults.triage_model_enabled))
             ),
+            triage_provider=os.getenv("ASSISTANT_TRIAGE_PROVIDER", defaults.triage_provider),
             triage_timeout_seconds=float(
                 os.getenv(
                     "ASSISTANT_TRIAGE_TIMEOUT_SECONDS", str(defaults.triage_timeout_seconds)

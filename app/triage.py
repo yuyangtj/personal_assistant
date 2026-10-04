@@ -164,7 +164,8 @@ class Triager:
         ]
         reason = "no attempt made"
         for _attempt in range(self.max_attempts):
-            completion = client.complete(messages, max_tokens=300)
+            # Room for models that think before answering; the reply itself is small.
+            completion = client.complete(messages, max_tokens=800)
             try:
                 return ModelSuggestion.model_validate(extract_json_object(completion.text))
             except (ValueError, ValidationError) as error:
