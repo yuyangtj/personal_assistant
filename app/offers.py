@@ -41,6 +41,7 @@ def offer_for(
 ) -> Offer | None:
     """The assistant's question for a proposal or clarification, or None to just answer."""
     goal = decision.goal
+    quoted = goal.strip().rstrip(".")  # it sits inside a sentence that adds its own
     answer = ChoiceOption(
         label="Just chat about it",
         action="answer",
@@ -63,7 +64,7 @@ def offer_for(
             answer,
         ]
         reply = (
-            f"That sounds like a code change in {name}: “{goal}”. Want me to set up a "
+            f"That sounds like a code change in {name}: “{quoted}”. Want me to set up a "
             "coding workflow? Nothing runs until you approve it."
         )
     elif decision.intent == TriageIntent.PROPOSE_TASK:
@@ -83,9 +84,9 @@ def offer_for(
             answer,
         ]
         reply = (
-            f"I can research this on the web: “{goal}”."
+            f"I can research this on the web: “{quoted}”."
             if research
-            else f"This looks like something to keep track of: “{goal}”."
+            else f"This looks like something to keep track of: “{quoted}”."
         )
     elif decision.intent == TriageIntent.CLARIFY and decision.options:
         options = []
