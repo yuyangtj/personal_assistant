@@ -38,6 +38,37 @@ def start_coding_task(
     return workflows.attach_coding_task(run.id, task_id=task.id)
 
 
+def revise_pull_request(tasks: TaskService, task_id: str, instructions: str):
+    """Start a revision of a run's open draft PR on the same branch.
+
+    The coding executor refuses the revision if the PR head moved since it was opened
+    (it checks the expected head before touching anything), so no live GitHub check is
+    needed here; review comments are not pulled in, only the user's instructions.
+    """
+    parent = tasks.get_task(task_id)
+    approval = tasks.get_pending_approval(task_id)
+    repository_id = str((parent.source_context or {}).get("repository_id") or "")
+    head_branch = str(approval.get("head_branch") or "")
+    if not repository_id or not head_branch:
+        raise ValueError("This run has no pull request branch to revise")
+    revision = tasks.create_follow_up_task(
+        task_id,
+        request=instructions,
+        required_capabilities=["coding-pull-request"],
+        source_context={
+            "repository_id": repository_id,
+            "revision_pull_request": {
+                "number": int(approval["number"]),
+                "head_branch": head_branch,
+                "expected_head_sha": str(approval.get("expected_head_sha") or ""),
+                "review_feedback": [],
+            },
+        },
+    )
+    tasks.supersede_pull_request_approval(task_id, revision_task_id=revision.id)
+    return revision
+
+
 def start_coding_run(
     tasks: TaskService,
     workflows: WorkflowService,

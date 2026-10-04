@@ -183,3 +183,104 @@ def test_a_ready_pull_request_is_reported_in_the_chat(client: TestClient) -> Non
         "PR #41 on GitHub",
     ]
     assert report["blocks"][0]["href"] == f"#/chats/{chat}?task={task.id}"
+
+
+def _started_run(client: TestClient) -> tuple[str, str, dict]:
+    chat, message = _chat_with_message(client, "change the icon")
+    starter, _ = _supervisor(
+        client,
+        _step(action="start_coding", repository_id="personal-assistant", goal="Change the icon."),
+        _step(action="reply", reply="On it."),
+    )
+    _run(starter, chat, message, "change the icon")
+    (run,) = client.get("/workflow-runs").json()["runs"]
+    return chat, message, run
+
+
+def _execution(client: TestClient, task_id: str) -> str:
+    service = client.app.state.task_service
+    service.claim_next_task(worker_id="w", lease_seconds=30)
+    return service.start_execution(
+        task_id,
+        capability_id="coding-pull-request",
+        executor_id="coding-pull-request",
+        execution_input={},
+    )
+
+
+def test_redirecting_a_working_agent_sends_it_the_instructions(client: TestClient) -> None:
+    chat, message, run = _started_run(client)
+    _execution(client, run["task_id"])
+    executor, model = _supervisor(
+        client,
+        _step(action="message_agent", run=run["id"][:8], text="Use a rocket instead."),
+        _step(action="reply", reply="Told the agent to use a rocket."),
+    )
+
+    _run(executor, chat, message, "make it a rocket instead")
+
+    inbox = client.app.state.task_service.user_messages_after(run["task_id"], 0)
+    assert [text for _, text in inbox] == ["Use a rocket instead."]
+    assert '"sent_to"' in model.requests[1][-1].content
+
+
+def test_redirecting_after_the_pr_is_open_starts_a_revision(client: TestClient) -> None:
+    chat, message, run = _started_run(client)
+    service = client.app.state.task_service
+    execution_id = _execution(client, run["task_id"])
+    service.start_validation(run["task_id"], execution_id, output={"summary": "Opened a PR"})
+    service.request_approval(
+        run["task_id"],
+        execution_id,
+        artifacts=[],
+        approval={
+            "number": 41,
+            "url": "https://github.com/acme/widget/pull/41",
+            "head_branch": "assistant/task-abc",
+            "expected_head_sha": "a" * 40,
+        },
+    )
+    executor, _ = _supervisor(
+        client,
+        _step(action="message_agent", run=run["id"][:8], text="Also make it blue."),
+        _step(action="reply", reply="Started a revision of PR 41."),
+    )
+
+    _run(executor, chat, message, "also make it blue")
+
+    revision = client.app.state.task_service.get_task(
+        client.get(f"/tasks/{run['task_id']}").json()["superseded_by_task_id"]
+    )
+    assert revision.original_request == "Also make it blue."
+    assert revision.source_context["revision_pull_request"]["head_branch"] == "assistant/task-abc"
+    assert revision.source_context["revision_pull_request"]["expected_head_sha"] == "a" * 40
+
+
+def test_redirecting_a_finishing_run_is_refused(client: TestClient) -> None:
+    chat, message, run = _started_run(client)
+    execution_id = _execution(client, run["task_id"])
+    client.app.state.task_service.start_validation(
+        run["task_id"], execution_id, output={"summary": "Validating"}
+    )
+    executor, model = _supervisor(
+        client,
+        _step(action="message_agent", run=run["id"][:8], text="Use a rocket."),
+        _step(action="reply", reply="It's finishing; I'll revise it once the PR is open."),
+    )
+
+    _run(executor, chat, message, "make it a rocket")
+
+    assert "finishing up" in model.requests[1][-1].content
+    assert client.app.state.task_service.user_messages_after(run["task_id"], 0) == []
+
+
+def test_supervisor_replies_drop_markdown_emphasis(client: TestClient) -> None:
+    chat, message = _chat_with_message(client, "status?")
+    executor, _ = _supervisor(
+        client,
+        _step(action="reply", reply="Recent work:\n- **PR #35** is ready\n\n- __Run 804e__ failed"),
+    )
+
+    output = _run(executor, chat, message, "status?")
+
+    assert output["reply"] == "Recent work:\n- PR #35 is ready\n- Run 804e failed"

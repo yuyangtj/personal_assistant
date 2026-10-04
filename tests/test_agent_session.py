@@ -179,3 +179,125 @@ def test_running_tasks_show_their_latest_progress(client: TestClient) -> None:
     (listed,) = client.get(f"/chat-sessions/{chat}/tasks").json()["tasks"]
     assert listed["progress"] == "Running: pytest"
     assert client.get(f"/tasks/{task.id}/context").status_code == 200
+
+
+# --- steering ------------------------------------------------------------------------
+
+
+def test_new_instructions_continue_the_same_acp_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktree = _worktree(tmp_path)
+    progress: list[tuple[str, str]] = []
+    inbox = iter([None, "Use a rocket icon instead."])
+
+    report = _runner(tmp_path, monkeypatch, "steer").run(
+        worktree=worktree,
+        request="Change the icon",
+        timeout_seconds=20,
+        is_cancelled=lambda: False,
+        on_progress=lambda text, kind: progress.append((kind, text)),
+        next_guidance=lambda: next(inbox, None),
+    )
+
+    assert report.summary == "Followed the redirect"
+    # The second turn of the same session carried the instructions.
+    assert "Use a rocket icon instead." in (worktree / "README.md").read_text()
+    assert ("milestone", "Redirected: Use a rocket icon instead.") in progress
+
+
+def test_a_one_shot_agent_restarts_with_new_instructions(tmp_path: Path) -> None:
+    from app.execution.coding import _run_code_agent_process
+
+    agent = tmp_path / "agent.py"
+    agent.write_text(
+        "import sys, time\n"
+        "prompt = sys.argv[1]\n"
+        "if 'rocket' not in prompt:\n"
+        "    time.sleep(30)\n"
+        "print('done: ' + prompt.splitlines()[-1])\n",
+        encoding="utf-8",
+    )
+    inbox = iter([None, "Use a rocket icon instead."])
+    progress: list[str] = []
+
+    def command(notes=()) -> list[str]:
+        return [sys.executable, str(agent), "\n".join(["Change the icon", *notes])]
+
+    output = _run_code_agent_process(
+        command=command(),
+        worktree=tmp_path,
+        timeout_seconds=20,
+        is_cancelled=lambda: False,
+        environment={"PATH": "/usr/bin:/bin"},
+        display_name="Agent",
+        on_progress=lambda text, kind: progress.append(text),
+        next_guidance=lambda: next(inbox, None),
+        redirected_command=command,
+    )
+
+    assert output.strip() == "done: Use a rocket icon instead."
+    assert "Redirected: Use a rocket icon instead." in progress
+
+
+def test_the_guidance_inbox_hands_each_message_over_once(client: TestClient) -> None:
+    from app.worker import GuidanceInbox
+
+    service = client.app.state.task_service
+    task = service.create_task(request="Change the icon")
+    service.add_user_message(task.id, "Queued note")  # sent before the agent started
+    inbox = GuidanceInbox(service, task.id)
+
+    assert inbox() == "Queued note"
+    assert inbox() is None
+    service.add_user_message(task.id, "Make it a rocket")
+    service.add_user_message(task.id, "and blue")
+    assert inbox() == "Make it a rocket\nand blue"
+    assert inbox() is None
+
+
+def test_git_commands_on_a_shared_checkout_take_turns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    import time
+
+    from app.execution import coding
+
+    shared, worktree = tmp_path / "shared", tmp_path / "worktree"
+    coding._share_repository(shared)
+    active: dict[str, int] = {"shared": 0, "most": 0}
+    overlap_in_worktree = threading.Event()
+    both_in_worktrees = threading.Barrier(2, timeout=2)
+
+    def fake_run_git(directory, arguments, timeout):
+        if directory == shared:
+            active["shared"] += 1
+            active["most"] = max(active["most"], active["shared"])
+            time.sleep(0.05)
+            active["shared"] -= 1
+        else:  # separate worktrees run side by side: both must be inside at once
+            both_in_worktrees.wait()
+            overlap_in_worktree.set()
+        return subprocess.CompletedProcess(arguments, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(coding, "_run_git", fake_run_git)
+    threads = [
+        threading.Thread(target=coding._git, args=(directory, "fetch"))
+        for directory in (shared, shared, shared, worktree, worktree)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert active["most"] == 1
+    assert overlap_in_worktree.is_set()
+
+
+def test_coding_concurrency_defaults_to_two(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import Settings
+
+    assert Settings.from_env().coding_concurrency == 2
+    monkeypatch.setenv("ASSISTANT_CODING_CONCURRENCY", "0")
+    assert Settings.from_env().coding_concurrency == 1
