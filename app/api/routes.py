@@ -70,6 +70,7 @@ from app.service import (
     TaskNotFoundError,
     TaskService,
 )
+from app.work_items import WorkItemNotFoundError
 from app.workflows import (
     WorkflowIntegrationUnavailableError,
     WorkflowRunConflictError,
@@ -333,11 +334,15 @@ def create_task_from_chat_message(
             goal=body.goal,
             required_capabilities=body.required_capabilities,
             source_context=_repository_context(request, body.source_context, body.repository_id),
+            work_item_id=body.work_item_id,
+            create_work_item=body.create_work_item,
         )
     except ChatSessionNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error
     except ChatMessageNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat message not found") from error
+    except WorkItemNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Work item not found") from error
     except MessageHasWorkflowError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
@@ -683,9 +688,12 @@ def create_task(body: CreateTaskRequest, request: Request) -> TaskResponse:
             chat_session_id=body.chat_session_id,
             external_source=body.external_source,
             external_key=body.external_key,
+            work_item_id=body.work_item_id,
         )
     except ChatSessionNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error
+    except WorkItemNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Work item not found") from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return TaskResponse.from_model(task)
@@ -1134,6 +1142,7 @@ def start_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunRes
             origin_message_id=run.origin_message_id,
             external_source="workflow",
             external_key=run.id,
+            work_item_space="coding",
         )
         return WorkflowRunResponse.from_model(
             workflow_service.attach_coding_task(run.id, task_id=task.id)

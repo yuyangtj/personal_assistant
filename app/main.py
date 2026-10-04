@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from app.api.routes import router
+from app.api.work_items import router as work_items_router
 from app.capabilities import CapabilityRegistry
 from app.config import Settings
 from app.decision import CodingRunnerRegistry
@@ -16,6 +17,7 @@ from app.providers import DatabaseProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.service import TaskService
 from app.validation import ValidationProfileRegistry
+from app.work_items import WorkItemService
 from app.workflows import WorkflowRegistry, WorkflowService
 
 
@@ -53,6 +55,7 @@ def create_app(
     application.state.database = database
     application.state.task_service = TaskService(database)
     application.state.memory_service = MemoryService(database)
+    application.state.work_item_service = WorkItemService(database)
     application.state.capability_registry = registry
     application.state.repository_registry = repository_registry
     application.state.workflow_registry = workflow_registry
@@ -95,6 +98,7 @@ def create_app(
     )
     application.state.approval_token = resolved_settings.approval_token
     application.include_router(router)
+    application.include_router(work_items_router)
     return application
 
 
