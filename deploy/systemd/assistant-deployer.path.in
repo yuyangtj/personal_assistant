@@ -1,0 +1,10 @@
+# Rendered by scripts/install-host-deployer.sh; edit the template, not /etc/systemd/system.
+[Unit]
+Description=Watch for personal assistant deployment requests
+
+[Path]
+PathExistsGlob=@SPOOL@/requests/*.json
+Unit=assistant-deployer.service
+
+[Install]
+WantedBy=multi-user.target

@@ -7,13 +7,20 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 
-from app.deployments import DeploymentRegistry
+from app.deployments import (
+    DeploymentRegistry,
+    DeploymentStrategy,
+    DeploymentTarget,
+    HostDeployerSpool,
+    HostDeploymentState,
+)
 from app.domain.enums import TaskStatus
 from app.integrations.github import GitHubClient
 from app.persistence.database import Database
 from app.persistence.models import (
     ChatMessageModel,
     ChatSessionModel,
+    CodingRunModel,
     TaskModel,
     WorkflowRunEventModel,
     WorkflowRunModel,
@@ -34,6 +41,10 @@ class WorkflowRunConflictError(ValueError):
     pass
 
 
+class WorkflowIntegrationUnavailableError(RuntimeError):
+    pass
+
+
 class WorkflowService:
     """Persists workflow authority and advances state only from trusted evidence."""
 
@@ -43,11 +54,13 @@ class WorkflowService:
         registry: WorkflowRegistry,
         repository_registry: RepositoryRegistry,
         deployment_registry: DeploymentRegistry | None = None,
+        host_deployer: HostDeployerSpool | None = None,
     ):
         self.database = database
         self.registry = registry
         self.repository_registry = repository_registry
         self.deployment_registry = deployment_registry
+        self.host_deployer = host_deployer
 
     def create_run(
         self,
@@ -264,14 +277,21 @@ class WorkflowService:
                 raise WorkflowRunConflictError(
                     "Deployment workflow must be approved before it can start"
                 )
-            if self.deployment_registry is None:
-                raise WorkflowRunConflictError("Deployment registry is not configured")
-            target = self.deployment_registry.get(
-                str(run.workflow_input["deployment_target_id"])
-            )
-            if not target.enabled or not target.workflow_file:
+            target = self._deployment_target(run)
+            if not target.enabled:
+                raise WorkflowRunConflictError("Deployment target is disabled")
+            if target.strategy == DeploymentStrategy.GITHUB_ACTIONS and not target.workflow_file:
                 raise WorkflowRunConflictError(
                     "Deployment target has no enabled GitHub Actions workflow"
+                )
+            if target.strategy == DeploymentStrategy.HOST_DEPLOYER and self.host_deployer is None:
+                raise WorkflowRunConflictError("Host deployer spool is not configured")
+            if run.workflow_input.get("force") is not True and self._coding_run_in_progress(
+                session
+            ):
+                # A rollout recreates the coding worker; wait instead of interrupting it.
+                raise WorkflowRunConflictError(
+                    "A coding run is executing; deploy after it finishes"
                 )
             repository = self.repository_registry.get(target.repository_id)
             commit_sha = str(run.workflow_input["commit_sha"])
@@ -283,35 +303,47 @@ class WorkflowService:
                 raise WorkflowRunConflictError(
                     "Deployment commit is no longer the exact head of the trusted base branch"
                 )
-            display_title = f"Deploy {run.id}"
-            github.dispatch_workflow(
-                repository=repository.github_repository,
-                workflow_file=target.workflow_file,
-                ref=repository.base_branch,
-                inputs={"commit_sha": commit_sha, "workflow_run_id": run.id},
-            )
-            run.status = WorkflowRunStatus.RUNNING.value
-            run.current_stage = "deploy"
-            run.updated_at = utc_now()
-            self._append_event(
-                session,
-                run,
-                "DEPLOYMENT_DISPATCHED",
-                {
+            if self.host_deployer is not None and target.strategy == (
+                DeploymentStrategy.HOST_DEPLOYER
+            ):
+                self.host_deployer.submit(
+                    workflow_run_id=run.id,
+                    commit_sha=commit_sha,
+                    deployment_target_id=target.id,
+                )
+                event_type = "DEPLOYMENT_SUBMITTED"
+                payload: dict[str, Any] = {
+                    "deployment_target_id": target.id,
+                    "strategy": target.strategy.value,
+                    "commit_sha": commit_sha,
+                }
+            else:
+                display_title = f"Deploy {run.id}"
+                github.dispatch_workflow(
+                    repository=repository.github_repository,
+                    workflow_file=target.workflow_file,
+                    ref=repository.base_branch,
+                    inputs={"commit_sha": commit_sha, "workflow_run_id": run.id},
+                )
+                event_type = "DEPLOYMENT_DISPATCHED"
+                payload = {
                     "deployment_target_id": target.id,
                     "repository": repository.github_repository,
                     "workflow_file": target.workflow_file,
                     "commit_sha": commit_sha,
                     "display_title": display_title,
-                },
-            )
+                }
+            run.status = WorkflowRunStatus.RUNNING.value
+            run.current_stage = "deploy"
+            run.updated_at = utc_now()
+            self._append_event(session, run, event_type, payload)
             return run
 
     def sync_deployment(
         self,
         workflow_run_id: str,
         *,
-        github: GitHubClient,
+        github: GitHubClient | None,
     ) -> WorkflowRunModel:
         with self.database.session() as session, session.begin():
             run = session.scalar(
@@ -332,11 +364,12 @@ class WorkflowService:
                 return run
             if run.status != WorkflowRunStatus.RUNNING.value:
                 raise WorkflowRunConflictError("Deployment workflow has not started")
-            if self.deployment_registry is None:
-                raise WorkflowRunConflictError("Deployment registry is not configured")
-            target = self.deployment_registry.get(
-                str(run.workflow_input["deployment_target_id"])
-            )
+            target = self._deployment_target(run)
+            if target.strategy == DeploymentStrategy.HOST_DEPLOYER:
+                self._sync_host_deployment(session, run)
+                return run
+            if github is None:
+                raise WorkflowIntegrationUnavailableError("GitHub integration is not configured")
             if not target.workflow_file:
                 raise WorkflowRunConflictError("Deployment target has no workflow file")
             repository = self.repository_registry.get(target.repository_id)
@@ -372,6 +405,82 @@ class WorkflowService:
                 },
             )
             return run
+
+    def sync_running_deployments(self, *, github: GitHubClient | None = None) -> list[str]:
+        """Advance every running deployment; returns the ids that reached a final state.
+
+        The API restarts during its own rollout, so the worker reconciles in the
+        background rather than relying on a client to keep polling.
+        """
+        with self.database.session() as session:
+            run_ids = session.scalars(
+                select(WorkflowRunModel.id)
+                .where(WorkflowRunModel.workflow_id == "assistant-deployment")
+                .where(WorkflowRunModel.status == WorkflowRunStatus.RUNNING.value)
+                .order_by(WorkflowRunModel.created_at)
+            ).all()
+        finished: list[str] = []
+        for run_id in run_ids:
+            try:
+                run = self.sync_deployment(run_id, github=github)
+            except WorkflowIntegrationUnavailableError:
+                continue
+            if run.status != WorkflowRunStatus.RUNNING.value:
+                finished.append(run.id)
+        return finished
+
+    def _sync_host_deployment(self, session, run: WorkflowRunModel) -> None:
+        if self.host_deployer is None:
+            raise WorkflowRunConflictError("Host deployer spool is not configured")
+        status = self.host_deployer.status(run.id)
+        if status is None or status.state == HostDeploymentState.RUNNING:
+            return
+        if status.commit_sha != run.workflow_input["commit_sha"]:
+            raise WorkflowRunConflictError("Deploy status reports a different commit")
+        if status.state == HostDeploymentState.SUCCEEDED:
+            run.status = WorkflowRunStatus.COMPLETED.value
+            run.current_stage = "promote"
+            event_type = "WORKFLOW_COMPLETED"
+        elif status.state == HostDeploymentState.ROLLED_BACK:
+            run.status = WorkflowRunStatus.FAILED.value
+            run.current_stage = "health_check"
+            event_type = "DEPLOYMENT_ROLLED_BACK"
+        else:
+            run.status = WorkflowRunStatus.FAILED.value
+            run.current_stage = status.stage
+            event_type = "WORKFLOW_FAILED"
+        run.updated_at = utc_now()
+        self._append_event(
+            session,
+            run,
+            event_type,
+            {
+                "strategy": DeploymentStrategy.HOST_DEPLOYER.value,
+                "state": status.state.value,
+                "stage": run.current_stage,
+                "commit_sha": status.commit_sha,
+                "previous_sha": status.previous_sha,
+                "finished_at": status.finished_at.isoformat() if status.finished_at else None,
+                "log_tail": status.log_tail,
+            },
+        )
+
+    def _deployment_target(self, run: WorkflowRunModel) -> DeploymentTarget:
+        if self.deployment_registry is None:
+            raise WorkflowRunConflictError("Deployment registry is not configured")
+        return self.deployment_registry.get(str(run.workflow_input["deployment_target_id"]))
+
+    @staticmethod
+    def _coding_run_in_progress(session) -> bool:
+        return (
+            session.scalar(
+                select(func.count())
+                .select_from(TaskModel)
+                .join(CodingRunModel, CodingRunModel.task_id == TaskModel.id)
+                .where(TaskModel.status == TaskStatus.EXECUTING.value)
+            )
+            > 0
+        )
 
     def sync_run(self, workflow_run_id: str) -> WorkflowRunModel:
         with self.database.session() as session, session.begin():

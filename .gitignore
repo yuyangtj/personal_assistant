@@ -13,3 +13,4 @@ backups/
 .coding-repositories/
 .coding-worktrees/
 hetzner-mcp/
+.deploy-current-tag

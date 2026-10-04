@@ -37,6 +37,7 @@ services:
 
   api:
     build: .
+    image: personal-assistant:${ASSISTANT_IMAGE_TAG:-local}
     restart: unless-stopped
     depends_on:
       migrate:
@@ -60,14 +61,25 @@ services:
       ASSISTANT_GITHUB_TOKEN: ${ASSISTANT_GITHUB_TOKEN:-}
       ASSISTANT_GITHUB_API_BASE_URL: ${ASSISTANT_GITHUB_API_BASE_URL:-https://api.github.com}
       ASSISTANT_APPROVAL_TOKEN: ${ASSISTANT_APPROVAL_TOKEN:?set ASSISTANT_APPROVAL_TOKEN}
+      ASSISTANT_DEPLOY_SPOOL_DIRECTORY: /deploy
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
     expose:
       - "8000"
+    volumes:
+      # Deploy requests for the host deployer (scripts/host-deployer.sh) and its replies.
+      - type: bind
+        source: ${ASSISTANT_HOST_DEPLOY_SPOOL:-/srv/personal-assistant/deploy}/requests
+        target: /deploy/requests
+      - type: bind
+        source: ${ASSISTANT_HOST_DEPLOY_SPOOL:-/srv/personal-assistant/deploy}/status
+        target: /deploy/status
+        read_only: true
     networks:
       - private
 
   worker:
     build: .
+    image: personal-assistant:${ASSISTANT_IMAGE_TAG:-local}
     restart: unless-stopped
     depends_on:
       migrate:
@@ -101,7 +113,14 @@ services:
       ASSISTANT_MANAGER_MODEL_MINIMUM_CONFIDENCE: ${ASSISTANT_MANAGER_MODEL_MINIMUM_CONFIDENCE:-0.5}
       ASSISTANT_CODE_AGENT_ENABLED: "false"
       ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS: ${ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS:-0.1}
+      ASSISTANT_DEPLOY_SPOOL_DIRECTORY: /deploy
     command: ["python", "-m", "app.worker"]
+    volumes:
+      # The worker only reads deploy results, to finish runs while the API restarts.
+      - type: bind
+        source: ${ASSISTANT_HOST_DEPLOY_SPOOL:-/srv/personal-assistant/deploy}/status
+        target: /deploy/status
+        read_only: true
     networks:
       - private
 
@@ -110,6 +129,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.coding-worker
+    image: personal-assistant-coding:${ASSISTANT_IMAGE_TAG:-local}
     restart: unless-stopped
     depends_on:
       migrate:

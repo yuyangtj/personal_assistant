@@ -2,7 +2,6 @@ id: personal-assistant-production
 name: Personal Assistant production
 repository_id: personal-assistant
 environment: production
-strategy: github_actions
-workflow_file: deploy.yml
+strategy: host_deployer
 requires_approval: true
 enabled: true

@@ -57,6 +57,7 @@ from app.api.schemas import (
     WorkflowRunResponse,
 )
 from app.capabilities.models import CapabilityKind
+from app.deployments import HostDeployerSpoolError
 from app.domain.enums import TaskStatus
 from app.integrations.chat import ProviderError
 from app.integrations.github import GitHubError
@@ -68,7 +69,11 @@ from app.service import (
     TaskNotFoundError,
     TaskService,
 )
-from app.workflows import WorkflowRunConflictError, WorkflowRunNotFoundError
+from app.workflows import (
+    WorkflowIntegrationUnavailableError,
+    WorkflowRunConflictError,
+    WorkflowRunNotFoundError,
+)
 
 router = APIRouter()
 
@@ -1128,7 +1133,7 @@ def start_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunRes
         )
     except WorkflowRunNotFoundError as error:
         raise HTTPException(status_code=404, detail="Workflow run not found") from error
-    except GitHubError as error:
+    except (GitHubError, HostDeployerSpoolError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     except (KeyError, ValueError, WorkflowRunConflictError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -1143,19 +1148,18 @@ def sync_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunResp
         workflow_service = request.app.state.workflow_service
         run = workflow_service.get_run(workflow_run_id)
         if run.workflow_id == "assistant-deployment":
-            github = request.app.state.github_client
-            if github is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail="GitHub integration is not configured",
-                )
-            run = workflow_service.sync_deployment(workflow_run_id, github=github)
+            run = workflow_service.sync_deployment(
+                workflow_run_id,
+                github=request.app.state.github_client,
+            )
         else:
             run = workflow_service.sync_run(workflow_run_id)
     except WorkflowRunNotFoundError as error:
         raise HTTPException(status_code=404, detail="Workflow run not found") from error
     except WorkflowRunConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    except GitHubError as error:
+    except WorkflowIntegrationUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except (GitHubError, HostDeployerSpoolError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return WorkflowRunResponse.from_model(run)
