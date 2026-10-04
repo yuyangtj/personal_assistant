@@ -14,6 +14,7 @@ from app.integrations.github import (
 )
 from app.integrations.speech import SpeechAudio
 from app.persistence.models import ExecutionModel, TaskModel
+from app.workflows import WorkflowRunConflictError
 
 
 def test_create_get_list_and_cancel_task(client: TestClient) -> None:
@@ -277,6 +278,61 @@ def test_message_with_coding_workflow_cannot_become_chat_only_task(
     assert response.status_code == 409
     assert run["id"] in response.json()["detail"]
     assert client.get(f"/chat-sessions/{chat['id']}/tasks").json()["tasks"] == []
+
+
+def test_workflow_start_does_not_reuse_a_chat_task_from_the_same_message(
+    client: TestClient,
+) -> None:
+    client.app.state.approval_token = "workflow-approval-secret"
+    chat = client.post("/chat-sessions", json={}).json()
+    message = client.post(
+        f"/chat-sessions/{chat['id']}/messages",
+        json={"content": "Update the icon for the light and dark mode toggle"},
+    ).json()["message"]
+    # Before the 409 guard existed, the same message could already have a chat-only task.
+    chat_task = client.post(
+        f"/chat-sessions/{chat['id']}/messages/{message['id']}/task", json={}
+    ).json()
+    run_id = client.post(
+        f"/chat-sessions/{chat['id']}/messages/{message['id']}/workflow-run",
+        json={"repository_id": "personal-assistant"},
+    ).json()["id"]
+    client.post(
+        f"/workflow-runs/{run_id}/decision",
+        headers={"X-Assistant-Approval-Token": "workflow-approval-secret"},
+        json={"decision": "approve"},
+    )
+
+    started = client.post(f"/workflow-runs/{run_id}/start")
+
+    assert started.status_code == 200
+    coding_task_id = started.json()["task_id"]
+    assert coding_task_id != chat_task["id"]
+    coding_task = client.get(f"/tasks/{coding_task_id}").json()
+    assert "coding" in coding_task["required_capabilities"]
+    messages = client.get(f"/chat-sessions/{chat['id']}/messages").json()["messages"]
+    original = next(item for item in messages if item["id"] == message["id"])
+    assert original["linked_task_id"] == coding_task_id
+
+
+def test_workflow_refuses_to_attach_a_task_without_coding(client: TestClient) -> None:
+    client.app.state.approval_token = "workflow-approval-secret"
+    run = client.post(
+        "/workflow-runs",
+        json={
+            "workflow_id": "coding-change",
+            "input": {"repository_id": "personal-assistant", "request": "Fix the toggle"},
+        },
+    ).json()
+    client.post(
+        f"/workflow-runs/{run['id']}/decision",
+        headers={"X-Assistant-Approval-Token": "workflow-approval-secret"},
+        json={"decision": "approve"},
+    )
+    chat_task = client.post("/tasks", json={"request": "Fix the toggle"}).json()
+
+    with pytest.raises(WorkflowRunConflictError, match="only start a coding task"):
+        client.app.state.workflow_service.attach_coding_task(run["id"], task_id=chat_task["id"])
 
 
 def test_workflow_runs_can_be_listed_for_one_chat(client: TestClient) -> None:

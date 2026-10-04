@@ -236,8 +236,11 @@ class WorkflowService:
                 return run
             if run.status != WorkflowRunStatus.APPROVED.value:
                 raise WorkflowRunConflictError("Workflow run must be approved before it can start")
-            if session.get(TaskModel, task_id) is None:
+            task = session.get(TaskModel, task_id)
+            if task is None:
                 raise ValueError("Task does not exist")
+            if not {"coding", "pull_request_creation"} & set(task.required_capabilities or []):
+                raise WorkflowRunConflictError("Workflow run can only start a coding task")
             run.task_id = task_id
             run.status = WorkflowRunStatus.RUNNING.value
             run.current_stage = "implement"
