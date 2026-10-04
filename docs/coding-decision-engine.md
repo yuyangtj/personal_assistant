@@ -29,10 +29,11 @@ enable a runner absent from operator configuration.
 - Active cooldowns always sort after available providers, regardless of score.
 - Manifest priority and configured order provide deterministic tie-breaking.
 
-The initial manifests encode the intended preference: Kimi Code is favored for simple
-work, Claude Code with MiniMax is competitive for data/debugging/refactoring work, and
-Codex is favored when architecture, migrations, or security make the task complex. These
-are editable policy values, not claims learned from hidden benchmarks.
+The manifests encode the operator's preference: Kimi Code is the primary runner and leads
+simple, standard, and complex work, so the others act as fallbacks. Behind it, Claude Code
+with MiniMax ranks next for data work, and Codex ranks next when architecture, migrations,
+or security make the task complex. These are editable policy values in
+`coding-runners/*.yaml`, not claims learned from hidden benchmarks.
 
 ## Auditability
 

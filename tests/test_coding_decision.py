@@ -26,7 +26,7 @@ def test_decision_engine_prefers_lower_cost_runner_for_simple_work() -> None:
     assert decision.ordered_providers[0] == "kimi-code"
 
 
-def test_decision_engine_prefers_matching_runner_for_data_work() -> None:
+def test_decision_engine_keeps_kimi_first_and_ranks_data_strength_next() -> None:
     engine = CodingDecisionEngine(
         CodingRunnerRegistry.from_directory("coding-runners"),
         InMemoryProviderStateStore(),
@@ -36,7 +36,7 @@ def test_decision_engine_prefers_matching_runner_for_data_work() -> None:
 
     assert decision.profile.complexity == TaskComplexity.STANDARD
     assert "data" in decision.profile.traits
-    assert decision.ordered_providers[0] == "minimax-claude-code"
+    assert decision.ordered_providers[:2] == ("kimi-code", "minimax-claude-code")
 
 
 def test_decision_engine_prefers_reasoning_for_complex_security_architecture() -> None:
@@ -51,8 +51,22 @@ def test_decision_engine_prefers_reasoning_for_complex_security_architecture() -
     )
 
     assert decision.profile.complexity == TaskComplexity.COMPLEX
-    assert decision.ordered_providers[0] == "codex-cli"
+    assert decision.ordered_providers == ("kimi-code", "codex-cli", "minimax-claude-code")
     assert decision.candidates[0].reasons[-1].startswith("complex_reasoning_fit")
+
+
+def test_decision_engine_keeps_kimi_first_for_long_work_after_one_failure() -> None:
+    store = InMemoryProviderStateStore()
+    store.record_failure("coding:kimi-code", category="execution_failed", cooldown_seconds=0)
+    engine = CodingDecisionEngine(CodingRunnerRegistry.from_directory("coding-runners"), store)
+
+    decision = engine.decide(
+        [Runner("kimi-code"), Runner("minimax-claude-code")],
+        "Add server-side triage for chat messages with tests. " * 20,
+    )
+
+    assert decision.profile.complexity == TaskComplexity.COMPLEX
+    assert decision.ordered_providers == ("kimi-code", "minimax-claude-code")
 
 
 def test_decision_engine_filters_cooling_provider_before_scoring() -> None:
