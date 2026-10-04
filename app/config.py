@@ -27,6 +27,8 @@ class Settings:
     spaces_directory: Path = Path("spaces")
     deploy_spool_directory: Path | None = None
     brief_writeback_enabled: bool = False
+    #: Messages about work go to the supervisor, which can start and inspect coding runs.
+    supervisor_enabled: bool = True
     triage_model_enabled: bool = False
     ntfy_topic_url: str | None = None
     tavily_api_key: str | None = None
@@ -165,6 +167,9 @@ class Settings:
             ),
             deploy_spool_directory=(
                 Path(value) if (value := os.getenv("ASSISTANT_DEPLOY_SPOOL_DIRECTORY")) else None
+            ),
+            supervisor_enabled=_as_bool(
+                os.getenv("ASSISTANT_SUPERVISOR_ENABLED", str(defaults.supervisor_enabled))
             ),
             brief_writeback_enabled=_as_bool(
                 os.getenv(

@@ -140,6 +140,7 @@ class TriageDecisionResponse(BaseModel):
     space: str | None = None
     #: For direct actions, what was done (also posted as the assistant's reply).
     result: str | None = None
+    about_work: bool = False
     #: The server already took care of this message (an action, an offer, or a choice
     #: picked); the client only refreshes and must not queue a chat reply.
     handled: bool = False

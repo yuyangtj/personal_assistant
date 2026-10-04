@@ -52,7 +52,7 @@ def offer_for(
         name = repository_names.get(decision.repository_id, decision.repository_id)
         options = [
             ChoiceOption(
-                label="Set up coding workflow",
+                label="Start coding",
                 action="start_coding",
                 primary=True,
                 payload={
@@ -64,8 +64,8 @@ def offer_for(
             answer,
         ]
         reply = (
-            f"That sounds like a code change in {name}: “{quoted}”. Want me to set up a "
-            "coding workflow? Nothing runs until you approve it."
+            f"That sounds like a code change in {name}: “{quoted}”. Want me to start a "
+            "coding agent on it? It works on a branch; nothing merges without your approval."
         )
     elif decision.intent == TriageIntent.PROPOSE_TASK:
         research = "web_research" in decision.capabilities
