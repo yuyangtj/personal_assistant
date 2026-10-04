@@ -139,9 +139,12 @@
   .dot.muted { background: var(--muted-dot); }
   @keyframes pulse { 50% { opacity: .3; } }
   .grow { flex: 1; }
-  .proposal { border: 1px solid var(--border-strong); background: var(--raised); border-radius: 12px; padding: 13px; }
-  .proposal .why { color: var(--muted); font-size: 12.5px; }
-  .proposal .goal { margin: 7px 0; }
+  .choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .choices button { padding: 6px 11px; }
+  .choices button:disabled { opacity: .4; }
+  .choices button.picked:disabled { opacity: 1; box-shadow: 0 0 0 2px var(--accent) inset; }
+  .block-link { display: block; margin-top: 7px; }
+  .bubble .chip { margin-top: 7px; padding: 2px 9px; }
   .badge {
     display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 999px;
     background: var(--badge-bg); color: var(--badge-color); margin-left: 6px;
@@ -270,7 +273,6 @@
       <select id="repository"><option value="">Pick for me</option></select></div></div>
     <div id="focus-bar" class="focus-bar" aria-label="Work items this chat is about"></div>
     <div id="transcript"><div class="empty">Start or pick a conversation.</div></div>
-    <div id="proposal-slot"></div>
     <form id="composer">
       <textarea id="input" rows="2" placeholder="Say something — mention a work item with #tag. Nothing runs on its own…"></textarea>
       <button id="send" type="submit">Send</button>
@@ -311,28 +313,33 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { chats: [], repositories: [], deploymentTargets: [], repositoryId: null, chatId: null, messages: [], tasks: [], proposal: null,
-                proposalFor: null, workflowRun: null, taskId: null, busy: false, timer: null,
+const state = { chats: [], repositories: [], deploymentTargets: [], repositoryId: null, chatId: null, messages: [], tasks: [],
+                workflowId: null, taskId: null, busy: false, timer: null,
                 taskTimer: null, prPollAttempts: 0, pendingAction: null,
-                workflowRuns: [], dismissedWorkflows: new Set(), items: [], focus: [], itemId: null,
+                workflowRuns: [], items: [], focus: [], itemId: null,
                 itemRef: null };
 
-// Every view has its own address: #/chats/<id>, #/items/<slug>, and ?task=<id> opens the
-// task drawer over either, so back/forward, reload and links from push work.
+// Every view has its own address: #/chats/<id>, #/items/<slug>; ?task=<id> or
+// ?workflow=<id> opens a drawer over either, so back/forward, reload and push links work.
 function parseRoute() {
   const [path, query = ""] = location.hash.replace(/^#\/?/, "").split("?");
   const [section, id = null] = path.split("/").map(decodeURIComponent);
+  const params = new URLSearchParams(query);
   return { section: section === "items" ? "items" : "chats", id: id || null,
-    task: new URLSearchParams(query).get("task") };
+    task: params.get("task"), workflow: params.get("workflow") };
 }
-function routeHash({ section, id = null, task = null }) {
-  return `#/${section}${id ? "/" + encodeURIComponent(id) : ""}${task ? "?task=" + encodeURIComponent(task) : ""}`;
+function routeHash({ section, id = null, task = null, workflow = null }) {
+  const drawer = task ? "?task=" + encodeURIComponent(task)
+    : workflow ? "?workflow=" + encodeURIComponent(workflow) : "";
+  return `#/${section}${id ? "/" + encodeURIComponent(id) : ""}${drawer}`;
 }
 function go(route) {
   const hash = routeHash(route);
   if (location.hash !== hash) location.hash = hash; else render();
 }
-const goTask = (task) => go({ ...parseRoute(), task });
+const goTask = (task) => go({ ...parseRoute(), workflow: null, task });
+const goWorkflow = (workflow) => go({ ...parseRoute(), task: null, workflow });
+const closeDrawer = () => go({ ...parseRoute(), task: null, workflow: null });
 const goChat = (id) => go({ section: "chats", id });
 const goItem = (ref) => go({ section: "items", id: ref });
 
@@ -362,7 +369,8 @@ async function render() {
     await Promise.all([loadChats(), refreshTranscript()]);
   }
   if (route.task) { if (route.task !== state.taskId) await renderTask(route.task); }
-  else if (state.taskId) hideTask();
+  else if (route.workflow) { if (route.workflow !== state.workflowId) await renderWorkflow(route.workflow); }
+  else if (state.taskId || state.workflowId) hideTask();
 }
 
 async function api(path, options) {
@@ -431,7 +439,7 @@ async function loadRepositories() {
     $("repository").innerHTML = `<option value="">Pick for me</option>`
       + state.repositories.map((repository) => `<option value="${esc(repository.id)}"
         ${repository.id === state.repositoryId ? "selected" : ""}>
-        ${esc(repository.name)}${repository.configured ? "" : " (not configured)"}</option>`).join("");
+        ${esc(repository.name)}</option>`).join("");
   } catch (e) { fail(e); }
 }
 
@@ -444,14 +452,14 @@ async function loadDeploymentTargets() {
 }
 
 async function openChat(id) {
-  state.chatId = id; state.proposal = null; state.proposalFor = null; state.workflowRun = null;
+  state.chatId = id;
   if (!id) {
     clearInterval(state.timer);
     state.messages = []; state.tasks = []; state.focus = [];
     $("chat-title").textContent = "No conversation open";
     $("transcript").innerHTML = `<div class="empty">Start or pick a conversation.</div>`;
     $("status").textContent = "";
-    renderFocusBar(); renderProposal();
+    renderFocusBar();
   }
   await Promise.all([loadChats(), refreshTranscript()]);
 }
@@ -469,7 +477,6 @@ async function refreshTranscript() {
     renderFocusBar();
     state.messages = msgs.messages; state.tasks = tasks.tasks;
     state.workflowRuns = runs.runs.filter((run) => run.workflow_id === "coding-change");
-    syncWorkflowCard();
     const chat = state.chats.find((c) => c.id === state.chatId);
     $("chat-title").textContent = chat ? chat.title : "Conversation";
     renderTranscript();
@@ -483,28 +490,6 @@ async function refreshTranscript() {
     if (state.taskId) renderTask(state.taskId);
     clearError();
   } catch (e) { fail(e); }
-}
-
-// A coding workflow waiting for approval or a start stays visible until it runs or is
-// dismissed, so a failed approval or a reload never strands it.
-function syncWorkflowCard() {
-  if (state.workflowRun) {
-    const latest = state.workflowRuns.find((run) => run.id === state.workflowRun.id);
-    if (latest) state.workflowRun = latest;
-  } else if (!state.proposal) {
-    // A fresh proposal for the latest message takes precedence over an older workflow.
-    state.workflowRun = state.workflowRuns.find((run) =>
-      ["proposed", "approved"].includes(run.status) && !run.task_id
-      && !state.dismissedWorkflows.has(run.id)) || null;
-  }
-  renderProposal();
-}
-
-// Triage decides what each message needs, so a message only offers a way back to the
-// coding workflow it started; there is no manual "create task" per message.
-function messageAction(m) {
-  const run = state.workflowRuns.find((candidate) => candidate.origin_message_id === m.id);
-  return run ? `<button class="ghost" data-workflow="${esc(run.id)}">View coding workflow</button>` : "";
 }
 
 const CODING_CAPABILITIES = ["coding", "pull_request_creation", "coding-pull-request"];
@@ -524,6 +509,33 @@ function taskCardLabel(task) {
   return research ? "Researching…" : kind === "Reply" ? "Thinking…" : `${kind} working…`;
 }
 
+const WORKFLOW_STATUS = { proposed: "waiting for your approval", approved: "approved · ready to start",
+  running: "running", completed: "done", failed: "failed", rejected: "declined", cancelled: "cancelled" };
+const workflowStatus = (status) => WORKFLOW_STATUS[status] || label(status);
+
+// Pre-built pieces of UI a reply can carry. The server only sends data (which block,
+// with what values); nothing here renders markup from a message.
+const BLOCKS = {
+  choices: (block) => `<div class="choices">${block.options.map((option) => {
+    const picked = block.state === "chosen" && option.label === block.chosen;
+    return `<button type="button" class="${option.primary ? "" : "quiet"} ${picked ? "picked" : ""}"`
+      + ` data-choice="${esc(option.label)}" ${block.state === "open" ? "" : "disabled"}>${esc(option.label)}</button>`;
+  }).join("")}</div>`,
+  link: (block) => block.href.startsWith("#/")
+    ? `<a class="block-link" href="${esc(block.href)}">${esc(block.label)} ›</a>`
+    : `<a class="block-link" href="${esc(block.href)}" target="_blank" rel="noreferrer">${esc(block.label)} ↗</a>`,
+  workflow: (block) => {
+    const run = state.workflowRuns.find((candidate) => candidate.id === block.workflow_run_id);
+    const status = run ? run.status : "proposed";
+    const dot = ["proposed", "approved", "running"].includes(status) ? "run" : status === "failed" ? "fail" : "";
+    return `<button class="taskcard" data-workflow="${esc(block.workflow_run_id)}" type="button">`
+      + `<span class="dot ${dot}"></span><span class="grow">Coding workflow · ${esc(workflowStatus(status))}</span>`
+      + `<span>Review ›</span></button>`;
+  },
+  item: (block) => `<button type="button" class="chip link-button" data-item="${esc(block.slug)}">#${esc(block.slug)}</button>`,
+};
+const renderBlocks = (m) => (m.blocks || []).map((block) => (BLOCKS[block.type] || (() => ""))(block)).join("");
+
 function renderTranscript() {
   const byId = Object.fromEntries(state.tasks.map((t) => [t.id, t]));
   const atBottom = $("transcript").scrollHeight - $("transcript").scrollTop
@@ -535,10 +547,9 @@ function renderTranscript() {
     const task = linked && (active(linked) || linked.status !== "completed"
       || (linked.required_capabilities || []).length || linked.work_item_id) ? linked : null;
     const who = m.role === "user" ? "YOU" : m.role === "system" ? "TASK REFERENCE" : "ASSISTANT";
-    const action = m.role === "user" && !m.linked_task_id ? messageAction(m) : "";
     // The bubble keeps the message's own line breaks (pre-wrap), so no template
     // whitespace may sit inside it.
-    const extras = (action ? `<div style="margin-top:6px">${action}</div>` : "")
+    const extras = renderBlocks(m)
       + (task ? `<button class="taskcard" data-task="${task.id}" type="button" aria-label="View: ${esc(taskCardLabel(task))}">`
         + `<span class="dot ${active(task) ? "run" : task.status === "failed" ? "fail" : ""}"></span>`
         + `<span class="grow">${esc(taskCardLabel(task))}</span><span>View ›</span></button>` : "");
@@ -546,75 +557,6 @@ function renderTranscript() {
       + `<div class="bubble">${esc(m.content)}${extras}</div></div>`;
   }).join("") || `<div class="empty">No messages yet.</div>`;
   if (atBottom) $("transcript").scrollTop = $("transcript").scrollHeight;
-  renderProposal();
-}
-
-function renderProposal() {
-  if (state.workflowRun) {
-    const run = state.workflowRun;
-    const proposed = run.status === "proposed";
-    const approved = run.status === "approved";
-    const runningTask = run.task_id;
-    $("proposal-slot").innerHTML = `<div class="proposal">
-      <strong>Coding workflow</strong><span class="badge">${esc(run.status)}</span>
-      <div class="why">Run ${esc(run.id.slice(0, 8))} ${proposed ? "is waiting for your separate approval before any code runs." : `is at ${esc(label(run.current_stage || run.status))}.`}</div>
-      <div class="row wrap" style="margin-top:10px">
-        ${proposed ? `<button id="approve-workflow">Approve and start</button>` : ""}
-        ${approved ? `<button id="start-workflow">Start workflow</button>` : ""}
-        ${runningTask ? `<button class="quiet" data-task-nav="${esc(runningTask)}">View task</button>` : ""}
-        <button class="ghost" id="dismiss-workflow">Dismiss</button></div></div>`;
-    const approve = $("approve-workflow");
-    if (approve) approve.onclick = () => openActionDialog("workflow", run.id, run);
-    const start = $("start-workflow");
-    if (start) start.onclick = () => startCodingWorkflow(run.id);
-    $("dismiss-workflow").onclick = () => {
-      state.dismissedWorkflows.add(run.id);
-      state.workflowRun = null;
-      renderProposal();
-    };
-    return;
-  }
-  if (!state.proposal) { $("proposal-slot").innerHTML = ""; return; }
-  // state.proposal is the server's triage decision for the latest message.
-  const d = state.proposal;
-  const repoName = (id) => (state.repositories.find((repo) => repo.id === id) || {}).name || id;
-  let title = "";
-  let actions = "";
-  if (d.intent === "propose_coding") {
-    title = `Propose a coding workflow in ${esc(repoName(d.repository_id))}?`;
-    actions = `<button id="confirm">Propose workflow</button>
-      <button class="quiet" id="answer-in-chat">Answer in chat</button>`;
-  } else if (d.intent === "propose_task") {
-    title = (d.capabilities || []).includes("web_research") ? "Research this on the web?" : "Track this as a task?";
-    actions = `<button id="confirm">Create task</button>
-      <button class="quiet" id="answer-in-chat">Answer in chat</button>`;
-  } else {
-    title = esc(d.question || "What should I do with this?");
-    actions = (d.options || []).map((option, index) =>
-      `<button class="${index ? "quiet" : ""}" data-option="${index}">${esc(option.label)}</button>`).join("");
-  }
-  $("proposal-slot").innerHTML = `<div class="proposal">
-    <strong>${title}</strong>${d.source === "rules" ? `<span class="badge">keyword rules</span>` : ""}
-    <div class="why">${esc(d.reason)}</div>
-    <div class="goal">${esc(d.goal)}</div>
-    <div class="row wrap" style="margin-top:10px">${actions}
-      <button class="quiet" id="decline">Not now</button></div></div>`;
-  const messageId = state.proposalFor;
-  const answer = $("answer-in-chat");
-  if (answer) answer.onclick = () => createTask(messageId);
-  const confirm = $("confirm");
-  if (confirm) confirm.onclick = () => d.intent === "propose_coding"
-    ? createCodingWorkflow(messageId, d.repository_id)
-    : createTask(messageId, d.goal, true, d.capabilities || [], d.space);
-  document.querySelectorAll("[data-option]").forEach((button) => {
-    button.onclick = () => {
-      const option = d.options[Number(button.dataset.option)];
-      if (option.intent === "propose_coding") return createCodingWorkflow(messageId, option.repository_id);
-      if (option.intent === "propose_task") return createTask(messageId, d.goal, true, d.capabilities || [], d.space);
-      return createTask(messageId);
-    };
-  });
-  $("decline").onclick = () => { state.proposal = null; renderProposal(); };
 }
 
 async function send(text) {
@@ -630,22 +572,16 @@ async function send(text) {
         local_time: localIsoTime(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
     });
     // The server decides what the message needs; the repository picker is only an override.
+    // When it already took care of it (an action, an offer with choices, or a choice
+    // picked), its reply is in the transcript; otherwise the message gets a chat reply.
     const decision = posted.decision || { intent: "answer" };
-    if (decision.intent === "direct_action") {
-      // Already done on the server; its reply is in the transcript.
-      state.proposal = null;
+    if (decision.handled || decision.intent === "direct_action") {
       await refreshTranscript();
       if (state.itemId) await renderWorkItem(state.itemId);
       await loadItems();
       return;
     }
-    state.proposal = decision.intent === "answer" ? null : decision;
-    state.proposalFor = posted.message.id;
-    // The newest message's choice replaces an older workflow card; that workflow stays
-    // reachable from its own message.
-    if (state.proposal) state.workflowRun = null;
-    await refreshTranscript();
-    if (!state.proposal) await createTask(posted.message.id);
+    await createTask(posted.message.id);
   } catch (e) { fail(e); }
   finally { state.busy = false; $("send").disabled = false; }
 }
@@ -656,31 +592,14 @@ function localIsoTime() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
-async function createTask(messageId, goal = null, makeWorkItem = false, capabilities = [], space = null) {
-  state.proposal = null;
+async function createTask(messageId) {
   try {
     const body = {
-      space,
-      // Confirmed work is worth keeping: it joins the chat's work item.
-      create_work_item: makeWorkItem,
-      required_capabilities: capabilities,
       source_context: { client: "web-console",
         local_time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     };
-    if (goal) body.goal = goal;
     await api(`/chat-sessions/${state.chatId}/messages/${messageId}/task`,
       { method: "POST", body: JSON.stringify(body) });
-    await refreshTranscript();
-  } catch (e) { fail(e); }
-}
-
-async function createCodingWorkflow(messageId, repositoryId = state.repositoryId) {
-  if (!repositoryId) return fail(new Error("Select a registered repository first."));
-  state.proposal = null;
-  try {
-    state.workflowRun = await api(
-      `/chat-sessions/${state.chatId}/messages/${messageId}/workflow-run`,
-      { method: "POST", body: JSON.stringify({ repository_id: repositoryId }) });
     await refreshTranscript();
   } catch (e) { fail(e); }
 }
@@ -688,16 +607,41 @@ async function createCodingWorkflow(messageId, repositoryId = state.repositoryId
 async function startCodingWorkflow(runId) {
   try {
     const run = await api(`/workflow-runs/${runId}/start`, { method: "POST", body: "{}" });
-    state.workflowRun = run;
     await refreshTranscript();
-    if (run.task_id) goTask(run.task_id);
-    renderProposal();
+    if (run.task_id) goTask(run.task_id); else await renderWorkflow(runId);
     return run;
   } catch (error) {
     fail(error);
-    renderProposal();
     throw error;
   }
+}
+
+async function renderWorkflow(id) {
+  state.workflowId = id;
+  state.taskId = null;
+  clearTimeout(state.taskTimer);
+  try {
+    const run = await api(`/workflow-runs/${id}`);
+    if (state.workflowId !== id) return;
+    const proposed = run.status === "proposed";
+    $("detail-title").textContent = "Coding workflow";
+    $("task-detail").innerHTML = `
+      <div class="row wrap">${statusPill(proposed ? "waiting_for_approval" : run.status, workflowStatus(run.status))}
+        <span class="status-pill">${esc(run.input.repository_id || "")}</span></div>
+      <h2 style="margin-top:12px">Request</h2><div style="white-space:pre-wrap">${esc(run.input.request || "")}</div>
+      <div class="sub" style="margin-top:12px">${proposed
+        ? "Approving starts a coding agent on a new branch. It validates the change and opens a draft pull request; nothing merges without your separate approval."
+        : `Stage: ${esc(label(run.current_stage || run.status))}`}</div>
+      <div class="row wrap">
+        ${proposed ? `<button id="approve-workflow">Approve and start</button>` : ""}
+        ${run.status === "approved" && !run.task_id ? `<button id="start-workflow">Start workflow</button>` : ""}
+        ${run.task_id ? `<button class="quiet" data-task-nav="${esc(run.task_id)}">View coding run</button>` : ""}</div>`;
+    const approve = $("approve-workflow");
+    if (approve) approve.onclick = () => openActionDialog("workflow", run.id, run);
+    const start = $("start-workflow");
+    if (start) start.onclick = () => startCodingWorkflow(run.id).catch(() => {});
+    openTaskPanel();
+  } catch (e) { fail(e); }
 }
 
 const ITEM_STATUSES = ["open", "active", "blocked", "done", "archived"];
@@ -840,6 +784,7 @@ function closeTaskPanel() {
 
 function hideTask() {
   state.taskId = null;
+  state.workflowId = null;
   clearTimeout(state.taskTimer);
   state.taskTimer = null;
   state.prPollAttempts = 0;
@@ -988,6 +933,8 @@ function closeActionDialog() {
 async function renderTask(id) {
   const taskChanged = state.taskId !== id;
   state.taskId = id;
+  state.workflowId = null;
+  $("detail-title").textContent = "Task";
   clearTimeout(state.taskTimer);
   state.taskTimer = null;
   if (taskChanged) state.prPollAttempts = 0;
@@ -1168,10 +1115,12 @@ document.addEventListener("click", (e) => {
       .then(() => renderWorkItem(state.itemId)).catch(fail);
   }
   const workflow = e.target.closest("[data-workflow]");
-  if (workflow) {
-    state.dismissedWorkflows.delete(workflow.dataset.workflow);
-    state.workflowRun = state.workflowRuns.find((run) => run.id === workflow.dataset.workflow) || null;
-    return renderProposal();
+  if (workflow) return goWorkflow(workflow.dataset.workflow);
+  const choice = e.target.closest("[data-choice]");
+  if (choice && !choice.disabled && !state.busy) {
+    // Picking a choice is just saying it: the label goes in as your next message.
+    clearError();
+    return send(choice.dataset.choice);
   }
 
 });
@@ -1211,10 +1160,9 @@ $("new-item-form").onsubmit = async (event) => {
 };
 $("repository").onchange = (event) => {
   state.repositoryId = event.target.value || null;
-  renderProposal();
 };
-$("close-task").onclick = () => go({ ...parseRoute(), task: null });
-$("detail-scrim").onclick = () => go({ ...parseRoute(), task: null });
+$("close-task").onclick = closeDrawer;
+$("detail-scrim").onclick = closeDrawer;
 $("cancel-action").onclick = closeActionDialog;
 $("action-dialog").addEventListener("close", () => { state.pendingAction = null; });
 $("action-form").onsubmit = async (event) => {
@@ -1229,11 +1177,11 @@ $("action-form").onsubmit = async (event) => {
   try {
     const headers = { "content-type": "application/json", "X-Assistant-Approval-Token": token };
     if (pending.mode === "workflow") {
-      state.workflowRun = await api(`/workflow-runs/${pending.taskId}/decision`, {
+      await api(`/workflow-runs/${pending.taskId}/decision`, {
         method: "POST", headers, body: JSON.stringify({ decision: "approve" }),
       });
-      await startCodingWorkflow(pending.taskId);
       closeActionDialog();
+      await startCodingWorkflow(pending.taskId);
     } else if (pending.mode === "deployment") {
       await api(`/workflow-runs/${pending.approval.id}/decision`, {
         method: "POST", headers, body: JSON.stringify({ decision: "approve" }),

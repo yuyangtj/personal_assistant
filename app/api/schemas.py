@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.capabilities.models import CapabilityManifest
 from app.decision import CodingRunnerManifest
@@ -98,7 +98,14 @@ class ChatMessageResponse(BaseModel):
     role: Literal["user", "assistant", "system"]
     content: str
     linked_task_id: str | None
+    #: Choices, links and cards to render under the text (see app.blocks).
+    blocks: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
+
+    @field_validator("blocks", mode="before")
+    @classmethod
+    def _no_blocks(cls, value: Any) -> Any:
+        return value or []
 
     @classmethod
     def from_model(cls, message: ChatMessageModel) -> ChatMessageResponse:
@@ -133,6 +140,9 @@ class TriageDecisionResponse(BaseModel):
     space: str | None = None
     #: For direct actions, what was done (also posted as the assistant's reply).
     result: str | None = None
+    #: The server already took care of this message (an action, an offer, or a choice
+    #: picked); the client only refreshes and must not queue a chat reply.
+    handled: bool = False
     source: str
 
 

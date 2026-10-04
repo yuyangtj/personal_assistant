@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 
+from app.blocks import validate_blocks
 from app.capabilities.models import IDENTIFIER_PATTERN
 from app.domain.enums import CODING_CAPABILITIES, EventType, ExecutionStatus, TaskStatus
 from app.domain.proposals import TaskProposal, propose_task
@@ -314,6 +315,7 @@ class TaskService:
         *,
         content: str,
         role: str = "user",
+        blocks: list[dict[str, Any]] | None = None,
     ) -> PostedMessage:
         """Record a turn of conversation. No task is launched and nothing is executed.
 
@@ -337,6 +339,7 @@ class TaskService:
                 chat_session_id=chat_session.id,
                 role=role,
                 content=normalized_content,
+                blocks=validate_blocks(blocks) if blocks else None,
             )
             if role == "user" and chat_session.title == DEFAULT_CHAT_TITLE:
                 chat_session.title = _chat_title(normalized_content)
@@ -349,6 +352,14 @@ class TaskService:
             )
             proposal = propose_task(normalized_content) if role == "user" else None
             return PostedMessage(message=message, proposal=proposal, focused_work_items=focused)
+
+    def set_message_blocks(self, message_id: str, blocks: list[dict[str, Any]]) -> None:
+        """Replace a message's blocks, e.g. to mark its choices answered."""
+        with self.database.session() as session, session.begin():
+            message = session.get(ChatMessageModel, message_id)
+            if message is None:
+                raise ChatMessageNotFoundError(message_id)
+            message.blocks = validate_blocks(blocks) or None
 
     def create_task_from_message(
         self,
@@ -1248,6 +1259,7 @@ class TaskService:
         reply: str | None = None,
         emotion: str = "Warm",
         action: dict[str, Any] | None = None,
+        blocks: list[dict[str, Any]] | None = None,
     ) -> TaskModel:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
@@ -1276,6 +1288,7 @@ class TaskService:
                         ),
                         # A proposed phone action; clients execute it only after confirmation.
                         "action": validate_action(action),
+                        **({"blocks": blocks} if blocks else {}),
                     },
                 )
             task.status = TaskStatus.COMPLETED.value
@@ -1386,12 +1399,17 @@ class TaskService:
         text = str(payload.get("text", "")).strip()
         if not task.chat_session_id or not text:
             return
+        try:
+            blocks = validate_blocks(payload.get("blocks") or [])
+        except ValueError:
+            blocks = []
         ChatMessageRepository.append(
             session,
             chat_session_id=task.chat_session_id,
             role="assistant",
             content=text,
             linked_task_id=task.id,
+            blocks=blocks,
         )
         chat_session = ChatSessionRepository.get(session, task.chat_session_id)
         if chat_session is not None:

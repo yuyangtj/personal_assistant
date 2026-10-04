@@ -75,8 +75,10 @@ def test_confirming_a_proposal_links_the_task_to_its_originating_message(
     assert task["parent_task_id"] is None
 
     messages = client.get(f"/chat-sessions/{chat_id}/messages").json()["messages"]
+    # The assistant asked which project in the chat; the task links to the user's message.
     assert [(message["role"], message["linked_task_id"]) for message in messages] == [
-        ("user", task["id"])
+        ("user", task["id"]),
+        ("assistant", None),
     ]
     assert client.get(f"/chat-sessions/{chat_id}/tasks").json()["tasks"][0]["id"] == task["id"]
 
