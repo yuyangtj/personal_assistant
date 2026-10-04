@@ -49,12 +49,29 @@
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    height: 100dvh; display: grid; grid-template-columns: 270px minmax(0, 1fr) 420px;
+    height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr);
     overflow: hidden;
   }
-  aside, main, section.detail { min-height: 0; height: 100dvh; overflow-y: auto; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--panel); min-width: 0; }
+  .topbar .brand { font-weight: 600; }
+  .topbar nav { display: flex; gap: 4px; }
+  .topbar nav a { color: var(--muted); text-decoration: none; padding: 6px 10px; border-radius: 8px; }
+  .topbar nav a.active { background: var(--surface); color: var(--text); }
+  .topbar .err { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .view { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: 0; }
+  .view[hidden] { display: none; }
+  aside, main { min-height: 0; overflow-y: auto; }
   aside { border-right: 1px solid var(--border); padding: 16px; background: var(--panel); }
-  section.detail { border-left: 1px solid var(--border); padding: 18px; background: var(--panel); }
+  section.detail {
+    position: fixed; z-index: 10; right: 0; top: 0; height: 100dvh; width: min(520px, 100vw);
+    overflow-y: auto; padding: 18px; background: var(--panel); border-left: 1px solid var(--border);
+    transform: translateX(105%); transition: transform .2s ease; box-shadow: var(--shadow);
+  }
+  section.detail.open { transform: translateX(0); }
+  #item-main { display: block; padding: 18px 24px; }
+  #item-page { max-width: 820px; }
+  #item-page h1 { font-size: 18px; margin: 8px 0; }
+  a.back { text-decoration: none; padding: 6px 8px 6px 0; }
   h1 { font-size: 15px; margin: 0 0 4px; }
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
   .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
@@ -82,9 +99,6 @@
   .chat-item:hover { background: var(--surface); }
   .chat-item.active { background: var(--surface); border-color: var(--border-strong); }
   .chat-item .when { color: var(--muted); font-size: 11px; }
-  .tabs { display: flex; gap: 4px; margin: 10px 0; }
-  .tab { background: transparent; color: var(--muted); padding: 6px 10px; border-radius: 8px; }
-  .tab.active { background: var(--surface); color: var(--text); }
   .space-head { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; margin: 12px 0 4px; }
   #new-item-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   #new-item-form select { flex: 1; max-width: none; }
@@ -198,53 +212,30 @@
   dialog input, dialog textarea { width: 100%; margin-top: 5px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 9px 10px; font: inherit; }
   dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
-  @media (max-width: 1180px) {
-    body { grid-template-columns: 250px minmax(0, 1fr); }
-    section.detail { position: fixed; z-index: 10; right: 0; top: 0; width: min(460px, 92vw); transform: translateX(105%); transition: transform .2s ease; box-shadow: var(--shadow); }
-    section.detail.open { transform: translateX(0); }
-  }
   @media (max-width: 720px) {
-    body { display: block; }
-    aside { display: none; position: fixed; inset: 0; z-index: 12; height: 100dvh; border: 0; }
-    aside.open { display: block; }
-    main { height: 100dvh; padding: 12px; }
-    section.detail { width: 100vw; }
+    /* One pane at a time: the list, or what the route opened from it. */
+    .view { grid-template-columns: minmax(0, 1fr); }
+    .view.has-detail > aside { display: none; }
+    .view:not(.has-detail) > main { display: none; }
+    aside { border: 0; }
+    main, #item-main { padding: 12px; }
+    .topbar { padding: 8px 12px; gap: 8px; }
+    .topbar .brand { display: none; }
     .mobile-only { display: inline-flex; }
     .main-head { align-items: flex-start; flex-wrap: wrap; }
-    .main-head h1 { min-width: calc(100% - 70px); }
-    .repo-control { width: 100%; }
-    .repo-control select { flex: 1; max-width: none; }
+    .main-head h1 { min-width: 0; }
+    .repo-control label { display: none; }
+    .repo-control select { max-width: 130px; }
     .msg { max-width: 94%; }
     .summary-grid { grid-template-columns: 1fr 1fr; }
   }
 </style>
 
-<aside>
-  <div class="row"><h1 class="grow">Assistant</h1>
-    <button class="ghost mobile-only" id="close-chats" aria-label="Close conversations">Close</button></div>
-  <div class="tabs" role="tablist">
-    <button class="tab active" id="tab-chats" role="tab" type="button" aria-selected="true">Chats</button>
-    <button class="tab" id="tab-items" role="tab" type="button" aria-selected="false">Work items</button></div>
-  <div id="chats-pane">
-    <div class="sub">Chat is free. Tasks are confirmed.</div>
-    <div class="row"><button id="new-chat">New conversation</button>
-      <button class="ghost" id="reload-chats">Refresh</button></div>
-    <div id="chat-list" style="margin-top:12px"></div>
-  </div>
-  <div id="items-pane" hidden>
-    <div class="sub">Goals that chats and runs build on. Mention one with #tag.</div>
-    <form id="new-item-form"><input id="new-item-title" maxlength="160" placeholder="New work item…" aria-label="New work item title">
-      <select id="new-item-space" aria-label="Space"><option value="general">General</option></select>
-      <button type="submit">Add</button></form>
-    <div id="item-list"></div>
-  </div>
-</aside>
-
-<main>
-  <div class="main-head"><button class="ghost mobile-only" id="open-chats">Chats</button>
-    <h1 id="chat-title" class="grow">No conversation open</h1>
-    <div class="repo-control"><label for="repository">Repository</label>
-    <select id="repository"><option value="">No repository</option></select></div>
+<header class="topbar">
+  <span class="brand">Assistant</span>
+  <nav aria-label="Sections"><a href="#/chats" id="nav-chats">Chats</a><a href="#/items" id="nav-items">Work items</a></nav>
+  <span id="error" class="err grow" role="alert"></span>
+  <span id="status" class="sub" style="margin:0"></span>
     <button class="ghost icon-btn" id="theme-toggle" type="button" aria-label="Toggle theme"
       title="Toggle bright/dark theme" aria-pressed="false">
       <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
@@ -264,16 +255,39 @@
         <path d="m19.07 4.93-1.41 1.41"></path>
       </svg>
     </button>
-    <span id="status" class="sub" style="margin:0"></span></div>
-  <div id="focus-bar" class="focus-bar" aria-label="Work items this chat is about"></div>
-  <div id="transcript"><div class="empty">Start or pick a conversation on the left.</div></div>
-  <div id="proposal-slot"></div>
-  <div id="error" class="err"></div>
-  <form id="composer">
-    <textarea id="input" rows="2" placeholder="Say something — mention a work item with #tag. Nothing runs on its own…"></textarea>
-    <button id="send" type="submit">Send</button>
-  </form>
-</main>
+</header>
+
+<div class="view" id="chat-view">
+  <aside aria-label="Conversations">
+    <div class="row"><button id="new-chat">New conversation</button>
+      <button class="ghost" id="reload-chats">Refresh</button></div>
+    <div id="chat-list" style="margin-top:12px"></div>
+  </aside>
+  <main>
+    <div class="main-head"><a class="back mobile-only" href="#/chats">‹ Chats</a>
+      <h1 id="chat-title" class="grow">No conversation open</h1>
+      <div class="repo-control"><label for="repository">Coding repo</label>
+      <select id="repository"><option value="">Pick for me</option></select></div></div>
+    <div id="focus-bar" class="focus-bar" aria-label="Work items this chat is about"></div>
+    <div id="transcript"><div class="empty">Start or pick a conversation.</div></div>
+    <div id="proposal-slot"></div>
+    <form id="composer">
+      <textarea id="input" rows="2" placeholder="Say something — mention a work item with #tag. Nothing runs on its own…"></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+  </main>
+</div>
+
+<div class="view" id="items-view" hidden>
+  <aside aria-label="Work items">
+    <div class="sub">Goals that chats and runs build on. Mention one with #tag.</div>
+    <form id="new-item-form"><input id="new-item-title" maxlength="160" placeholder="New work item…" aria-label="New work item title">
+      <select id="new-item-space" aria-label="Space"><option value="general">General</option></select>
+      <button type="submit">Add</button></form>
+    <div id="item-list"></div>
+  </aside>
+  <main id="item-main"><div id="item-page"><div class="empty">Pick a work item.</div></div></main>
+</div>
 
 <div class="scrim" id="detail-scrim"></div>
 <section class="detail" id="task-panel" aria-label="Task details">
@@ -300,7 +314,56 @@ const $ = (id) => document.getElementById(id);
 const state = { chats: [], repositories: [], deploymentTargets: [], repositoryId: null, chatId: null, messages: [], tasks: [], proposal: null,
                 proposalFor: null, workflowRun: null, taskId: null, busy: false, timer: null,
                 taskTimer: null, prPollAttempts: 0, pendingAction: null,
-                workflowRuns: [], dismissedWorkflows: new Set(), items: [], focus: [], itemId: null };
+                workflowRuns: [], dismissedWorkflows: new Set(), items: [], focus: [], itemId: null,
+                itemRef: null };
+
+// Every view has its own address: #/chats/<id>, #/items/<slug>, and ?task=<id> opens the
+// task drawer over either, so back/forward, reload and links from push work.
+function parseRoute() {
+  const [path, query = ""] = location.hash.replace(/^#\/?/, "").split("?");
+  const [section, id = null] = path.split("/").map(decodeURIComponent);
+  return { section: section === "items" ? "items" : "chats", id: id || null,
+    task: new URLSearchParams(query).get("task") };
+}
+function routeHash({ section, id = null, task = null }) {
+  return `#/${section}${id ? "/" + encodeURIComponent(id) : ""}${task ? "?task=" + encodeURIComponent(task) : ""}`;
+}
+function go(route) {
+  const hash = routeHash(route);
+  if (location.hash !== hash) location.hash = hash; else render();
+}
+const goTask = (task) => go({ ...parseRoute(), task });
+const goChat = (id) => go({ section: "chats", id });
+const goItem = (ref) => go({ section: "items", id: ref });
+
+async function render() {
+  const route = parseRoute();
+  const items = route.section === "items";
+  // A view coming back into sight is refreshed even when its route is unchanged.
+  const returning = items ? $("items-view").hidden : $("chat-view").hidden;
+  $("chat-view").hidden = items;
+  $("items-view").hidden = !items;
+  $("chat-view").classList.toggle("has-detail", !items && Boolean(route.id));
+  $("items-view").classList.toggle("has-detail", items && Boolean(route.id));
+  $("nav-chats").classList.toggle("active", !items);
+  $("nav-items").classList.toggle("active", items);
+  $("nav-chats").toggleAttribute("aria-current", !items);
+  $("nav-items").toggleAttribute("aria-current", items);
+  if (items) {
+    if (route.id !== state.itemRef || returning) {
+      state.itemRef = route.id;
+      if (route.id) await renderWorkItem(route.id);
+      else { state.itemId = null; $("item-page").innerHTML = `<div class="empty">Pick a work item.</div>`; }
+    }
+    loadItems();
+  } else if (route.id !== state.chatId) {
+    await openChat(route.id);
+  } else if (returning) {
+    await Promise.all([loadChats(), refreshTranscript()]);
+  }
+  if (route.task) { if (route.task !== state.taskId) await renderTask(route.task); }
+  else if (state.taskId) hideTask();
+}
 
 async function api(path, options) {
   const res = await fetch(path, {
@@ -365,7 +428,7 @@ async function loadChats() {
 async function loadRepositories() {
   try {
     state.repositories = (await api("/repositories")).repositories;
-    $("repository").innerHTML = `<option value="">No repository</option>`
+    $("repository").innerHTML = `<option value="">Pick for me</option>`
       + state.repositories.map((repository) => `<option value="${esc(repository.id)}"
         ${repository.id === state.repositoryId ? "selected" : ""}>
         ${esc(repository.name)}${repository.configured ? "" : " (not configured)"}</option>`).join("");
@@ -382,7 +445,14 @@ async function loadDeploymentTargets() {
 
 async function openChat(id) {
   state.chatId = id; state.proposal = null; state.proposalFor = null; state.workflowRun = null;
-  document.querySelector("aside").classList.remove("open");
+  if (!id) {
+    clearInterval(state.timer);
+    state.messages = []; state.tasks = []; state.focus = [];
+    $("chat-title").textContent = "No conversation open";
+    $("transcript").innerHTML = `<div class="empty">Start or pick a conversation.</div>`;
+    $("status").textContent = "";
+    renderFocusBar(); renderProposal();
+  }
   await Promise.all([loadChats(), refreshTranscript()]);
 }
 
@@ -407,7 +477,7 @@ async function refreshTranscript() {
     const running = state.tasks.some((task) =>
       ["planning", "executing", "validating"].includes(task.status));
     const queued = state.tasks.some((task) => task.status === "created");
-    $("status").textContent = running ? "task running…" : queued ? "task queued…" : "";
+    $("status").textContent = running ? "working…" : queued ? "queued…" : "";
     clearInterval(state.timer);
     if (running || queued) state.timer = setInterval(refreshTranscript, 2000);
     if (state.taskId) renderTask(state.taskId);
@@ -437,6 +507,23 @@ function messageAction(m) {
   return run ? `<button class="ghost" data-workflow="${esc(run.id)}">View coding workflow</button>` : "";
 }
 
+const CODING_CAPABILITIES = ["coding", "pull_request_creation", "coding-pull-request"];
+
+// Say what the work is doing rather than naming the task machinery.
+function taskCardLabel(task) {
+  const caps = task.required_capabilities || [];
+  const research = caps.includes("web_research");
+  const kind = research ? "Research" : caps.some((c) => CODING_CAPABILITIES.includes(c)) ? "Coding run"
+    : task.work_item_id ? "Task" : "Reply";
+  if (task.status === "failed") return `${kind} failed`;
+  if (task.status === "cancelled") return `${kind} cancelled`;
+  if (task.status === "completed") return `${kind} done`;
+  if (task.status === "waiting_for_approval") return `${kind} · waiting for your review`;
+  if (task.status === "created") return `${kind} queued…`;
+  if (!active(task)) return `${kind} · ${label(task.status)}`;
+  return research ? "Researching…" : kind === "Reply" ? "Thinking…" : `${kind} working…`;
+}
+
 function renderTranscript() {
   const byId = Object.fromEntries(state.tasks.map((t) => [t.id, t]));
   const atBottom = $("transcript").scrollHeight - $("transcript").scrollTop
@@ -452,9 +539,9 @@ function renderTranscript() {
     // The bubble keeps the message's own line breaks (pre-wrap), so no template
     // whitespace may sit inside it.
     const extras = (action ? `<div style="margin-top:6px">${action}</div>` : "")
-      + (task ? `<button class="taskcard" data-task="${task.id}" type="button" aria-label="View task: ${esc(label(task.status))}">`
+      + (task ? `<button class="taskcard" data-task="${task.id}" type="button" aria-label="View: ${esc(taskCardLabel(task))}">`
         + `<span class="dot ${active(task) ? "run" : task.status === "failed" ? "fail" : ""}"></span>`
-        + `<span class="grow">Task · ${esc(label(task.status))}</span><span>View ›</span></button>` : "");
+        + `<span class="grow">${esc(taskCardLabel(task))}</span><span>View ›</span></button>` : "");
     return `<div class="msg ${m.role}"><div class="who">${who}</div>`
       + `<div class="bubble">${esc(m.content)}${extras}</div></div>`;
   }).join("") || `<div class="empty">No messages yet.</div>`;
@@ -533,7 +620,11 @@ function renderProposal() {
 async function send(text) {
   state.busy = true; $("send").disabled = true;
   try {
-    if (!state.chatId) { state.chatId = (await api("/chat-sessions", { method: "POST", body: "{}" })).id; }
+    if (!state.chatId) {
+      state.chatId = (await api("/chat-sessions", { method: "POST", body: "{}" })).id;
+      goChat(state.chatId);
+      loadChats();
+    }
     const posted = await api(`/chat-sessions/${state.chatId}/messages`, {
       method: "POST", body: JSON.stringify({ content: text, repository_id: state.repositoryId,
         local_time: localIsoTime(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
@@ -577,9 +668,8 @@ async function createTask(messageId, goal = null, makeWorkItem = false, capabili
         local_time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     };
     if (goal) body.goal = goal;
-    const task = await api(`/chat-sessions/${state.chatId}/messages/${messageId}/task`,
+    await api(`/chat-sessions/${state.chatId}/messages/${messageId}/task`,
       { method: "POST", body: JSON.stringify(body) });
-    state.taskId = task.id;
     await refreshTranscript();
   } catch (e) { fail(e); }
 }
@@ -600,7 +690,7 @@ async function startCodingWorkflow(runId) {
     const run = await api(`/workflow-runs/${runId}/start`, { method: "POST", body: "{}" });
     state.workflowRun = run;
     await refreshTranscript();
-    if (run.task_id) await renderTask(run.task_id);
+    if (run.task_id) goTask(run.task_id);
     renderProposal();
     return run;
   } catch (error) {
@@ -611,17 +701,6 @@ async function startCodingWorkflow(runId) {
 }
 
 const ITEM_STATUSES = ["open", "active", "blocked", "done", "archived"];
-
-function showTab(tab) {
-  const items = tab === "items";
-  $("chats-pane").hidden = items;
-  $("items-pane").hidden = !items;
-  $("tab-chats").classList.toggle("active", !items);
-  $("tab-items").classList.toggle("active", items);
-  $("tab-chats").setAttribute("aria-selected", String(!items));
-  $("tab-items").setAttribute("aria-selected", String(items));
-  if (items) loadItems();
-}
 
 async function loadSpaces() {
   try {
@@ -637,7 +716,7 @@ async function loadItems() {
     const spaces = [...new Set(state.items.map((item) => item.space))].sort();
     $("item-list").innerHTML = spaces.map((space) => `<div class="space-head">${esc(space)}</div>`
       + state.items.filter((item) => item.space === space).map((item) => `
-        <button class="chat-item ${item.id === state.itemId ? "active" : ""}" data-item="${esc(item.id)}" type="button">
+        <button class="chat-item ${[item.id, item.slug].includes(state.itemRef) ? "active" : ""}" data-item="${esc(item.slug)}" type="button">
           <div>${esc(item.title)}</div>
           <div class="when">#${esc(item.slug)} · ${esc(label(item.status))}</div>
         </button>`).join("")).join("") || `<div class="sub" style="margin-top:12px">No work items yet.</div>`;
@@ -650,7 +729,7 @@ function renderFocusBar() {
   const focused = new Set(state.focus.map((item) => item.id));
   const candidates = state.items.filter((item) => !focused.has(item.id) && item.status !== "done");
   $("focus-bar").innerHTML = state.focus.map((item) => `
-    <span class="chip"><button type="button" class="link-button" data-item="${esc(item.id)}"
+    <span class="chip"><button type="button" class="link-button" data-item="${esc(item.slug)}"
       title="${esc(item.title)}">#${esc(item.slug)}</button><button type="button" class="chip-x"
       data-unfocus="${esc(item.id)}" aria-label="Stop focusing on #${esc(item.slug)}">×</button></span>`).join("")
     + (candidates.length ? `<select id="focus-add" aria-label="Focus this chat on a work item">
@@ -677,20 +756,18 @@ function briefSection(title, value) {
 
 async function renderWorkItem(id) {
   state.itemId = id;
-  state.taskId = null;
-  clearTimeout(state.taskTimer);
-  state.taskTimer = null;
   try {
     const [item, runs, timeline, schedules] = await Promise.all([
       api(`/work-items/${id}`), api(`/work-items/${id}/runs`), api(`/work-items/${id}/timeline?limit=50`),
       api(`/schedules?work_item_id=${encodeURIComponent(id)}`),
     ]);
+    if (state.itemId !== id) return;
     const brief = item.brief || {};
-    $("detail-title").textContent = "Work item";
-    $("task-detail").innerHTML = `
-      <div class="row wrap">${statusPill(item.status)}<span class="badge">#${esc(item.slug)}</span>
+    state.itemId = item.id;
+    $("item-page").innerHTML = `
+      <div class="row wrap"><a class="back mobile-only" href="#/items">‹ Work items</a>${statusPill(item.status)}<span class="badge">#${esc(item.slug)}</span>
         <span class="sub" style="margin:0">${esc(item.space)} · ${esc(item.kind)}</span></div>
-      <h2 style="text-transform:none;letter-spacing:normal;font-size:16px;color:var(--text)">${esc(item.title)}</h2>
+      <h1>${esc(item.title)}</h1>
       <div class="row wrap"><label class="sub" for="item-status" style="margin:0">Status</label>
         <select id="item-status">${ITEM_STATUSES.map((value) =>
           `<option value="${value}" ${value === item.status ? "selected" : ""}>${label(value)}</option>`).join("")}</select>
@@ -741,7 +818,6 @@ async function renderWorkItem(id) {
         await renderWorkItem(item.id);
       } catch (e) { fail(e); }
     };
-    openTaskPanel();
     clearError();
   } catch (e) { fail(e); }
 }
@@ -751,28 +827,23 @@ function openTaskPanel() {
   panel.classList.add("open");
   panel.inert = false;
   panel.removeAttribute("aria-hidden");
-  if (window.matchMedia("(max-width: 1180px)").matches) $("detail-scrim").classList.add("open");
+  $("detail-scrim").classList.add("open");
 }
 
 function closeTaskPanel() {
   const panel = $("task-panel");
   panel.classList.remove("open");
   $("detail-scrim").classList.remove("open");
-  if (window.matchMedia("(max-width: 1180px)").matches) {
-    panel.inert = true;
-    panel.setAttribute("aria-hidden", "true");
-  }
+  panel.inert = true;
+  panel.setAttribute("aria-hidden", "true");
 }
 
-function syncResponsivePanels() {
-  const panel = $("task-panel");
-  if (window.matchMedia("(max-width: 1180px)").matches && !panel.classList.contains("open")) {
-    panel.inert = true;
-    panel.setAttribute("aria-hidden", "true");
-  } else {
-    panel.inert = false;
-    panel.removeAttribute("aria-hidden");
-  }
+function hideTask() {
+  state.taskId = null;
+  clearTimeout(state.taskTimer);
+  state.taskTimer = null;
+  state.prPollAttempts = 0;
+  closeTaskPanel();
 }
 
 function codingWorkflow(ctx, task, prStatus) {
@@ -917,8 +988,6 @@ function closeActionDialog() {
 async function renderTask(id) {
   const taskChanged = state.taskId !== id;
   state.taskId = id;
-  state.itemId = null;
-  $("detail-title").textContent = "Task";
   clearTimeout(state.taskTimer);
   state.taskTimer = null;
   if (taskChanged) state.prPollAttempts = 0;
@@ -941,6 +1010,8 @@ async function renderTask(id) {
     }
     const deploymentEvents = deploymentRun
       ? (await api(`/workflow-runs/${deploymentRun.id}/events`)).events : [];
+    // The route moved on while this loaded; don't reopen a closed or replaced drawer.
+    if (state.taskId !== id) return;
     const ciReady = prStatus && prStatus.head_matches
       && prStatus.state === "open" && prStatus.required_checks_state === "passed"
       && prStatus.mergeable === true;
@@ -1034,7 +1105,7 @@ async function renderTask(id) {
     $("discuss").onclick = async () => {
       try {
         const chat = await api(`/tasks/${id}/chat-session`, { method: "POST" });
-        await openChat(chat.id);
+        goChat(chat.id);
       } catch (e) { fail(e); }
     };
     $("followup-form").onsubmit = async (ev) => {
@@ -1045,8 +1116,8 @@ async function renderTask(id) {
         const task = await api(`/tasks/${id}/follow-up`,
           { method: "POST", body: JSON.stringify({ request: text }) });
         $("followup").value = "";
-        if (task.chat_session_id) await openChat(task.chat_session_id);
-        await renderTask(task.id);
+        if (task.chat_session_id) go({ section: "chats", id: task.chat_session_id, task: task.id });
+        else goTask(task.id);
       } catch (e) { fail(e); }
     };
     const unsettledPr = approval && task.status === "waiting_for_approval"
@@ -1068,13 +1139,13 @@ async function renderTask(id) {
 
 document.addEventListener("click", (e) => {
   const chat = e.target.closest("[data-chat]");
-  if (chat) return openChat(chat.dataset.chat);
+  if (chat) return goChat(chat.dataset.chat);
   const taskNav = e.target.closest("[data-task-nav]");
-  if (taskNav) return renderTask(taskNav.dataset.taskNav);
+  if (taskNav) return goTask(taskNav.dataset.taskNav);
   const task = e.target.closest("[data-task]");
-  if (task) return renderTask(task.dataset.task);
+  if (task) return goTask(task.dataset.task);
   const item = e.target.closest("[data-item]");
-  if (item) return renderWorkItem(item.dataset.item);
+  if (item) return goItem(item.dataset.item);
   const unfocus = e.target.closest("[data-unfocus]");
   if (unfocus) {
     return api(`/chat-sessions/${state.chatId}/focus/${unfocus.dataset.unfocus}`, { method: "DELETE" })
@@ -1084,7 +1155,7 @@ document.addEventListener("click", (e) => {
   if (discuss && state.itemId) {
     return api(`/work-items/${state.itemId}/discuss`, { method: "POST",
       body: JSON.stringify({ about: discuss.dataset.discuss || null }) })
-      .then((chat) => { closeTaskPanel(); return openChat(chat.id); }).catch(fail);
+      .then((chat) => goChat(chat.id)).catch(fail);
   }
   const cancelSchedule = e.target.closest("[data-cancel-schedule]");
   if (cancelSchedule && state.itemId) {
@@ -1114,12 +1185,10 @@ $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); }
 });
 $("new-chat").onclick = async () => {
-  try { const c = await api("/chat-sessions", { method: "POST", body: "{}" }); await openChat(c.id); }
+  try { const c = await api("/chat-sessions", { method: "POST", body: "{}" }); goChat(c.id); }
   catch (e) { fail(e); }
 };
 $("reload-chats").onclick = loadChats;
-$("tab-chats").onclick = () => showTab("chats");
-$("tab-items").onclick = () => showTab("items");
 document.addEventListener("change", (e) => {
   const check = e.target.closest("[data-check]");
   if (!check || !state.itemId) return;
@@ -1137,26 +1206,15 @@ $("new-item-form").onsubmit = async (event) => {
     $("new-item-title").value = "";
     await loadItems();
     if (state.chatId) await refreshTranscript();
-    await renderWorkItem(item.id);
+    goItem(item.slug);
   } catch (e) { fail(e); }
 };
 $("repository").onchange = (event) => {
   state.repositoryId = event.target.value || null;
   renderProposal();
 };
-$("close-task").onclick = () => {
-  state.taskId = null;
-  state.itemId = null;
-  $("detail-title").textContent = "Task";
-  clearTimeout(state.taskTimer);
-  state.taskTimer = null;
-  state.prPollAttempts = 0;
-  $("task-detail").innerHTML = `<div class="sub">Select a task card in the transcript.</div>`;
-  closeTaskPanel();
-};
-$("detail-scrim").onclick = closeTaskPanel;
-$("open-chats").onclick = () => document.querySelector("aside").classList.add("open");
-$("close-chats").onclick = () => document.querySelector("aside").classList.remove("open");
+$("close-task").onclick = () => go({ ...parseRoute(), task: null });
+$("detail-scrim").onclick = () => go({ ...parseRoute(), task: null });
 $("cancel-action").onclick = closeActionDialog;
 $("action-dialog").addEventListener("close", () => { state.pendingAction = null; });
 $("action-form").onsubmit = async (event) => {
@@ -1199,7 +1257,7 @@ $("action-form").onsubmit = async (event) => {
       });
       closeActionDialog();
       await refreshTranscript();
-      await renderTask(task.id);
+      goTask(task.id);
     } else {
       await api(`/tasks/${pending.taskId}/pull-request-approval`, {
         method: "POST", headers,
@@ -1215,8 +1273,7 @@ $("action-form").onsubmit = async (event) => {
     button.disabled = false;
   }
 };
-window.addEventListener("resize", syncResponsivePanels);
-syncResponsivePanels();
+closeTaskPanel();
 
 const THEME_STORAGE_KEY = "assistant.theme";
 const theme = {
@@ -1247,5 +1304,11 @@ const theme = {
 };
 theme.init();
 $("theme-toggle").onclick = () => theme.toggle();
+// Push notifications link to /?task=<id>; open that task over the chats view.
+const linkedTask = new URLSearchParams(location.search).get("task");
+if (linkedTask) history.replaceState(null, "", location.pathname + routeHash({ section: "chats", task: linkedTask }));
+else if (!location.hash) history.replaceState(null, "", location.pathname + "#/chats");
+window.addEventListener("hashchange", render);
 Promise.all([loadChats(), loadRepositories(), loadDeploymentTargets(), loadItems(), loadSpaces()]);
+render();
 </script>
