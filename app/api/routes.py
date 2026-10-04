@@ -59,6 +59,7 @@ from app.api.schemas import (
 )
 from app.capabilities.models import CapabilityKind
 from app.deployments import HostDeployerSpoolError
+from app.direct_actions import run_direct_action
 from app.domain.enums import CODING_CAPABILITIES, TaskStatus
 from app.integrations.chat import ProviderError
 from app.integrations.github import GitHubError
@@ -104,6 +105,11 @@ def _triage(
     focused = work_items.focused(chat_session_id)
     spaces = work_items.space_slugs(focused)
     history = _service(request).list_chat_messages(chat_session_id, limit=500)[-7:-1]
+    open_items = [
+        {"slug": item.slug, "title": item.title, "kind": item.kind}
+        for item in work_items.list(limit=50)
+        if item.status != "done"
+    ]
     decision = request.app.state.triager.decide(
         body.content,
         selected_repository_id=body.repository_id,
@@ -116,8 +122,22 @@ def _triage(
             for message in history
             if message.role in ("user", "assistant")
         ],
+        work_items=open_items,
     )
-    return TriageDecisionResponse.model_validate(decision.model_dump(mode="json"))
+    response = TriageDecisionResponse.model_validate(decision.model_dump(mode="json"))
+    if decision.action is not None:
+        # T0: done now, without a chat model; the reply lands in the transcript.
+        result = run_direct_action(
+            decision.action,
+            chat_session_id=chat_session_id,
+            items=work_items,
+            memory=request.app.state.memory_service,
+        )
+        _service(request).append_chat_message(
+            chat_session_id, content=result.reply, role="assistant"
+        )
+        response.result = result.reply
+    return response
 
 
 CODING_WORKFLOW_REQUIRED = (
