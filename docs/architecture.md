@@ -30,58 +30,54 @@ the worker. Adding Kimi, a model, or a tool would require editing worker logic.
 
 ## Current architecture
 
+The full picture, with what is built, partial, and next, is
+[`personal-assistant-target-architecture.svg`](personal-assistant-target-architecture.svg).
+This diagram is the request path in the code today.
+
 ```mermaid
 flowchart LR
-    client[HTTP client] --> api[FastAPI]
+    client[Web console / Android] --> caddy[Caddy HTTPS + login]
+    caddy --> api[FastAPI]
     api --> service[Task service]
-    service --> db[(PostgreSQL task and event store)]
+    api --> items[Work item service]
+    service --> db[(PostgreSQL: tasks, events, chats, work items)]
+    items --> db
 
-    manifests[YAML capability manifests] --> registry[Capability registry]
-    registry --> capapi[Capabilities API]
+    manifests[YAML manifests] --> registry[Capability registry]
     registry --> manager[Deterministic manager]
 
     worker[Task worker] -->|claim task| db
     worker --> manager
     manager -->|typed delegate decision| worker
-    worker --> adapters{Adapter resolver}
-    adapters --> fake[Fake executor enabled]
-    adapters --> conversation[Conversation executor]
-    adapters --> coding[Coding PR executor opt-in]
-    conversation --> chat{Preferred chat provider}
+    worker --> conversation[Conversation executor]
+    conversation --> chat{Chat provider}
     chat -->|primary| kimichat[Kimi]
-    chat -->|provider failure| minimaxchat[MiniMax fallback]
-    coding --> worktree[Isolated Git worktree]
-    worktree --> codex[Codex CLI]
-    codex --> pr[Draft GitHub pull request]
+    chat -->|provider failure| minimaxchat[MiniMax]
+    worker -.->|idle thread| writeback[Brief write-back]
+    writeback --> chat
+
+    api --> workflows[Coding workflow: propose → approve → start]
+    workflows --> codingworker[Coding worker container]
+    codingworker --> worktree[Isolated Git worktree]
+    worktree --> runners[Kimi Code → Claude Code + MiniMax]
+    runners --> repair[Validate · one repair pass]
+    repair --> pr[Draft GitHub pull request]
     pr --> approval[Exact-SHA human approval]
     approval --> merge[GitHub merge API]
-    adapters -. later .-> kimi[Kimi Code disabled]
-    adapters -. later .-> tools[Tool adapters]
+    merge --> deploy[Approved deployment]
+    deploy --> deployer[Host deployer → redeploy + rollback]
 
-    fake --> validation[Output validation]
-    conversation --> validation
-    validation --> service
-    service -->|ordered events| db
-
-    classDef boundary fill:#edf2f7,stroke:#64748b,color:#0f172a
     classDef current fill:#dbeafe,stroke:#2563eb,color:#172554
-    classDef new fill:#fef3c7,stroke:#d97706,color:#451a03
     classDef persistence fill:#dcfce7,stroke:#16a34a,color:#14532d
-    classDef later fill:#f3e8ff,stroke:#9333ea,color:#3b0764,stroke-dasharray:5 5
-    class client boundary
-    class api,service,worker,fake,conversation,chat,kimichat,minimaxchat,gemini,validation,coding,worktree,codex,pr,approval,merge current
-    class manifests,registry,capapi,manager,adapters new
+    class client,caddy,api,service,items,manifests,registry,manager,worker,conversation,chat,kimichat,minimaxchat,writeback,workflows,codingworker,worktree,runners,repair,pr,approval,merge,deploy,deployer current
     class db persistence
-    class kimi,tools later
 ```
 
 This capability-driven layer is now implemented. The manager returns only
 schema-validated actions. Application code still owns state transitions,
 adapter availability, cancellation, and validation. The conversation executor uses
 Kimi and MiniMax through one provider-neutral, preference-ordered fallback contract.
-The manager-model boundary uses the same failure-only provider-chain policy. Kimi Code remains a
-separate disabled future capability and cannot be selected until its adapter is built
-and the manifest is explicitly enabled.
+The manager-model boundary uses the same failure-only provider-chain policy.
 
 Gemini is isolated from both model-selection paths. Only the API process receives
 `GEMINI_TTS_API_KEY`; `POST /speech` converts Gemini's raw 24 kHz PCM to WAV and keeps a
@@ -89,8 +85,9 @@ bounded repeat-request cache. The Android client falls back to local TTS wheneve
 optional endpoint is unavailable.
 
 The coding workflow is a registered agent capability, while merge is deliberately
-outside manager routing. A code task publishes a draft PR and enters
-`waiting_for_approval`. The approval API binds consent to the recorded PR and its exact
+outside manager routing. Coding tasks are only created by an approved coding workflow or
+a PR revision; the public task routes refuse coding capabilities. A code task publishes a
+draft PR and enters `waiting_for_approval`. The approval API binds consent to the recorded PR and its exact
 head SHA before invoking GitHub. GitHub branch protections remain an independent final
 gate.
 

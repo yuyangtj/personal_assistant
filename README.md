@@ -36,9 +36,14 @@ agent, tool, approval, and Slack integrations.
 
 The fake executor remains as a credential-free fallback, and a scripted client
 exercises the manager inference boundary in tests. Kimi and MiniMax conversational
-execution and opt-in manager analysis are implemented. A Codex-backed coding-to-draft-PR
-adapter is implemented as an opt-in runtime capability. The separate Kimi Code
-capability remains disabled until its CLI runner is implemented and tested.
+execution and opt-in manager analysis are implemented. Coding runs only through an
+approved coding workflow, in an isolated coding worker: Kimi Code is the primary runner
+and Claude Code with MiniMax the fallback (Codex is supported but not installed on the
+server). A failed validation gets one repair pass, and work that still fails is saved to
+a `-validation-failed` branch.
+
+What is built, partial, and next is drawn in
+[`docs/personal-assistant-target-architecture.svg`](docs/personal-assistant-target-architecture.svg).
 
 The before-and-after architecture diagrams are in
 [`docs/architecture.md`](docs/architecture.md).
