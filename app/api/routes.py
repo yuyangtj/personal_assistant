@@ -58,7 +58,7 @@ from app.api.schemas import (
 )
 from app.capabilities.models import CapabilityKind
 from app.deployments import HostDeployerSpoolError
-from app.domain.enums import TaskStatus
+from app.domain.enums import CODING_CAPABILITIES, TaskStatus
 from app.integrations.chat import ProviderError
 from app.integrations.github import GitHubError
 from app.service import (
@@ -93,6 +93,26 @@ def _require_approval_authorization(request: Request) -> None:
         raise HTTPException(status_code=503, detail="Approval authorization is not configured")
     if not supplied_token or not hmac.compare_digest(supplied_token, configured_token):
         raise HTTPException(status_code=401, detail="Invalid approval authorization")
+
+
+CODING_WORKFLOW_REQUIRED = (
+    "Coding work starts from a coding workflow (propose → approve → start), "
+    "not from a plain task"
+)
+
+
+def _reject_direct_coding(
+    required_capabilities: list[str],
+    repository_id: str | None,
+    source_context: dict[str, object],
+) -> None:
+    """Keep the approval gate the only way to start coding work from the API."""
+    if (
+        CODING_CAPABILITIES.intersection(required_capabilities)
+        or repository_id
+        or source_context.get("repository_id")
+    ):
+        raise HTTPException(status_code=422, detail=CODING_WORKFLOW_REQUIRED)
 
 
 def _repository_context(
@@ -328,6 +348,7 @@ def create_task_from_chat_message(
     request: Request,
 ) -> TaskResponse:
     """Launch the work a chat message asked for, on the user's explicit confirmation."""
+    _reject_direct_coding(body.required_capabilities, body.repository_id, body.source_context)
     try:
         task = _service(request).create_task_from_message(
             chat_session_id,
@@ -680,6 +701,7 @@ def request_pull_request_revision(
 
 @router.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 def create_task(body: CreateTaskRequest, request: Request) -> TaskResponse:
+    _reject_direct_coding(body.required_capabilities, body.repository_id, body.source_context)
     try:
         task = _service(request).create_task(
             request=body.request,
@@ -753,6 +775,7 @@ def create_follow_up_task(
     request: Request,
 ) -> TaskResponse:
     """A new task continuing an earlier one, carrying only its curated context."""
+    _reject_direct_coding(body.required_capabilities, body.repository_id, body.source_context)
     try:
         task = _service(request).create_follow_up_task(
             task_id,

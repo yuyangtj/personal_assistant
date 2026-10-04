@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -30,6 +31,7 @@ from app.repositories import RepositoryRegistry
 from app.workflows.models import WorkflowRunStatus
 from app.workflows.registry import WorkflowRegistry
 
+HOST_DEPLOYER_REPORT_TIMEOUT = timedelta(minutes=30)
 GITHUB_REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
 
 
@@ -442,7 +444,28 @@ class WorkflowService:
         if self.host_deployer is None:
             raise WorkflowRunConflictError("Host deployer spool is not configured")
         status = self.host_deployer.status(run.id)
-        if status is None or status.state == HostDeploymentState.RUNNING:
+        if status is None:
+            submitted = run.updated_at
+            if submitted.tzinfo is None:  # SQLite returns naive timestamps
+                submitted = submitted.replace(tzinfo=UTC)
+            if utc_now() - submitted > HOST_DEPLOYER_REPORT_TIMEOUT:
+                # The deployer rejected the request or never ran; stop waiting for it.
+                run.status = WorkflowRunStatus.FAILED.value
+                run.current_stage = "deploy"
+                run.updated_at = utc_now()
+                self._append_event(
+                    session,
+                    run,
+                    "WORKFLOW_FAILED",
+                    {
+                        "strategy": DeploymentStrategy.HOST_DEPLOYER.value,
+                        "stage": "deploy",
+                        "reason": "The host deployer did not report within "
+                        f"{int(HOST_DEPLOYER_REPORT_TIMEOUT.total_seconds() // 60)} minutes",
+                    },
+                )
+            return
+        if status.state == HostDeploymentState.RUNNING:
             return
         if status.commit_sha != run.workflow_input["commit_sha"]:
             raise WorkflowRunConflictError("Deploy status reports a different commit")

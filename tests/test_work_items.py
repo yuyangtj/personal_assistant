@@ -212,6 +212,7 @@ def test_timeline_merges_item_history_with_whitelisted_run_events(
     assert {entry["event_type"] for entry in entries} == {
         "TASK_CREATED",
         "RUN_LINKED",
+        "STATUS_CHANGED",
         "WORK_ITEM_CREATED",
     }
     assert "PLAN_CREATED" not in {entry["event_type"] for entry in everything}
@@ -272,3 +273,24 @@ def test_backfill_creates_one_item_per_coding_lineage_once(
     assert {link["kind"] for link in item.links} == {"repository", "pull_request"}
     assert [focus.id for focus in items.focused(chat.id)] == [item.id]
     assert service.get_task(chat_turn.id).work_item_id is None
+
+
+def test_new_work_skips_a_finished_focused_item_and_starts_open_items(
+    client: TestClient, database: Database, service: TaskService
+) -> None:
+    chat = service.create_chat_session()
+    items = WorkItemService(database)
+    finished = items.create(title="Toggle icon", chat_session_id=chat.id)
+    items.update(finished.id, expected_version=1, status="done")
+    message = _message(client, chat.id, "Research a new font for the console")
+
+    task = client.post(
+        f"/chat-sessions/{chat.id}/messages/{message}/task", json={"create_work_item": True}
+    ).json()
+
+    assert task["work_item_id"] != finished.id
+    fresh = items.get(task["work_item_id"])
+    assert fresh.status == "active"
+    assert items.get(finished.id).status == "done"
+    summaries = [entry["summary"] for entry in items.timeline(fresh.id)]
+    assert "Status: open → active" in summaries
