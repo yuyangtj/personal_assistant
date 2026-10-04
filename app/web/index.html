@@ -440,7 +440,10 @@ function renderProposal() {
     ${missingRepository ? `<div class="gate-notice">Select the repository this coding workflow may change.</div>` : ""}
     <div class="row" style="margin-top:10px">
       <button id="confirm" ${missingRepository ? "disabled" : ""}>${codingWorkflow ? "Propose workflow" : "Create task"}</button>
+      ${codingWorkflow ? `<button class="quiet" id="answer-in-chat">Answer in chat</button>` : ""}
       <button class="quiet" id="decline">Not now</button></div></div>`;
+  const answer = $("answer-in-chat");
+  if (answer) answer.onclick = () => createTask(state.proposalFor, null);
   $("confirm").onclick = () => codingWorkflow
     ? createCodingWorkflow(state.proposalFor)
     : createTask(state.proposalFor, p);
@@ -454,15 +457,26 @@ async function send(text) {
     const posted = await api(`/chat-sessions/${state.chatId}/messages`, {
       method: "POST", body: JSON.stringify({ content: text }),
     });
-    state.proposal = posted.proposal; state.proposalFor = posted.message.id;
+    // A selected repository means the user may want code changed, so the message waits
+    // for a choice instead of going to the chat model, which cannot touch code.
+    const codingRequested = Boolean(state.repositoryId) || Boolean(
+      posted.proposal && posted.proposal.required_capabilities.includes("coding"));
+    state.proposal = posted.proposal || (codingRequested ? {
+      required_capabilities: ["coding"],
+      reason: "A repository is selected, so this message can become a coding workflow.",
+      suggested_goal: text,
+      consequential: true,
+    } : null);
+    state.proposalFor = posted.message.id;
+    // The newest message's choice replaces an older workflow card; that workflow stays
+    // reachable from its own message.
+    if (state.proposal) state.workflowRun = null;
     await refreshTranscript();
     // Ordinary conversation runs straight through; consequential work waits for a tap.
-    const codingRequested = posted.proposal && (
-      posted.proposal.required_capabilities.includes("coding") || state.repositoryId
-    );
-    if (!posted.proposal || (!posted.proposal.consequential && !codingRequested)) {
+    if (!state.proposal || (!state.proposal.consequential && !codingRequested)) {
+      const proposal = state.proposal;
       state.proposal = null;
-      await createTask(posted.message.id, posted.proposal);
+      await createTask(posted.message.id, proposal);
     }
   } catch (e) { fail(e); }
   finally { state.busy = false; $("send").disabled = false; }
