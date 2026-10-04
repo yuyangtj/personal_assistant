@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -13,7 +15,7 @@ CODING = suggestion(
     intent="propose_coding",
     repository_id="personal-assistant",
     goal="Update the browser tab icon.",
-    confidence=0.9,
+    confidence=0.7,  # not clear enough to start right away, so it is offered
 )
 RESEARCH = suggestion(
     intent="propose_task",
@@ -45,7 +47,7 @@ def _messages(client: TestClient, chat_id: str) -> list[dict]:
 
 BLOCK = {
     "options": [
-        {"label": "Set up coding workflow", "primary": True},
+        {"label": "Start coding", "primary": True},
         {"label": "Just chat about it", "decline": True},
     ]
 }
@@ -54,10 +56,10 @@ BLOCK = {
 @pytest.mark.parametrize(
     ("text", "label"),
     [
-        ("yes", "Set up coding workflow"),
-        ("Yes please!", "Set up coding workflow"),
-        ("go ahead", "Set up coding workflow"),
-        ("set up coding workflow", "Set up coding workflow"),
+        ("yes", "Start coding"),
+        ("Yes please!", "Start coding"),
+        ("go ahead", "Start coding"),
+        ("start coding", "Start coding"),
         ("not now", "Just chat about it"),
         ("No thanks.", "Just chat about it"),
         ("yes but in the other repo", None),
@@ -73,7 +75,7 @@ def test_replies_pick_options_by_label_or_yes_no(text: str, label: str | None) -
 # --- the conversation flow -----------------------------------------------------------
 
 
-def test_coding_is_offered_in_chat_and_yes_proposes_the_workflow(client: TestClient) -> None:
+def test_an_unclear_coding_request_is_offered_and_yes_starts_it(client: TestClient) -> None:
     chat = client.post("/chat-sessions", json={}).json()["id"]
     _script(client, CODING)
 
@@ -85,7 +87,7 @@ def test_coding_is_offered_in_chat_and_yes_proposes_the_workflow(client: TestCli
     assert "in Personal Assistant: “Update the browser tab icon”. Want me" in offer["content"]
     (choices,) = offer["blocks"]
     assert [option["label"] for option in choices["options"]] == [
-        "Set up coding workflow",
+        "Start coding",
         "Just chat about it",
     ]
     assert client.get("/workflow-runs").json()["runs"] == []
@@ -94,14 +96,19 @@ def test_coding_is_offered_in_chat_and_yes_proposes_the_workflow(client: TestCli
 
     assert confirmed["decision"]["handled"] is True
     (run,) = client.get("/workflow-runs").json()["runs"]
-    assert run["status"] == "proposed"  # still needs the separate approval
+    assert run["status"] == "running"  # agreeing in chat starts it; merging still needs the token
+    assert run["task_id"] is not None
     assert run["origin_message_id"] == asked["message"]["id"]
+    events = client.get(f"/workflow-runs/{run['id']}/events").json()["events"]
+    assert {"event_type": "WORKFLOW_APPROVED", "by": "chat"} in [
+        {"event_type": event["event_type"], "by": event["payload"].get("by")} for event in events
+    ]
     assert run["input"]["request"].startswith("Update the browser tab icon")
     messages = _messages(client, chat)
     assert messages[-1]["blocks"] == [{"type": "workflow", "workflow_run_id": run["id"]}]
     settled = next(message for message in messages if message["id"] == offer["id"])
     assert settled["blocks"][0]["state"] == "chosen"
-    assert settled["blocks"][0]["chosen"] == "Set up coding workflow"
+    assert settled["blocks"][0]["chosen"] == "Start coding"
 
 
 def test_research_is_started_from_its_choice(client: TestClient) -> None:
@@ -193,3 +200,27 @@ def test_chat_model_choices_reach_the_transcript(client: TestClient) -> None:
     reply = _messages(client, chat)[-1]
     assert reply["content"] == "Which one?"
     assert [option["label"] for option in reply["blocks"][0]["options"]] == ["A", "B"]
+
+
+def test_a_clear_coding_request_goes_to_the_supervisor(client: TestClient) -> None:
+    chat = client.post("/chat-sessions", json={}).json()["id"]
+    _script(client, suggestion(**{**json.loads(CODING), "confidence": 0.95}))
+
+    asked = _say(client, chat, "change the tab icon to a rocket")
+
+    assert asked["decision"]["handled"] is True
+    (task,) = client.get(f"/chat-sessions/{chat}/tasks").json()["tasks"]
+    assert task["required_capabilities"] == ["supervision"]
+    assert task["origin_message_id"] == asked["message"]["id"]
+    assert client.get("/workflow-runs").json()["runs"] == []  # the supervisor decides
+
+
+def test_questions_about_work_go_to_the_supervisor(client: TestClient) -> None:
+    chat = client.post("/chat-sessions", json={}).json()["id"]
+    _script(client, suggestion(intent="answer", about_work=True))
+
+    asked = _say(client, chat, "how is the icon change going?")
+
+    assert asked["decision"]["handled"] is True
+    (task,) = client.get(f"/chat-sessions/{chat}/tasks").json()["tasks"]
+    assert task["required_capabilities"] == ["supervision"]

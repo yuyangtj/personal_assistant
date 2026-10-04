@@ -47,6 +47,7 @@ from app.repositories import RepositoryRegistry
 from app.schedules import Scheduler
 from app.service import TaskService
 from app.spaces import SpaceRegistry
+from app.supervisor import SupervisorExecutor, SupervisorTools
 from app.tools.search import build_search
 from app.validation import ValidationProfileRegistry
 from app.work_items import configure_spaces
@@ -502,7 +503,15 @@ class TaskWorker:
             execution_context = dict(task.source_context or {})
             if executor.id == "coding-pull-request":
                 execution_context["progress"] = ProgressReporter(self.service, task.id)
-            if executor.id in {"model-conversation", "coding-pull-request", "tool-agent"}:
+            if executor.id == "supervisor":
+                execution_context["chat_session_id"] = task.chat_session_id
+                execution_context["origin_message_id"] = task.origin_message_id
+            if executor.id in {
+                "model-conversation",
+                "coding-pull-request",
+                "tool-agent",
+                "supervisor",
+            }:
                 work_items = self.service.work_item_context(task)
                 if work_items:
                     execution_context["work_items"] = work_items
@@ -690,6 +699,19 @@ def main() -> None:
     database = Database(settings.database_url)
     if settings.auto_create_schema:
         database.create_schema()
+    repositories = RepositoryRegistry.from_directory(settings.repositories_directory)
+    workflow_service = WorkflowService(
+        database,
+        WorkflowRegistry.from_directory(settings.workflows_directory),
+        repositories,
+        DeploymentRegistry.from_directory(settings.deployment_targets_directory),
+        host_deployer=(
+            HostDeployerSpool(settings.deploy_spool_directory)
+            if settings.deploy_spool_directory
+            else None
+        ),
+    )
+    task_service = TaskService(database)
     executors: dict[str, Executor] = {
         "fake": FakeExecutor(delay_seconds=settings.fake_executor_delay_seconds),
     }
@@ -724,23 +746,17 @@ def main() -> None:
             "Coding pull-request agent enabled for repositories: %s",
             ", ".join(sorted(coding_executor.executors)),
         )
+    if conversation_executor is not None and not settings.worker_coding_only:
+        executors[SupervisorExecutor.id] = SupervisorExecutor(
+            conversation_executor.client,
+            SupervisorTools(database, task_service, workflow_service, repositories),
+        )
+        logger.info("Assistant supervisor enabled")
     # Only capabilities whose adapter is installed in this worker can be selected.
     registry = CapabilityRegistry.from_directory(
         settings.capabilities_directory
     ).restricted_to_adapters(executors)
     manager = build_manager(settings, registry)
-    workflow_service = WorkflowService(
-        database,
-        WorkflowRegistry.from_directory(settings.workflows_directory),
-        RepositoryRegistry.from_directory(settings.repositories_directory),
-        DeploymentRegistry.from_directory(settings.deployment_targets_directory),
-        host_deployer=(
-            HostDeployerSpool(settings.deploy_spool_directory)
-            if settings.deploy_spool_directory
-            else None
-        ),
-    )
-    task_service = TaskService(database)
     notifier = build_notifier(
         settings.ntfy_topic_url, token=settings.ntfy_token, public_url=settings.public_url
     )

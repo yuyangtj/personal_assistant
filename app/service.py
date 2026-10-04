@@ -847,10 +847,42 @@ class TaskService:
                 EventType.APPROVAL_REQUESTED,
                 {**approval, "execution_id": execution_id},
             )
+            self._report_pull_request_ready(session, task, approval)
             task.status = TaskStatus.WAITING_FOR_APPROVAL.value
             task.claimed_by = None
             task.lease_expires_at = None
             return task
+
+    def _report_pull_request_ready(
+        self, session, task: TaskModel, approval: dict[str, Any]
+    ) -> None:
+        """Tell the chat that started the run that its pull request is ready to review."""
+        number = approval.get("number")
+        if not task.chat_session_id or not number:
+            return
+        blocks: list[dict[str, Any]] = [
+            {
+                "type": "link",
+                "label": "Review and merge",
+                "href": f"#/chats/{task.chat_session_id}?task={task.id}",
+            }
+        ]
+        url = str(approval.get("url") or "")
+        if url.startswith("https://"):
+            blocks.append({"type": "link", "label": f"PR #{number} on GitHub", "href": url})
+        self._record_assistant_reply(
+            session,
+            task,
+            {
+                **_reply_payload(
+                    f"Draft PR #{number} is ready for your review: {task.current_goal[:200]}",
+                    emotion="Warm",
+                    intensity=0.7,
+                    outcome="waiting_for_approval",
+                ),
+                "blocks": blocks,
+            },
+        )
 
     def get_pending_approval(self, task_id: str) -> dict[str, Any]:
         with self.database.session() as session:

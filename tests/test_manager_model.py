@@ -128,6 +128,7 @@ def test_validated_adapter_returns_analysis_and_usage() -> None:
         "pull_request_creation",
         "repository_analysis",
         "shell_execution",
+        "supervision",
         "task_execution",
         "testing",
         "web_research",

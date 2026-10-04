@@ -496,8 +496,11 @@ async function refreshTranscript() {
 const CODING_CAPABILITIES = ["coding", "pull_request_creation", "coding-pull-request"];
 
 // Say what the work is doing rather than naming the task machinery.
+// The supervisor answering a message is a chat reply, not separate work.
+const workCapabilities = (task) => (task.required_capabilities || []).filter((c) => c !== "supervision");
+
 function taskCardLabel(task) {
-  const caps = task.required_capabilities || [];
+  const caps = workCapabilities(task);
   const research = caps.includes("web_research");
   const kind = research ? "Research" : caps.some((c) => CODING_CAPABILITIES.includes(c)) ? "Coding run"
     : task.work_item_id ? "Task" : "Reply";
@@ -548,7 +551,7 @@ function renderTranscript() {
     // Every chat reply runs as a small task; only real work, running, or failed tasks
     // earn a card, so ordinary conversation reads like a chat.
     const task = linked && (active(linked) || linked.status !== "completed"
-      || (linked.required_capabilities || []).length || linked.work_item_id) ? linked : null;
+      || workCapabilities(linked).length || linked.work_item_id) ? linked : null;
     const who = m.role === "user" ? "YOU" : m.role === "system" ? "TASK REFERENCE" : "ASSISTANT";
     // The bubble keeps the message's own line breaks (pre-wrap), so no template
     // whitespace may sit inside it.

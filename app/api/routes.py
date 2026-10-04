@@ -58,6 +58,7 @@ from app.api.schemas import (
     WorkflowRunResponse,
 )
 from app.capabilities.models import CapabilityKind
+from app.coding_flow import start_coding_run, start_coding_task
 from app.deployments import HostDeployerSpoolError
 from app.direct_actions import run_direct_action
 from app.domain.enums import CODING_CAPABILITIES, TaskStatus
@@ -75,6 +76,7 @@ from app.service import (
     TaskNotFoundError,
     TaskService,
 )
+from app.triage import TriageIntent
 from app.work_items import WorkItemNotFoundError
 from app.workflows import (
     WorkflowIntegrationUnavailableError,
@@ -144,10 +146,25 @@ def _resolve_choice(
     blocks: list[dict] = []
     try:
         if action == "start_coding":
-            run = _propose_coding_run(
-                request, chat_session_id, origin, payload["repository_id"], goal=payload.get("goal")
+            # Agreeing in the chat is enough to start: the agent only works on a branch and
+            # opens a draft pull request; merging still needs the approval token.
+            message = service.get_user_chat_message(chat_session_id, origin)
+            goal = str(payload.get("goal") or "").strip()
+            run = start_coding_run(
+                service,
+                request.app.state.workflow_service,
+                request.app.state.repository_registry,
+                repository_id=payload["repository_id"],
+                request=(
+                    f"{goal}\n\nOriginal request: {message.content}"
+                    if goal and goal != message.content
+                    else message.content
+                ),
+                chat_session_id=chat_session_id,
+                origin_message_id=origin,
+                approved_by="chat",
             )
-            reply = "Proposed a coding workflow. Nothing runs until you approve it."
+            reply = "Started a coding agent on it. I'll report back here."
             blocks = [{"type": "workflow", "workflow_run_id": run.id}]
         elif action in ("start_research", "start_task"):
             task = service.create_task_from_message(
@@ -180,6 +197,10 @@ def _resolve_choice(
         handled=True,
         source="rules",
     )
+
+
+#: A coding request this clear starts work right away; less clear ones are offered.
+SUPERVISOR_CONFIDENCE = 0.85
 
 
 def _triage(
@@ -243,6 +264,32 @@ def _triage(
         )
         service.append_chat_message(chat_session_id, content=result.reply, role="assistant")
         response.result = result.reply
+        response.handled = True
+        return response
+    # Work goes to the supervisor, which sees every run and can start, inspect or stop
+    # them: a clear request for a code change, or any message about coding work.
+    if request.app.state.settings.supervisor_enabled and (
+        decision.about_work
+        or (
+            decision.intent == TriageIntent.PROPOSE_CODING
+            and decision.repository_id
+            and decision.confidence >= SUPERVISOR_CONFIDENCE
+        )
+    ):
+        service.create_task_from_message(
+            chat_session_id,
+            message_id,
+            required_capabilities=["supervision"],
+            source_context={
+                key: value
+                for key, value in {
+                    "client": "web-console",
+                    "local_time": body.local_time,
+                    "timezone": body.timezone,
+                }.items()
+                if value
+            },
+        )
         response.handled = True
         return response
     # Proposals are asked in the conversation, with the options as choices to pick.
@@ -1329,25 +1376,8 @@ def start_workflow_run(workflow_run_id: str, request: Request) -> WorkflowRunRes
             raise WorkflowRunConflictError(
                 f"Workflow {run.workflow_id} has no trusted execution adapter"
             )
-        if run.task_id is not None:
-            return WorkflowRunResponse.from_model(workflow_service.sync_run(run.id))
-        if run.status != "approved":
-            raise WorkflowRunConflictError("Workflow run must be approved before it can start")
-        task = _service(request).create_task(
-            request=str(run.workflow_input["request"]),
-            required_capabilities=["coding", "pull_request_creation"],
-            source_context={
-                "repository_id": str(run.workflow_input["repository_id"]),
-                "workflow_run_id": run.id,
-            },
-            chat_session_id=run.chat_session_id,
-            origin_message_id=run.origin_message_id,
-            external_source="workflow",
-            external_key=run.id,
-            work_item_space="coding",
-        )
         return WorkflowRunResponse.from_model(
-            workflow_service.attach_coding_task(run.id, task_id=task.id)
+            start_coding_task(_service(request), workflow_service, run)
         )
     except WorkflowRunNotFoundError as error:
         raise HTTPException(status_code=404, detail="Workflow run not found") from error

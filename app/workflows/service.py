@@ -194,7 +194,9 @@ class WorkflowService:
                 )
             )
 
-    def decide(self, workflow_run_id: str, *, approve: bool) -> WorkflowRunModel:
+    def decide(
+        self, workflow_run_id: str, *, approve: bool, by: str | None = None
+    ) -> WorkflowRunModel:
         with self.database.session() as session, session.begin():
             run = session.scalar(
                 select(WorkflowRunModel)
@@ -216,7 +218,8 @@ class WorkflowService:
                 run.status = WorkflowRunStatus.REJECTED.value
                 event_type = "WORKFLOW_REJECTED"
             run.updated_at = utc_now()
-            self._append_event(session, run, event_type, {})
+            # Who decided: the console's token approval, or the assistant on the user's ask.
+            self._append_event(session, run, event_type, {"by": by} if by else {})
             return run
 
     def attach_coding_task(self, workflow_run_id: str, *, task_id: str) -> WorkflowRunModel:
