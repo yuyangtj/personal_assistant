@@ -21,6 +21,7 @@ WORK_VERBS = frozenset(
     {
         "add",
         "build",
+        "change",
         "check",
         "clean",
         "configure",
@@ -34,6 +35,7 @@ WORK_VERBS = frozenset(
         "improve",
         "investigate",
         "migrate",
+        "modify",
         "refactor",
         "release",
         "remove",
