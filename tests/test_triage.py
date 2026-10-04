@@ -200,3 +200,13 @@ def test_null_goal_and_reason_are_accepted(repositories: RepositoryRegistry) -> 
 
     assert (decision.intent, decision.source) == (TriageIntent.ANSWER, "model")
     assert decision.goal == "how are you today?"
+
+
+def test_chat_model_offers_research_only_when_available() -> None:
+    from app.execution.conversation import ConversationExecutor
+
+    with_research = ConversationExecutor(ScriptedChat(), research_available=True)
+    without = ConversationExecutor(ScriptedChat())
+
+    assert "research agent can" in with_research._messages("find one", (), {})[0].content
+    assert "research agent" not in without._messages("find one", (), {})[0].content
