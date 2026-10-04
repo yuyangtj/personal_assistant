@@ -48,6 +48,8 @@ class AppendChatMessageRequest(BaseModel):
     """A turn of conversation. Posting one never launches work."""
 
     content: str = Field(min_length=1, max_length=20_000)
+    #: The client's repository picker; triage treats it as an override, not an intent.
+    repository_id: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class CreateTaskFromMessageRequest(BaseModel):
@@ -107,9 +109,29 @@ class TaskProposalResponse(BaseModel):
     consequential: bool
 
 
+class TriageOptionResponse(BaseModel):
+    label: str
+    intent: str
+    repository_id: str | None = None
+
+
+class TriageDecisionResponse(BaseModel):
+    intent: str
+    goal: str
+    reason: str
+    confidence: float
+    repository_id: str | None = None
+    question: str | None = None
+    options: list[TriageOptionResponse] = Field(default_factory=list)
+    source: str
+
+
 class AppendChatMessageResponse(BaseModel):
     message: ChatMessageResponse
+    #: Keyword-rule proposal, kept for older clients; new clients render ``decision``.
     proposal: TaskProposalResponse | None = None
+    #: What the server decided this message needs (answer, propose work, or ask).
+    decision: TriageDecisionResponse | None = None
     #: Slugs of work items this message focused the chat on through #mentions.
     focused_work_items: list[str] = Field(default_factory=list)
 

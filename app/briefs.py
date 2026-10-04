@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -19,6 +18,7 @@ from sqlalchemy import select
 
 from app.domain.work_items import Brief, WorkItemStatus
 from app.integrations.chat import ChatClient, ChatMessage
+from app.integrations.model_json import extract_json_object
 from app.persistence.database import Database
 from app.persistence.models import WorkItemModel, utc_now
 from app.work_items import brief_material, record_writeback
@@ -43,15 +43,6 @@ class BriefWriterError(RuntimeError):
     pass
 
 
-def _extract_json(text: str) -> Any:
-    """The JSON object in a reply, tolerating reasoning tags, fences, or prose around it."""
-    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    start, end = cleaned.find("{"), cleaned.rfind("}")
-    if start == -1 or end <= start:
-        raise ValueError("no JSON object in the reply")
-    return json.loads(cleaned[start : end + 1])
-
-
 class BriefWriter:
     def __init__(self, client: ChatClient, *, max_attempts: int = 2):
         if max_attempts < 1:
@@ -73,7 +64,7 @@ class BriefWriter:
         for _attempt in range(self.max_attempts):
             completion = self.client.complete(messages, max_tokens=900)
             try:
-                return Brief.model_validate(_extract_json(completion.text))
+                return Brief.model_validate(extract_json_object(completion.text))
             except (ValueError, ValidationError) as error:
                 reason = str(error).splitlines()[0][:300]
                 messages.extend(

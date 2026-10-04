@@ -485,24 +485,45 @@ function renderProposal() {
     return;
   }
   if (!state.proposal) { $("proposal-slot").innerHTML = ""; return; }
-  const p = state.proposal;
-  const codingWorkflow = p.required_capabilities.includes("coding") || Boolean(state.repositoryId);
-  const missingRepository = codingWorkflow && !state.repositoryId;
+  // state.proposal is the server's triage decision for the latest message.
+  const d = state.proposal;
+  const repoName = (id) => (state.repositories.find((repo) => repo.id === id) || {}).name || id;
+  let title = "";
+  let actions = "";
+  if (d.intent === "propose_coding") {
+    title = `Propose a coding workflow in ${esc(repoName(d.repository_id))}?`;
+    actions = `<button id="confirm">Propose workflow</button>
+      <button class="quiet" id="answer-in-chat">Answer in chat</button>`;
+  } else if (d.intent === "propose_task") {
+    title = "Track this as a task?";
+    actions = `<button id="confirm">Create task</button>
+      <button class="quiet" id="answer-in-chat">Answer in chat</button>`;
+  } else {
+    title = esc(d.question || "What should I do with this?");
+    actions = (d.options || []).map((option, index) =>
+      `<button class="${index ? "quiet" : ""}" data-option="${index}">${esc(option.label)}</button>`).join("");
+  }
   $("proposal-slot").innerHTML = `<div class="proposal">
-    <strong>${codingWorkflow ? "Propose coding workflow?" : "Create a task?"}</strong>${p.consequential ? `<span class="badge">consequential</span>` : ""}
-    <div class="why">${esc(p.reason)}</div>
-    <div class="goal">${esc(p.suggested_goal)}</div>
-    ${p.required_capabilities.length ? `<div class="why">Needs: ${esc(p.required_capabilities.join(", "))}</div>` : ""}
-    ${missingRepository ? `<div class="gate-notice">Select the repository this coding workflow may change.</div>` : ""}
-    <div class="row" style="margin-top:10px">
-      <button id="confirm" ${missingRepository ? "disabled" : ""}>${codingWorkflow ? "Propose workflow" : "Create task"}</button>
-      ${codingWorkflow ? `<button class="quiet" id="answer-in-chat">Answer in chat</button>` : ""}
+    <strong>${title}</strong>${d.source === "rules" ? `<span class="badge">keyword rules</span>` : ""}
+    <div class="why">${esc(d.reason)}</div>
+    <div class="goal">${esc(d.goal)}</div>
+    <div class="row wrap" style="margin-top:10px">${actions}
       <button class="quiet" id="decline">Not now</button></div></div>`;
+  const messageId = state.proposalFor;
   const answer = $("answer-in-chat");
-  if (answer) answer.onclick = () => createTask(state.proposalFor, null);
-  $("confirm").onclick = () => codingWorkflow
-    ? createCodingWorkflow(state.proposalFor)
-    : createTask(state.proposalFor, p, true);
+  if (answer) answer.onclick = () => createTask(messageId);
+  const confirm = $("confirm");
+  if (confirm) confirm.onclick = () => d.intent === "propose_coding"
+    ? createCodingWorkflow(messageId, d.repository_id)
+    : createTask(messageId, d.goal, true);
+  document.querySelectorAll("[data-option]").forEach((button) => {
+    button.onclick = () => {
+      const option = d.options[Number(button.dataset.option)];
+      if (option.intent === "propose_coding") return createCodingWorkflow(messageId, option.repository_id);
+      if (option.intent === "propose_task") return createTask(messageId, d.goal, true);
+      return createTask(messageId);
+    };
+  });
   $("decline").onclick = () => { state.proposal = null; renderProposal(); };
 }
 
@@ -511,44 +532,31 @@ async function send(text) {
   try {
     if (!state.chatId) { state.chatId = (await api("/chat-sessions", { method: "POST", body: "{}" })).id; }
     const posted = await api(`/chat-sessions/${state.chatId}/messages`, {
-      method: "POST", body: JSON.stringify({ content: text }),
+      method: "POST", body: JSON.stringify({ content: text, repository_id: state.repositoryId }),
     });
-    // A selected repository means the user may want code changed, so the message waits
-    // for a choice instead of going to the chat model, which cannot touch code.
-    const codingRequested = Boolean(state.repositoryId) || Boolean(
-      posted.proposal && posted.proposal.required_capabilities.includes("coding"));
-    state.proposal = posted.proposal || (codingRequested ? {
-      required_capabilities: ["coding"],
-      reason: "A repository is selected, so this message can become a coding workflow.",
-      suggested_goal: text,
-      consequential: true,
-    } : null);
+    // The server decides what the message needs; the repository picker is only an override.
+    const decision = posted.decision || { intent: "answer" };
+    state.proposal = decision.intent === "answer" ? null : decision;
     state.proposalFor = posted.message.id;
     // The newest message's choice replaces an older workflow card; that workflow stays
     // reachable from its own message.
     if (state.proposal) state.workflowRun = null;
     await refreshTranscript();
-    // Ordinary conversation runs straight through; consequential work waits for a tap.
-    if (!state.proposal || (!state.proposal.consequential && !codingRequested)) {
-      const proposal = state.proposal;
-      state.proposal = null;
-      await createTask(posted.message.id, proposal);
-    }
+    if (!state.proposal) await createTask(posted.message.id);
   } catch (e) { fail(e); }
   finally { state.busy = false; $("send").disabled = false; }
 }
 
-async function createTask(messageId, proposal, makeWorkItem = false) {
+async function createTask(messageId, goal = null, makeWorkItem = false) {
   state.proposal = null;
   try {
     const body = {
-      // A confirmed proposal is work worth keeping: it joins the chat's work item.
+      // Confirmed work is worth keeping: it joins the chat's work item.
       create_work_item: makeWorkItem,
-      required_capabilities: proposal ? proposal.required_capabilities : [],
       source_context: { client: "web-console",
         local_time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     };
-    if (proposal && proposal.suggested_goal) body.goal = proposal.suggested_goal;
+    if (goal) body.goal = goal;
     const task = await api(`/chat-sessions/${state.chatId}/messages/${messageId}/task`,
       { method: "POST", body: JSON.stringify(body) });
     state.taskId = task.id;
@@ -556,13 +564,13 @@ async function createTask(messageId, proposal, makeWorkItem = false) {
   } catch (e) { fail(e); }
 }
 
-async function createCodingWorkflow(messageId) {
-  if (!state.repositoryId) return fail(new Error("Select a registered repository first."));
+async function createCodingWorkflow(messageId, repositoryId = state.repositoryId) {
+  if (!repositoryId) return fail(new Error("Select a registered repository first."));
   state.proposal = null;
   try {
     state.workflowRun = await api(
       `/chat-sessions/${state.chatId}/messages/${messageId}/workflow-run`,
-      { method: "POST", body: JSON.stringify({ repository_id: state.repositoryId }) });
+      { method: "POST", body: JSON.stringify({ repository_id: repositoryId }) });
     await refreshTranscript();
   } catch (e) { fail(e); }
 }
@@ -1058,7 +1066,7 @@ document.addEventListener("click", (e) => {
   const propose = e.target.closest("[data-propose]");
   if (propose) return createCodingWorkflow(propose.dataset.propose);
   const create = e.target.closest("[data-create]");
-  if (create) return createTask(create.dataset.create, null);
+  if (create) return createTask(create.dataset.create);
 });
 $("composer").onsubmit = (e) => {
   e.preventDefault();

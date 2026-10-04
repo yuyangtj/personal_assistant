@@ -26,6 +26,9 @@ class Settings:
     deployment_targets_directory: Path = Path("deployment-targets")
     deploy_spool_directory: Path | None = None
     brief_writeback_enabled: bool = False
+    triage_model_enabled: bool = False
+    triage_timeout_seconds: float = 8.0
+    triage_min_confidence: float = 0.6
     brief_writeback_idle_seconds: int = 600
     default_repository_id: str | None = None
     kimi_api_key: str | None = None
@@ -151,6 +154,19 @@ class Settings:
             brief_writeback_enabled=_as_bool(
                 os.getenv(
                     "ASSISTANT_BRIEF_WRITEBACK_ENABLED", str(defaults.brief_writeback_enabled)
+                )
+            ),
+            triage_model_enabled=_as_bool(
+                os.getenv("ASSISTANT_TRIAGE_MODEL_ENABLED", str(defaults.triage_model_enabled))
+            ),
+            triage_timeout_seconds=float(
+                os.getenv(
+                    "ASSISTANT_TRIAGE_TIMEOUT_SECONDS", str(defaults.triage_timeout_seconds)
+                )
+            ),
+            triage_min_confidence=float(
+                os.getenv(
+                    "ASSISTANT_TRIAGE_MIN_CONFIDENCE", str(defaults.triage_min_confidence)
                 )
             ),
             brief_writeback_idle_seconds=int(

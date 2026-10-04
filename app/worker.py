@@ -27,11 +27,12 @@ from app.execution.coding import (
     RepositoryCodingExecutor,
 )
 from app.execution.fake import ExecutionCancelled
-from app.integrations.chat import ChatClient
-from app.integrations.fallback import FallbackChatClient, FallbackManagerModelClient
+from app.integrations.factory import chat_client_chain
+from app.integrations.factory import provider_order as _provider_order
+from app.integrations.fallback import FallbackManagerModelClient
 from app.integrations.github import GitHubClient
-from app.integrations.kimi import KimiChatClient, KimiManagerModelClient
-from app.integrations.minimax import MiniMaxChatClient, MiniMaxManagerModelClient
+from app.integrations.kimi import KimiManagerModelClient
+from app.integrations.minimax import MiniMaxManagerModelClient
 from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
 from app.manager.decisions import DelegateDecision, FailDecision
 from app.manager.model import ManagerModelClient, ValidatedManagerModelAdapter
@@ -275,66 +276,11 @@ def preflight_coding_executor(executor: RepositoryCodingExecutor) -> None:
         raise ValueError("Coding worker preflight failed: " + "; ".join(problems))
 
 
-def _provider_order(primary: str, fallback: str | None) -> tuple[str, ...]:
-    normalized_primary = primary.strip().lower()
-    supported = {"kimi", "minimax"}
-    if normalized_primary not in supported:
-        raise ValueError(f"Unsupported model provider: {normalized_primary}")
-    if fallback is None or fallback.strip().lower() in {"", "none", "off", "disabled"}:
-        return (normalized_primary,)
-    normalized_fallback = fallback.strip().lower()
-    if normalized_fallback == "auto":
-        normalized_fallback = "minimax" if normalized_primary == "kimi" else "kimi"
-    if normalized_fallback not in supported:
-        raise ValueError(f"Unsupported fallback model provider: {normalized_fallback}")
-    return tuple(dict.fromkeys((normalized_primary, normalized_fallback)))
-
-
-def _build_chat_client(
-    settings: Settings,
-    provider: str,
-    *,
-    primary: bool,
-) -> ChatClient | None:
-    base_url_override = settings.conversation_model_base_url if primary else None
-    model_override = settings.conversation_model_name if primary else None
-    if provider == "kimi":
-        if not settings.kimi_api_key:
-            return None
-        return KimiChatClient(
-            api_key=settings.kimi_api_key,
-            base_url=base_url_override or settings.kimi_base_url,
-            model=model_override or settings.kimi_model,
-            timeout_seconds=(
-                settings.conversation_model_timeout_seconds or settings.kimi_timeout_seconds
-            ),
-        )
-    if not settings.minimax_api_key:
-        return None
-    return MiniMaxChatClient(
-        api_key=settings.minimax_api_key,
-        base_url=base_url_override or settings.minimax_base_url,
-        model=model_override or settings.minimax_model,
-        timeout_seconds=(
-            settings.conversation_model_timeout_seconds or settings.minimax_timeout_seconds
-        ),
-    )
-
-
 def build_conversation_executor(settings: Settings) -> ConversationExecutor | None:
     """Builds the preferred conversation provider with an optional fallback."""
-    order = _provider_order(
-        settings.conversation_model_provider,
-        settings.conversation_model_fallback_provider,
-    )
-    clients = [
-        client
-        for index, provider in enumerate(order)
-        if (client := _build_chat_client(settings, provider, primary=index == 0)) is not None
-    ]
-    if not clients:
+    client = chat_client_chain(settings)
+    if client is None:
         return None
-    client: ChatClient = clients[0] if len(clients) == 1 else FallbackChatClient(clients)
     logger.info("Conversation provider order: %s", client.provider)
     return ConversationExecutor(client)
 

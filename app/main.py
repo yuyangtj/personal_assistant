@@ -8,6 +8,7 @@ from app.capabilities import CapabilityRegistry
 from app.config import Settings
 from app.decision import CodingRunnerRegistry
 from app.deployments import DeploymentRegistry, HostDeployerSpool
+from app.integrations.factory import chat_client_chain
 from app.integrations.gemini_tts import GeminiTtsClient
 from app.integrations.github import GitHubClient
 from app.integrations.speech import CachedSpeechSynthesizer
@@ -16,6 +17,7 @@ from app.persistence.database import Database
 from app.providers import DatabaseProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.service import TaskService
+from app.triage import Triager
 from app.validation import ValidationProfileRegistry
 from app.work_items import WorkItemService
 from app.workflows import WorkflowRegistry, WorkflowService
@@ -56,6 +58,17 @@ def create_app(
     application.state.task_service = TaskService(database)
     application.state.memory_service = MemoryService(database)
     application.state.work_item_service = WorkItemService(database)
+    application.state.triager = Triager(
+        repository_registry,
+        (
+            chat_client_chain(
+                resolved_settings, timeout_seconds=resolved_settings.triage_timeout_seconds
+            )
+            if resolved_settings.triage_model_enabled
+            else None
+        ),
+        min_confidence=resolved_settings.triage_min_confidence,
+    )
     application.state.capability_registry = registry
     application.state.repository_registry = repository_registry
     application.state.workflow_registry = workflow_registry
