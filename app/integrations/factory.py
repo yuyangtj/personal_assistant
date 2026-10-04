@@ -60,6 +60,30 @@ def build_chat_client(
     )
 
 
+def triage_client(settings: Settings) -> ChatClient | None:
+    """A fast client for triage: its own provider first, the other one as fallback.
+
+    Triage runs before every chat reply, so it prefers the quicker provider (Kimi
+    answers in about 1.5 s; MiniMax M2 reasons first and takes over 10 s).
+    """
+    clients = [
+        client
+        for index, provider in enumerate(provider_order(settings.triage_provider, "auto"))
+        if (
+            client := build_chat_client(
+                settings,
+                provider,
+                primary=index == 0,
+                timeout_seconds=settings.triage_timeout_seconds,
+            )
+        )
+        is not None
+    ]
+    if not clients:
+        return None
+    return clients[0] if len(clients) == 1 else FallbackChatClient(clients)
+
+
 def chat_client_chain(
     settings: Settings, *, timeout_seconds: float | None = None
 ) -> ChatClient | None:

@@ -609,3 +609,12 @@ def test_failed_task_reply_uses_the_errors_user_message(service: TaskService) ->
     events = service.list_events(task.id)
     assert events[-1].payload["error"] == "internal detail"
     assert events[-2].payload["text"] == "The tests check still failed; work saved on branch x."
+
+
+def test_triage_prefers_its_own_provider_with_fallback() -> None:
+    from app.integrations.factory import triage_client
+
+    both = triage_client(Settings(kimi_api_key="k", minimax_api_key="m", triage_timeout_seconds=8))
+    assert both.provider == "kimi->minimax"
+    assert triage_client(Settings(minimax_api_key="m")).provider == "minimax"
+    assert triage_client(Settings()) is None
