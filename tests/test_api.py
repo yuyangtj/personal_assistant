@@ -256,6 +256,52 @@ def test_chat_message_can_propose_one_coding_workflow_then_link_started_task(
     assert original["linked_task_id"] == started.json()["task_id"]
 
 
+def test_message_with_coding_workflow_cannot_become_chat_only_task(
+    client: TestClient,
+) -> None:
+    chat = client.post("/chat-sessions", json={}).json()
+    message = client.post(
+        f"/chat-sessions/{chat['id']}/messages",
+        json={"content": "Update the icon for the light and dark mode toggle"},
+    ).json()["message"]
+    run = client.post(
+        f"/chat-sessions/{chat['id']}/messages/{message['id']}/workflow-run",
+        json={"repository_id": "personal-assistant"},
+    ).json()
+
+    response = client.post(
+        f"/chat-sessions/{chat['id']}/messages/{message['id']}/task",
+        json={},
+    )
+
+    assert response.status_code == 409
+    assert run["id"] in response.json()["detail"]
+    assert client.get(f"/chat-sessions/{chat['id']}/tasks").json()["tasks"] == []
+
+
+def test_workflow_runs_can_be_listed_for_one_chat(client: TestClient) -> None:
+    chats = [client.post("/chat-sessions", json={}).json() for _ in range(2)]
+    run_ids = []
+    for chat in chats:
+        message = client.post(
+            f"/chat-sessions/{chat['id']}/messages",
+            json={"content": "Implement a revenue dashboard with tests"},
+        ).json()["message"]
+        run_ids.append(
+            client.post(
+                f"/chat-sessions/{chat['id']}/messages/{message['id']}/workflow-run",
+                json={"repository_id": "personal-assistant"},
+            ).json()["id"]
+        )
+
+    listed = client.get(
+        "/workflow-runs", params={"chat_session_id": chats[0]["id"]}
+    ).json()["runs"]
+
+    assert [run["id"] for run in listed] == [run_ids[0]]
+    assert len(client.get("/workflow-runs").json()["runs"]) == 2
+
+
 def test_external_key_makes_creation_idempotent(client: TestClient) -> None:
     payload = {
         "request": "Handle a Slack message",

@@ -66,6 +66,7 @@ from app.service import (
     ApprovalNotFoundError,
     ChatMessageNotFoundError,
     ChatSessionNotFoundError,
+    MessageHasWorkflowError,
     TaskNotFoundError,
     TaskService,
 )
@@ -337,6 +338,8 @@ def create_task_from_chat_message(
         raise HTTPException(status_code=404, detail="Chat session not found") from error
     except ChatMessageNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat message not found") from error
+    except MessageHasWorkflowError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return TaskResponse.from_model(task)
@@ -1037,8 +1040,12 @@ def get_deployment_workflow_for_task(
 def list_workflow_runs(
     request: Request,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    chat_session_id: str | None = None,
 ) -> WorkflowRunListResponse:
-    runs = request.app.state.workflow_service.list_runs(limit=limit)
+    runs = request.app.state.workflow_service.list_runs(
+        limit=limit,
+        chat_session_id=chat_session_id,
+    )
     return WorkflowRunListResponse(runs=[WorkflowRunResponse.from_model(run) for run in runs])
 
 
