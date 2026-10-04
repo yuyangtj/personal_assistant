@@ -1,9 +1,15 @@
 id: kimi-code
 name: Kimi Code
+# The primary coding runner: rated highest for reasoning and broad strengths so it
+# leads simple, standard and complex work alike. Other runners are fallbacks.
 priority: 100
 cost_tier: 1
-reasoning_tier: 2
+reasoning_tier: 5
 strengths:
+  - architecture
+  - debugging
   - documentation
+  - migration
+  - refactor
   - testing
 enabled: true
