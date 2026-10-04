@@ -110,6 +110,8 @@ class TaskProposalResponse(BaseModel):
 class AppendChatMessageResponse(BaseModel):
     message: ChatMessageResponse
     proposal: TaskProposalResponse | None = None
+    #: Slugs of work items this message focused the chat on through #mentions.
+    focused_work_items: list[str] = Field(default_factory=list)
 
 
 class TaskArtifactReference(BaseModel):
@@ -451,6 +453,7 @@ class CreateWorkItemRequest(BaseModel):
 class UpdateWorkItemRequest(BaseModel):
     version: int = Field(ge=1)
     title: str | None = Field(default=None, min_length=1, max_length=160)
+    slug: str | None = Field(default=None, min_length=1, max_length=80)
     status: WorkItemStatus | None = None
     brief: Brief | None = None
     links: list[WorkItemLink] | None = Field(default=None, max_length=50)

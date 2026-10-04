@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MAX_BRIEF_ENTRIES = 12
 MAX_BRIEF_ENTRY_CHARACTERS = 300
-MAX_SLUG_CHARACTERS = 72
+MAX_SLUG_CHARACTERS = 40
 
 
 class WorkItemKind(StrEnum):
@@ -40,6 +40,7 @@ class WorkItemEventType(StrEnum):
     BRIEF_UPDATE_FAILED = "BRIEF_UPDATE_FAILED"
     STATUS_CHANGED = "STATUS_CHANGED"
     TITLE_CHANGED = "TITLE_CHANGED"
+    SLUG_CHANGED = "SLUG_CHANGED"
     LINKS_CHANGED = "LINKS_CHANGED"
     CHECKLIST_CHANGED = "CHECKLIST_CHANGED"
     RUN_LINKED = "RUN_LINKED"
@@ -98,8 +99,90 @@ class WorkItemLink(BaseModel):
     ref: str | None = Field(default=None, max_length=200)
 
 
+SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
+#: A ``#slug`` mention in a chat message, not preceded by a word or path character.
+MENTION_PATTERN = re.compile(r"(?<![\w/#])#([a-z0-9][a-z0-9-]{1,79})\b")
+SLUG_WORDS = 5
+_SLUG_FILLER = frozenset(
+    {
+        "a",
+        "about",
+        "also",
+        "an",
+        "and",
+        "app",
+        "can",
+        "could",
+        "for",
+        "i",
+        "in",
+        "into",
+        "is",
+        "it",
+        "me",
+        "my",
+        "of",
+        "on",
+        "or",
+        "our",
+        "please",
+        "that",
+        "the",
+        "this",
+        "to",
+        "we",
+        "with",
+        "would",
+        "you",
+    }
+)
+
+
 def slugify(title: str) -> str:
-    """A short, readable, URL-safe handle such as ``add-voice-login``."""
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-    slug = slug[:MAX_SLUG_CHARACTERS].rstrip("-")
+    """A short handle someone would type, such as ``add-voice-login``.
+
+    Keeps the first few meaningful words, so a long request still yields a tag like
+    ``update-icon-light-dark-mode`` rather than its whole first sentence.
+    """
+    words = re.findall(r"[a-z0-9]+", title.lower())
+    meaningful = [word for word in words if word not in _SLUG_FILLER] or words
+    slug = "-".join(meaningful[:SLUG_WORDS])[:MAX_SLUG_CHARACTERS].rstrip("-")
     return slug or "item"
+
+
+def mentioned_slugs(text: str) -> list[str]:
+    return list(dict.fromkeys(match.lower() for match in MENTION_PATTERN.findall(text.lower())))
+
+
+MAX_CONTEXT_ITEMS = 3
+MAX_CONTEXT_CHECKLIST = 10
+MAX_CONTEXT_ACTIVITY = 5
+
+
+def render_work_item_context(items: list[dict]) -> str:
+    """Plain text for a model prompt: each focused item's brief, open checklist, and
+    recent activity. Built from curated records only, never from raw transcripts."""
+    blocks: list[str] = []
+    for item in items[:MAX_CONTEXT_ITEMS]:
+        brief = item.get("brief") or {}
+        lines = [f"#{item['slug']} — {item['title']} ({item['kind']}, {item['status']})"]
+        if goal := brief.get("goal"):
+            lines.append(f"Goal: {goal}")
+        if status_summary := brief.get("status_summary"):
+            lines.append(f"Where it stands: {status_summary}")
+        for label, key in (
+            ("Decisions", "decisions"),
+            ("Next steps", "next_steps"),
+            ("Open questions", "open_questions"),
+        ):
+            if entries := brief.get(key):
+                lines.append(f"{label}:")
+                lines.extend(f"- {entry}" for entry in entries)
+        if checklist := item.get("open_checklist"):
+            lines.append("Open checklist:")
+            lines.extend(f"- {entry}" for entry in checklist[:MAX_CONTEXT_CHECKLIST])
+        if activity := item.get("recent_activity"):
+            lines.append("Recent activity (newest first):")
+            lines.extend(f"- {entry}" for entry in activity[:MAX_CONTEXT_ACTIVITY])
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)

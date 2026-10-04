@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -11,7 +12,7 @@ from app.domain.enums import EventType, ExecutionStatus, TaskStatus
 from app.domain.proposals import TaskProposal, propose_task
 from app.domain.task_context import build_task_context, render_task_context
 from app.domain.transitions import TERMINAL_STATUSES, ensure_transition
-from app.domain.work_items import WorkItemLink
+from app.domain.work_items import WorkItemLink, mentioned_slugs
 from app.execution.actions import validate_action
 from app.execution.base import ConversationTurn
 from app.persistence.database import Database
@@ -28,10 +29,12 @@ from app.persistence.models import (
 )
 from app.persistence.repository import ChatMessageRepository, ChatSessionRepository, TaskRepository
 from app.work_items import (
+    focus_chat,
     get_work_item,
     item_title,
     link_task,
     resolve_for_run,
+    work_item_context,
 )
 from app.workflows.models import WorkflowRunStatus
 
@@ -46,6 +49,13 @@ class ChatSessionNotFoundError(LookupError):
 
 class ChatMessageNotFoundError(LookupError):
     pass
+
+
+@dataclass(frozen=True)
+class PostedMessage:
+    message: ChatMessageModel
+    proposal: TaskProposal | None
+    focused_work_items: list[str] = field(default_factory=list)
 
 
 class MessageHasWorkflowError(ValueError):
@@ -285,12 +295,13 @@ class TaskService:
         *,
         content: str,
         role: str = "user",
-    ) -> tuple[ChatMessageModel, TaskProposal | None]:
+    ) -> PostedMessage:
         """Record a turn of conversation. No task is launched and nothing is executed.
 
         Returns the stored message and, for user turns that read as a request for work,
         a proposal the client can offer as "create a task?". The proposal is advisory:
-        only :meth:`create_task_from_message` actually starts work.
+        only :meth:`create_task_from_message` actually starts work. ``#slug`` mentions of
+        existing work items focus the chat on them.
         """
         normalized_content = content.strip()
         if not normalized_content:
@@ -312,8 +323,17 @@ class TaskService:
                 chat_session.title = _chat_title(normalized_content)
             chat_session.updated_at = datetime.now(UTC)
             session.flush()
+            focused: list[str] = []
+            if role == "user":
+                for slug in mentioned_slugs(normalized_content):
+                    try:
+                        item = get_work_item(session, slug)
+                    except LookupError:
+                        continue
+                    focus_chat(session, chat_session_id=chat_session.id, item=item)
+                    focused.append(item.slug)
             proposal = propose_task(normalized_content) if role == "user" else None
-            return message, proposal
+            return PostedMessage(message=message, proposal=proposal, focused_work_items=focused)
 
     def create_task_from_message(
         self,
@@ -381,6 +401,11 @@ class TaskService:
             if message.role != "user":
                 raise ValueError("Only a user message can propose a workflow")
             return message
+
+    def work_item_context(self, task: TaskModel) -> list[dict[str, Any]]:
+        """Briefs of the work items a run is about, for its model prompt."""
+        with self.database.session() as session:
+            return work_item_context(session, task)
 
     def task_context(self, task_id: str) -> dict[str, Any]:
         """The curated, whitelisted summary of a task — safe to put in a model prompt."""

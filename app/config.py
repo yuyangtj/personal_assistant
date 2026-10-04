@@ -25,6 +25,8 @@ class Settings:
     validation_profiles_directory: Path = Path("validation-profiles")
     deployment_targets_directory: Path = Path("deployment-targets")
     deploy_spool_directory: Path | None = None
+    brief_writeback_enabled: bool = False
+    brief_writeback_idle_seconds: int = 600
     default_repository_id: str | None = None
     kimi_api_key: str | None = None
     kimi_base_url: str = "https://api.kimi.com/coding/v1"
@@ -145,6 +147,17 @@ class Settings:
             ),
             deploy_spool_directory=(
                 Path(value) if (value := os.getenv("ASSISTANT_DEPLOY_SPOOL_DIRECTORY")) else None
+            ),
+            brief_writeback_enabled=_as_bool(
+                os.getenv(
+                    "ASSISTANT_BRIEF_WRITEBACK_ENABLED", str(defaults.brief_writeback_enabled)
+                )
+            ),
+            brief_writeback_idle_seconds=int(
+                os.getenv(
+                    "ASSISTANT_BRIEF_WRITEBACK_IDLE_SECONDS",
+                    str(defaults.brief_writeback_idle_seconds),
+                )
             ),
             default_repository_id=os.getenv("ASSISTANT_DEFAULT_REPOSITORY_ID") or None,
             kimi_api_key=os.getenv("ASSISTANT_KIMI_API_KEY") or os.getenv("KIMI_API_KEY") or None,

@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.coding_runs import CodingRunPhase, CodingRunStore
 from app.decision import CodingDecision, CodingDecisionEngine
+from app.domain.work_items import render_work_item_context
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.integrations.github import GitHubClient, GitHubPullRequest
@@ -681,7 +682,10 @@ class CodingPullRequestExecutor:
             created = True
             if self.checkpoint_store is not None:
                 self.checkpoint_store.update(task_id, CodingRunPhase.AGENT_RUNNING)
-            agent_request = _revision_agent_request(request, revision)
+            agent_request = _with_work_item_context(
+                _revision_agent_request(request, revision),
+                (context or {}).get("work_items"),
+            )
             report = self.agent.run(
                 worktree=worktree,
                 request=agent_request,
@@ -934,6 +938,18 @@ def _failure_headline(result: dict[str, Any]) -> str:
     if headline is None:
         headline = next((line for line in reversed(lines) if not line.startswith("=")), "")
     return headline[:200]
+
+
+def _with_work_item_context(request: str, work_items: Any) -> str:
+    if not isinstance(work_items, list) or not work_items:
+        return request
+    return (
+        f"{request}\n\n"
+        "BACKGROUND FROM THE WORK ITEM (trusted summary of earlier progress; the request "
+        "above takes precedence)\n"
+        f"{render_work_item_context(work_items)}\n"
+        "END BACKGROUND"
+    )
 
 
 def _repair_agent_request(request: str, results: list[dict[str, Any]]) -> str:

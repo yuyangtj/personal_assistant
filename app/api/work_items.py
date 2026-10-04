@@ -106,6 +106,7 @@ def update_work_item(
             reference,
             expected_version=body.version,
             title=body.title,
+            slug=body.slug,
             status=body.status,
             brief=body.brief,
             links=body.links,

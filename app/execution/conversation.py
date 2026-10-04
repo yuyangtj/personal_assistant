@@ -8,6 +8,7 @@ from time import monotonic
 from typing import Any
 
 from app.domain.task_context import render_task_context
+from app.domain.work_items import render_work_item_context
 from app.execution.actions import alarm_matches_next_occurrence, validate_action
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
@@ -106,6 +107,17 @@ class ConversationExecutor:
                     "system",
                     "This request follows up on earlier work. Trusted summary:\n"
                     f"{render_task_context(parent)}",
+                )
+            )
+        work_items = context.get("work_items")
+        if isinstance(work_items, list) and work_items:
+            # Curated briefs from the assistant's records, so the user never repeats them.
+            messages.append(
+                ChatMessage(
+                    "system",
+                    "Work items this conversation is about. Trusted summary; use it to "
+                    "continue the work without asking the user to repeat it:\n"
+                    f"{render_work_item_context(work_items)}",
                 )
             )
         memories = context.get("memories")
