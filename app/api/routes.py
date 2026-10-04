@@ -48,6 +48,7 @@ from app.api.schemas import (
     TaskListResponse,
     TaskProposalResponse,
     TaskResponse,
+    TriageDecisionResponse,
     ValidationProfileListResponse,
     WorkflowDecisionRequest,
     WorkflowListResponse,
@@ -93,6 +94,30 @@ def _require_approval_authorization(request: Request) -> None:
         raise HTTPException(status_code=503, detail="Approval authorization is not configured")
     if not supplied_token or not hmac.compare_digest(supplied_token, configured_token):
         raise HTTPException(status_code=401, detail="Invalid approval authorization")
+
+
+def _triage(
+    request: Request, chat_session_id: str, body: AppendChatMessageRequest
+) -> TriageDecisionResponse:
+    """Decide what a just-stored message needs; never raises (rules are the fallback)."""
+    work_items = request.app.state.work_item_service
+    focused = work_items.focused(chat_session_id)
+    spaces = work_items.space_slugs(focused)
+    history = _service(request).list_chat_messages(chat_session_id, limit=500)[-7:-1]
+    decision = request.app.state.triager.decide(
+        body.content,
+        selected_repository_id=body.repository_id,
+        focused_items=[
+            {"slug": item.slug, "title": item.title, "space": spaces.get(item.space_id)}
+            for item in focused
+        ],
+        recent_turns=[
+            (message.role, message.content)
+            for message in history
+            if message.role in ("user", "assistant")
+        ],
+    )
+    return TriageDecisionResponse.model_validate(decision.model_dump(mode="json"))
 
 
 CODING_WORKFLOW_REQUIRED = (
@@ -333,6 +358,7 @@ def append_chat_message(
             else None
         ),
         focused_work_items=posted.focused_work_items,
+        decision=_triage(request, chat_session_id, body),
     )
 
 
