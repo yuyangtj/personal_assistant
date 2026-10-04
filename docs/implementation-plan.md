@@ -265,3 +265,35 @@ and unsafe paths.
 Phase 0 first: it is small, and it makes every later PR deployable from the phone.
 Then Phases 1 → 2 → 3, which together deliver the chat/task model you asked for.
 Phases 4–6 open up the personal Spaces.
+
+## Status
+
+- **Phase 0 is done**: host deployer (#9), live on the server and used for approved
+  deployments with automatic rollback.
+
+## Backlog
+
+Agreed follow-ups, not yet scheduled. Highest value first.
+
+- [ ] **Server-side triage.** One server decision per chat message (`answer`,
+  `propose_coding`, `propose_task`, `clarify`) from a cheap model with a strict schema,
+  repository inferred from manifest aliases, and keyword rules as the fallback. Clients
+  render the decision instead of their own rules. Brief and logic in the conversation
+  that produced #13–#18; the first assistant-run attempt was lost to an environment test
+  failure (#16).
+- [ ] **Escalation runner for repairs.** The repair pass (#18) reuses the runner that wrote
+  the failing code. Add an `escalation` role to `coding-runners/*.yaml`: repairs (and
+  later hard tasks) use a stronger model such as Claude Code on the Anthropic API or
+  Codex, falling back to the next-ranked runner when none is configured. Needs an API
+  key in `.env.remote` and an ARM64 check of the CLI.
+- [ ] **Repository readiness in the console.** "(not configured)" is computed from the API
+  container's environment, which never has repository mounts. The coding worker should
+  report which repositories passed preflight, and the console should show ready or
+  "coding worker offline".
+- [ ] **Chat model hand-off.** Let the conversation model return a
+  `propose_coding_workflow` action (like phone actions) instead of answering "I can't
+  edit files", and stop claiming that when a coding worker is available.
+- [ ] **Deploy approval in the Android app.** Propose, approve, and start deployments
+  from the app, not only the web console (fits Phase 3).
+- [ ] **Deploy any `main` head from the console.** A task's Deploy button only works while
+  its merge is the tip of `main`; offer "deploy current main" when it is not.
