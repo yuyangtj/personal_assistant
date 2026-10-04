@@ -65,17 +65,19 @@ effect (merge, deploy, purchase, device action) and push approval requests to th
 
 ## Mapping to today's code
 
-| Concept | Existing code | Change |
-|---|---|---|
-| Run | `tasks`, `executions`, `app/service.py`, `app/worker.py` | Add `work_item_id`; keep lifecycle, leases, recovery |
-| Event / timeline | `task_events`, `app/domain/enums.py` `EventType` | Add `work_item_id` and `chat_session_id`; timeline query |
-| Chat | `chat_sessions`, `chat_messages` (`003`, `004`) | Replace one-to-one link with `chat_work_items` |
-| Memory | `memories` (`009`), `app/memory.py` | Add Space scope |
-| Run planner | `app/manager/`, `app/decision/coding.py` | Add tier to the decision |
-| Workflows (T3) | `workflows/*.yaml`, `app/workflows/` | Unchanged |
-| Catalog | `capabilities/`, `coding-runners/`, `repositories/`, `app/capabilities/registry.py` | Load per Space pack; add agent profiles, skills, MCP tools |
-| Runtime state | `provider_runtime_states` (`008`, `010`), `app/providers/state.py` | Unchanged |
-| Approvals | Exact-SHA merge approval, `app/domain/proposals.py` | Generalize to other side effects |
+| Concept | Existing code | Change | Status |
+|---|---|---|---|
+| Work item, Space | `work_items`, `spaces` (`013`), `app/work_items.py` | New | Done (#20); Spaces are `general` and `coding`, no packs yet |
+| Run | `tasks`, `executions`, `app/service.py`, `app/worker.py` | Add `work_item_id`; keep lifecycle, leases, recovery | Done (#20) |
+| Event / timeline | `task_events` + `work_item_events` | Timeline merges item events with whitelisted run events | Done (#20) |
+| Chat | `chat_sessions`, `chat_messages`, `chat_work_items` | Chats focus on items, by #mention or chips | Done (#20, #21, #22) |
+| Brief | `work_items.brief`, `app/briefs.py` | In model prompts; rewritten after quiet chats and finished runs | Done (#21) |
+| Memory | `memories` (`009`), `app/memory.py` | Add Space scope | Next |
+| Run planner | `app/manager/`, `app/decision/coding.py` | Add tier to the decision | Next |
+| Workflows (T3) | `workflows/*.yaml`, `app/workflows/` | Repair pass, saved branch, approved host deploys | Done (#9, #18) |
+| Catalog | `capabilities/`, `coding-runners/`, `repositories/`, `app/capabilities/registry.py` | Load per Space pack; add agent profiles, skills, MCP tools | Next |
+| Runtime state | `provider_runtime_states` (`008`, `010`), `app/providers/state.py` | Unchanged | Done |
+| Approvals | Exact-SHA merge and deploy approval | Generalize to other side effects | Partial |
 
 ## Migration path
 

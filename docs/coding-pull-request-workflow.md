@@ -11,7 +11,11 @@ flowchart LR
     capability --> fetch[Fetch configured base branch]
     fetch --> worktree[Isolated Git worktree + assistant/task branch]
     worktree --> runners[Kimi Code → MiniMax via Claude Code → Codex]
-    runners --> commit[Host validates diff and commits]
+    runners --> validate[Host validation]
+    validate -->|fails| repair[One repair pass with the failure output]
+    repair --> validate
+    validate -->|still fails| saved[Push work to -validation-failed branch]
+    validate -->|passes| commit[Host commits]
     commit --> push[Push dedicated branch]
     push --> draft[Create draft GitHub PR]
     draft --> wait[Task waits for approval]
@@ -95,9 +99,16 @@ The initial registry contains `personal-assistant` and `analytics-agent-playgrou
 the original single-repository personal-assistant setup, but the per-repository path
 variables are preferred.
 
-Kimi Code and Codex reuse their respective CLI authentication. The MiniMax Claude Code
-runner receives `MINIMAX_API_KEY` as `ANTHROPIC_AUTH_TOKEN` and uses
-`https://api.minimaxi.com/anthropic` by default. Provider credentials are independent
+Kimi Code receives its model through `KIMI_MODEL_NAME`, `KIMI_MODEL_API_KEY` (from
+`KIMI_API_KEY`), and `KIMI_MODEL_BASE_URL` (from `ASSISTANT_KIMI_BASE_URL`), because the
+agent's throwaway home has no `config.toml`. Codex reuses its CLI authentication. The
+MiniMax Claude Code runner receives `MINIMAX_API_KEY` as `ANTHROPIC_AUTH_TOKEN` and uses
+`https://api.minimaxi.com/anthropic` by default.
+
+When a required validation step fails, the same runner gets one repair pass with the
+step's output tail. If validation still fails, the work is committed and pushed to
+`<task-branch>-validation-failed` before the worktree is removed, and the chat reply
+names the failing step and links the saved branch. Provider credentials are independent
 from `ASSISTANT_GITHUB_TOKEN`, which is used only by trusted host code.
 
 The coding runner settings are:
@@ -106,7 +117,7 @@ The coding runner settings are:
 | --- | --- |
 | `ASSISTANT_CODE_AGENT_PROVIDERS` | `kimi,minimax-claude,codex` |
 | `ASSISTANT_KIMI_CODE_EXECUTABLE` | `kimi` |
-| `ASSISTANT_KIMI_CODE_MODEL` | CLI default |
+| `ASSISTANT_KIMI_CODE_MODEL` | `kimi-for-coding` |
 | `ASSISTANT_CLAUDE_CODE_EXECUTABLE` | `claude` |
 | `ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL` | `https://api.minimaxi.com/anthropic` |
 | `ASSISTANT_MINIMAX_CODE_MODEL` | Claude Code/provider default |

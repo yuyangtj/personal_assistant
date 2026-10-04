@@ -270,6 +270,12 @@ Phases 4–6 open up the personal Spaces.
 
 - **Phase 0 is done**: host deployer (#9), live on the server and used for approved
   deployments with automatic rollback.
+- **Phases 1–2 are done**: work items, spaces, timeline and backfill (#20); #mentions,
+  briefs in model prompts, and brief write-back (#21).
+- **Phase 3 is done for the web console** (#22). The Android app (PR 4b) is next.
+- **Hardening from the code review**: coding work only through approved workflows,
+  stuck coding follow-ups, write-back off the task loop (#23); redeploy provider and
+  backup retention (#24).
 
 ## Backlog
 
