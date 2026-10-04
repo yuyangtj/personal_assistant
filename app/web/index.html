@@ -245,7 +245,8 @@
 const $ = (id) => document.getElementById(id);
 const state = { chats: [], repositories: [], deploymentTargets: [], repositoryId: null, chatId: null, messages: [], tasks: [], proposal: null,
                 proposalFor: null, workflowRun: null, taskId: null, busy: false, timer: null,
-                taskTimer: null, prPollAttempts: 0, pendingAction: null };
+                taskTimer: null, prPollAttempts: 0, pendingAction: null,
+                workflowRuns: [], dismissedWorkflows: new Set() };
 
 async function api(path, options) {
   const res = await fetch(path, {
@@ -334,11 +335,14 @@ async function openChat(id) {
 async function refreshTranscript() {
   if (!state.chatId) return;
   try {
-    const [msgs, tasks] = await Promise.all([
+    const [msgs, tasks, runs] = await Promise.all([
       api(`/chat-sessions/${state.chatId}/messages`),
       api(`/chat-sessions/${state.chatId}/tasks`),
+      api(`/workflow-runs?chat_session_id=${encodeURIComponent(state.chatId)}&limit=50`),
     ]);
     state.messages = msgs.messages; state.tasks = tasks.tasks;
+    state.workflowRuns = runs.runs.filter((run) => run.workflow_id === "coding-change");
+    syncWorkflowCard();
     const chat = state.chats.find((c) => c.id === state.chatId);
     $("chat-title").textContent = chat ? chat.title : "Conversation";
     renderTranscript();
@@ -354,6 +358,28 @@ async function refreshTranscript() {
   } catch (e) { fail(e); }
 }
 
+// A coding workflow waiting for approval or a start stays visible until it runs or is
+// dismissed, so a failed approval or a reload never strands it.
+function syncWorkflowCard() {
+  if (state.workflowRun) {
+    const latest = state.workflowRuns.find((run) => run.id === state.workflowRun.id);
+    if (latest) state.workflowRun = latest;
+  } else if (!state.proposal) {
+    // A fresh proposal for the latest message takes precedence over an older workflow.
+    state.workflowRun = state.workflowRuns.find((run) =>
+      ["proposed", "approved"].includes(run.status) && !run.task_id
+      && !state.dismissedWorkflows.has(run.id)) || null;
+  }
+  renderProposal();
+}
+
+function messageAction(m) {
+  const run = state.workflowRuns.find((candidate) => candidate.origin_message_id === m.id);
+  if (run) return `<button class="ghost" data-workflow="${esc(run.id)}">View coding workflow</button>`;
+  if (state.repositoryId) return `<button class="ghost" data-propose="${m.id}">Propose coding workflow</button>`;
+  return `<button class="ghost" data-create="${m.id}">Create task</button>`;
+}
+
 function renderTranscript() {
   const byId = Object.fromEntries(state.tasks.map((t) => [t.id, t]));
   const atBottom = $("transcript").scrollHeight - $("transcript").scrollTop
@@ -366,7 +392,7 @@ function renderTranscript() {
       <div class="who">${who}</div>
       <div class="bubble">${esc(m.content)}
         ${canCreate ? `<div style="margin-top:6px">
-          <button class="ghost" data-create="${m.id}">Create task</button></div>` : ""}
+          ${messageAction(m)}</div>` : ""}
         ${task ? `<button class="taskcard" data-task="${task.id}" type="button" aria-label="View task: ${esc(label(task.status))}">
           <span class="dot ${active(task) ? "run" : task.status === "failed" ? "fail" : ""}"></span>
           <span class="grow">Task · ${esc(label(task.status))}</span><span>View ›</span>
@@ -395,7 +421,11 @@ function renderProposal() {
     if (approve) approve.onclick = () => openActionDialog("workflow", run.id, run);
     const start = $("start-workflow");
     if (start) start.onclick = () => startCodingWorkflow(run.id);
-    $("dismiss-workflow").onclick = () => { state.workflowRun = null; renderProposal(); };
+    $("dismiss-workflow").onclick = () => {
+      state.dismissedWorkflows.add(run.id);
+      state.workflowRun = null;
+      renderProposal();
+    };
     return;
   }
   if (!state.proposal) { $("proposal-slot").innerHTML = ""; return; }
@@ -461,7 +491,7 @@ async function createCodingWorkflow(messageId) {
     state.workflowRun = await api(
       `/chat-sessions/${state.chatId}/messages/${messageId}/workflow-run`,
       { method: "POST", body: JSON.stringify({ repository_id: state.repositoryId }) });
-    renderProposal();
+    await refreshTranscript();
   } catch (e) { fail(e); }
 }
 
@@ -805,6 +835,14 @@ document.addEventListener("click", (e) => {
   if (taskNav) return renderTask(taskNav.dataset.taskNav);
   const task = e.target.closest("[data-task]");
   if (task) return renderTask(task.dataset.task);
+  const workflow = e.target.closest("[data-workflow]");
+  if (workflow) {
+    state.dismissedWorkflows.delete(workflow.dataset.workflow);
+    state.workflowRun = state.workflowRuns.find((run) => run.id === workflow.dataset.workflow) || null;
+    return renderProposal();
+  }
+  const propose = e.target.closest("[data-propose]");
+  if (propose) return createCodingWorkflow(propose.dataset.propose);
   const create = e.target.closest("[data-create]");
   if (create) return createTask(create.dataset.create, null);
 });
@@ -824,6 +862,7 @@ $("new-chat").onclick = async () => {
 $("reload-chats").onclick = loadChats;
 $("repository").onchange = (event) => {
   state.repositoryId = event.target.value || null;
+  renderTranscript();
   renderProposal();
 };
 $("close-task").onclick = () => {

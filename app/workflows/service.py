@@ -164,13 +164,19 @@ class WorkflowService:
                 raise WorkflowRunNotFoundError(workflow_run_id)
             return run
 
-    def list_runs(self, *, limit: int = 100) -> list[WorkflowRunModel]:
+    def list_runs(
+        self,
+        *,
+        limit: int = 100,
+        chat_session_id: str | None = None,
+    ) -> list[WorkflowRunModel]:
+        statement = select(WorkflowRunModel)
+        if chat_session_id is not None:
+            statement = statement.where(WorkflowRunModel.chat_session_id == chat_session_id)
         with self.database.session() as session:
             return list(
                 session.scalars(
-                    select(WorkflowRunModel)
-                    .order_by(WorkflowRunModel.created_at.desc())
-                    .limit(limit)
+                    statement.order_by(WorkflowRunModel.created_at.desc()).limit(limit)
                 )
             )
 

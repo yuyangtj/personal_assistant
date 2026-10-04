@@ -41,6 +41,10 @@ class ChatMessageNotFoundError(LookupError):
     pass
 
 
+class MessageHasWorkflowError(ValueError):
+    """The message already proposed a coding workflow; a chat-only task would bypass it."""
+
+
 MAX_REPLY_CHARACTERS = 4000
 DEFAULT_FAILURE_REPLY = "Sorry, I couldn't finish that request."
 CANCELLED_REPLY = "Okay, I've stopped working on that."
@@ -292,6 +296,14 @@ class TaskService:
                 existing = TaskRepository.get(session, message.linked_task_id)
                 if existing is not None:
                     return existing
+            workflow_run_id = session.scalar(
+                select(WorkflowRunModel.id).where(WorkflowRunModel.origin_message_id == message_id)
+            )
+            if workflow_run_id is not None:
+                raise MessageHasWorkflowError(
+                    f"This message already proposed coding workflow {workflow_run_id}; "
+                    "approve or start that workflow instead"
+                )
             content = message.content
 
         return self.create_task(
