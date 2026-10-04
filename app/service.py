@@ -360,6 +360,7 @@ class TaskService:
         source_context: dict[str, Any] | None = None,
         work_item_id: str | None = None,
         create_work_item: bool = False,
+        space: str | None = None,
     ) -> TaskModel:
         """Launch work from a message the user already sent, on their explicit confirmation.
 
@@ -398,7 +399,7 @@ class TaskService:
             origin_message_id=message_id,
             work_item_id=work_item_id,
             work_item_space=(
-                ("coding" if repository_id else "general") if create_work_item else None
+                (space or ("coding" if repository_id else "general")) if create_work_item else None
             ),
         )
 

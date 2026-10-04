@@ -273,6 +273,10 @@ Phases 4–6 open up the personal Spaces.
 - **Phases 1–2 are done**: work items, spaces, timeline and backfill (#20); #mentions,
   briefs in model prompts, and brief write-back (#21).
 - **Phase 3 is done for the web console** (#22). The Android app (PR 4b) is next.
+- **Phases 4–6, first slice**: server-side triage with a fast model and chat hand-off
+  (#26, #27), T0 direct actions (#28), reminders/routines with ntfy push (#29), a web
+  research agent (#30), and space packs (`spaces/*.yaml`). Still next: agent profiles
+  and tiers in the planner, MCP servers, watches, the escalation runner, Android 4b.
 - **Hardening from the code review**: coding work only through approved workflows,
   stuck coding follow-ups, write-back off the task loop (#23); redeploy provider and
   backup retention (#24).

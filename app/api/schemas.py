@@ -64,6 +64,8 @@ class CreateTaskFromMessageRequest(BaseModel):
     source_context: dict[str, Any] = Field(default_factory=dict)
     work_item_id: str | None = Field(default=None, min_length=1, max_length=80)
     create_work_item: bool = False
+    #: Space for a newly created work item (validated against the space packs).
+    space: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class FollowUpTaskRequest(BaseModel):
@@ -128,6 +130,7 @@ class TriageDecisionResponse(BaseModel):
     options: list[TriageOptionResponse] = Field(default_factory=list)
     action: dict[str, Any] | None = None
     capabilities: list[str] = Field(default_factory=list)
+    space: str | None = None
     #: For direct actions, what was done (also posted as the assistant's reply).
     result: str | None = None
     source: str

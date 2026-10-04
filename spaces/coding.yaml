@@ -1,0 +1,7 @@
+slug: coding
+name: Coding
+kind: coding
+description: Changes to the registered code repositories, run through approved coding workflows.
+aliases:
+  - code
+  - development

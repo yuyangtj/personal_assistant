@@ -35,6 +35,7 @@ def test_work_items_are_created_with_unique_slugs_and_default_brief(client: Test
     assert {space["slug"] for space in client.get("/spaces").json()["spaces"]} == {
         "general",
         "coding",
+        "shopping",
     }
 
 

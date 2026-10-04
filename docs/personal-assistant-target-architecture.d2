@@ -17,7 +17,7 @@ clients: "1 · Clients" {
   web: "Web console\nchats · work items · timeline · approvals" {class: built}
   android: "Android app\nchats · approvals (items: PR 4b)" {class: partial}
   voice: "Voice + avatar" {class: built}
-  push: "Push notifications" {class: next}
+  push: "Push notifications\nntfy" {class: built}
   gateway: "Caddy\nHTTPS · login" {class: built}
 }
 
@@ -27,7 +27,7 @@ conversation: "2 · Conversation layer (FastAPI)" {
   sessions: "Chat sessions" {class: built}
   focus: "Focus resolver\n#mentions · focus chips" {class: built}
   context: "Context builder\nbrief + checklist + recent events + memory" {class: built}
-  triage: "Intake & triage\nkeyword proposals today; model triage next" {class: partial}
+  triage: "Intake & triage\nfast model + rules · keyword fallback" {class: built}
 }
 
 orchestrator: "3 · Orchestrator" {
@@ -37,16 +37,16 @@ orchestrator: "3 · Orchestrator" {
   queue: "Durable queue + workers\nleases · recovery" {class: built}
   policy: "Policy & approvals\nmerge · deploy (buy · device later)" {class: built}
   writeback: "Brief write-back\nquiet chat or finished run" {class: built}
-  scheduler: "Scheduler\nreminders · routines · watches" {class: next}
+  scheduler: "Scheduler\nreminders · routines (watches next)" {class: built}
   deployer: "Host deployer → Hetzner\nsystemd · tagged releases · rollback" {class: built}
 }
 
 tiers: "4 · Execution tiers — cheapest that can do the job" {
   class: layer
   grid-columns: 4
-  t0: "T0 direct action\nno / tiny model" {class: next}
+  t0: "T0 direct action\nchecklists · remember · reminders" {class: built}
   t1: "T1 chat agent\nKimi · MiniMax" {class: built}
-  t2: "T2 tool agent\nmid model + skills + MCP" {class: next}
+  t2: "T2 research agent\nweb search (MCP tools next)" {class: partial}
   t3: "T3 coding workflow (isolated worker)\nKimi Code → MiniMax · repair pass\nsaved branch · PR → approve → merge" {class: built}
 }
 
@@ -64,7 +64,7 @@ external: "5 · External" {
 workspace: "Workspace — source of truth (PostgreSQL)" {
   class: layer
   grid-columns: 1
-  spaces: "Spaces\ngeneral · coding (no packs yet)" {class: partial}
+  spaces: "Spaces\npacks: general · coding · shopping" {class: partial}
   items: "Work items + briefs" {class: built}
   runs: "Runs (tasks table)" {class: built}
   events: "Event log → timeline" {class: built}
@@ -78,7 +78,7 @@ catalog: "Capability catalog (YAML)" {
   runtime: "Provider health · cooldowns · outcomes" {class: built}
   profiles: "Agent profiles\nmodel + skills + tools + budget" {class: next}
   skills: "Skills" {class: next}
-  tools: "Tools / MCP servers" {class: next}
+  tools: "Tools\nweb search (MCP servers next)" {class: partial}
 }
 
 legend: "Legend" {

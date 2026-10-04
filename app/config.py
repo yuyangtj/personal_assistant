@@ -24,6 +24,7 @@ class Settings:
     coding_runners_directory: Path = Path("coding-runners")
     validation_profiles_directory: Path = Path("validation-profiles")
     deployment_targets_directory: Path = Path("deployment-targets")
+    spaces_directory: Path = Path("spaces")
     deploy_spool_directory: Path | None = None
     brief_writeback_enabled: bool = False
     triage_model_enabled: bool = False
@@ -155,6 +156,9 @@ class Settings:
                     "ASSISTANT_DEPLOYMENT_TARGETS_DIRECTORY",
                     str(defaults.deployment_targets_directory),
                 )
+            ),
+            spaces_directory=Path(
+                os.getenv("ASSISTANT_SPACES_DIRECTORY", str(defaults.spaces_directory))
             ),
             deploy_spool_directory=(
                 Path(value) if (value := os.getenv("ASSISTANT_DEPLOY_SPOOL_DIRECTORY")) else None
