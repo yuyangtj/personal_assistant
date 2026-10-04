@@ -135,8 +135,14 @@ class TaskService:
                     raise ChatMessageNotFoundError(origin_message_id)
                 if origin_message.linked_task_id is not None:
                     # One message launches one task; a repeated confirmation is a no-op.
+                    # Externally keyed work (a workflow's coding task) never reuses a task
+                    # the message launched for something else; it takes over the link.
                     existing_task = TaskRepository.get(session, origin_message.linked_task_id)
-                    if existing_task is not None:
+                    if existing_task is not None and (
+                        external_source is None
+                        or (existing_task.external_source, existing_task.external_key)
+                        == (external_source, external_key)
+                    ):
                         return existing_task
             if parent_task_id is not None and TaskRepository.get(session, parent_task_id) is None:
                 raise TaskNotFoundError(parent_task_id)
