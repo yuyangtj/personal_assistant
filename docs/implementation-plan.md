@@ -111,10 +111,10 @@ Compose under systemd. It receives requests through a file spool.
 
 ```bash
 ssh <deploy-user>@<server>
-cd /srv/personal-assistant/repos/personal_assistant   # the trusted DEPLOY_PATH clone
+cd /srv/personal-assistant/app   # the deployment checkout, owned by the deploy user
 git pull --ff-only origin main
+sudo ./scripts/install-host-deployer.sh # creates the spool the API mounts
 ./scripts/redeploy-remote.sh            # brings up the stack with the spool mounts
-sudo ./scripts/install-host-deployer.sh
 systemctl status assistant-deployer.path
 ```
 
