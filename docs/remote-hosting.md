@@ -281,10 +281,11 @@ stack safely:
    local changes.
 2. Pulls `origin/main` (fast-forward only). When the host deployer calls it, it also
    refuses unless `main` is exactly the approved commit.
-3. Sets the primary conversation provider in `.env.remote` (MiniMax by default, or the
-   `kimi`/`minimax` argument) with automatic fallback.
+3. Keeps the primary conversation provider already set in `.env.remote`, or switches it
+   when you pass `kimi` or `minimax`; automatic fallback stays on.
 4. Validates the Compose configuration.
-5. Backs up PostgreSQL to `backups/assistant-<time>.dump` if the database is running.
+5. Backs up PostgreSQL to `backups/assistant-<time>.dump` if the database is running,
+   keeping the newest 20 dumps.
 6. Builds and starts the release with images tagged by commit
    (`personal-assistant:<sha>`); migrations run first.
 7. Waits up to 60 seconds for `/health`.
