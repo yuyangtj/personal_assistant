@@ -15,10 +15,11 @@ SIMULATE_HEALTH_FAILURE="${ASSISTANT_DEPLOY_SIMULATE_HEALTH_FAILURE:-0}"
 CURRENT_TAG_FILE="${REPOSITORY_ROOT}/.deploy-current-tag"
 RELEASES_TO_KEEP=3
 EXIT_ROLLED_BACK=3
-PROVIDER="${1:-minimax}"
+BACKUPS_TO_KEEP=20
+PROVIDER="${1:-}"
 
 usage() {
-    echo "Usage: $0 [minimax|kimi]" >&2
+    echo "Usage: $0 [minimax|kimi]  (default: keep the provider set in .env.remote)" >&2
 }
 
 wait_for_health() {
@@ -60,7 +61,7 @@ set_env_value() {
 }
 
 case "${PROVIDER}" in
-    minimax|kimi) ;;
+    ""|minimax|kimi) ;;
     *)
         usage
         exit 2
@@ -70,6 +71,15 @@ esac
 if [[ ! -f "${ENV_FILE}" ]]; then
     echo "Missing ${ENV_FILE}. Copy .env.remote.example and configure it first." >&2
     exit 1
+fi
+
+if [[ -z "${PROVIDER}" ]]; then
+    # Keep the operator's current choice; only an explicit argument switches it.
+    PROVIDER="$(sed -n 's/^ASSISTANT_CONVERSATION_MODEL_PROVIDER=//p' "${ENV_FILE}" | tail -n 1)"
+    case "${PROVIDER}" in
+        minimax|kimi) ;;
+        *) PROVIDER=minimax ;;
+    esac
 fi
 
 if [[ ! -f "${COMPOSE_FILE}" ]]; then
@@ -119,6 +129,9 @@ if "${compose[@]}" ps --status running --services 2>/dev/null | grep -qx postgre
     umask 077
     echo "Backing up PostgreSQL to ${backup_path}..."
     "${compose[@]}" exec -T postgres pg_dump -U assistant -d assistant -Fc > "${backup_path}"
+    # Timestamped names sort chronologically; keep only the newest dumps.
+    find "${backup_directory}" -maxdepth 1 -type f -name 'assistant-*.dump' \
+        | sort -r | tail -n +"$((BACKUPS_TO_KEEP + 1))" | xargs -r rm -f --
 fi
 
 release_tag="$(git rev-parse HEAD)"
