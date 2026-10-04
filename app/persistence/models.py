@@ -52,6 +52,8 @@ class ChatMessageModel(Base):
     linked_task_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    #: Choices, links and cards the console renders under the text (see app.blocks).
+    blocks: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )

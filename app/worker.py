@@ -515,6 +515,7 @@ class TaskWorker:
                 reply=str(reply),
                 emotion=str(result.output.get("emotion", "Warm")),
                 action=result.output.get("action"),
+                blocks=result.output.get("blocks"),
             )
         except ExecutionCancelled:
             if execution_id is not None:
