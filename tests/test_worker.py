@@ -584,3 +584,23 @@ def test_kimi_code_runner_gets_model_endpoint_and_is_skipped_without_a_key() -> 
         Settings(code_agent_providers="kimi,minimax-claude", minimax_api_key="minimax-secret")
     )
     assert [runner.provider for runner in without_kimi] == ["minimax-claude-code"]
+
+
+def test_failed_task_reply_uses_the_errors_user_message(service: TaskService) -> None:
+    from app.execution.coding import CodingAgentError
+
+    class ExplainingExecutor(FakeExecutor):
+        def execute(self, **_kwargs):
+            raise CodingAgentError(
+                "internal detail",
+                category="validation_failed",
+                user_message="The tests check still failed; work saved on branch x.",
+            )
+
+    task = service.create_task(request="Run something")
+
+    assert make_worker(service, executors={"fake": ExplainingExecutor()}).run_once() is True
+
+    events = service.list_events(task.id)
+    assert events[-1].payload["error"] == "internal detail"
+    assert events[-2].payload["text"] == "The tests check still failed; work saved on branch x."
