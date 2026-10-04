@@ -17,6 +17,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.coding_runs import CodingRunPhase, CodingRunStore
 from app.decision import CodingDecision, CodingDecisionEngine
 from app.domain.work_items import render_work_item_context
+from app.execution.agent_session import (
+    AcpCancelled,
+    AcpClient,
+    AcpError,
+    AcpSession,
+    AcpTimeout,
+    ProgressCallback,
+)
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.integrations.github import GitHubClient, GitHubPullRequest
@@ -81,6 +89,7 @@ class CodeAgentRunner(Protocol):
         request: str,
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
+        on_progress: ProgressCallback | None = None,
     ) -> CodeAgentReport: ...
 
 
@@ -100,6 +109,7 @@ class CodexCliRunner:
         request: str,
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
+        on_progress: ProgressCallback | None = None,
     ) -> CodeAgentReport:
         with tempfile.TemporaryDirectory(prefix="assistant-codex-") as temporary:
             temporary_path = Path(temporary)
@@ -142,6 +152,7 @@ class CodexCliRunner:
                     process.stdin.write(prompt.encode())
                     process.stdin.close()
                     deadline = time.monotonic() + timeout_seconds
+                    watcher = _WorktreeWatcher(worktree, on_progress)
                     while process.poll() is None:
                         if is_cancelled():
                             process.terminate()
@@ -151,6 +162,7 @@ class CodexCliRunner:
                             process.terminate()
                             _wait_or_kill(process)
                             raise CodingAgentError("Coding agent timed out")
+                        watcher.poll()
                         time.sleep(0.2)
             except FileNotFoundError as error:
                 raise CodingAgentError("Codex CLI executable was not found") from error
@@ -193,6 +205,7 @@ class KimiCodeCliRunner:
         request: str,
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
+        on_progress: ProgressCallback | None = None,
     ) -> CodeAgentReport:
         command = [
             self.executable,
@@ -201,6 +214,18 @@ class KimiCodeCliRunner:
             "--output-format",
             "text",
         ]
+        output = _run_code_agent_process(
+            command=command,
+            worktree=worktree,
+            timeout_seconds=timeout_seconds,
+            is_cancelled=is_cancelled,
+            environment=self._environment(),
+            on_progress=on_progress,
+            display_name="Kimi Code CLI",
+        )
+        return _text_report(output, "Kimi Code completed the requested repository change")
+
+    def _environment(self) -> dict[str, str]:
         # Kimi Code only runs a model it has configured. With no config.toml in the
         # agent's throwaway home, the KIMI_MODEL_* variables define the default model.
         environment = _safe_agent_environment()
@@ -211,15 +236,51 @@ class KimiCodeCliRunner:
                 "KIMI_MODEL_BASE_URL": self.base_url,
             }
         )
-        output = _run_code_agent_process(
-            command=command,
-            worktree=worktree,
-            timeout_seconds=timeout_seconds,
-            is_cancelled=is_cancelled,
-            environment=environment,
-            display_name="Kimi Code CLI",
-        )
-        return _text_report(output, "Kimi Code completed the requested repository change")
+        return environment
+
+
+class KimiAcpRunner(KimiCodeCliRunner):
+    """Runs Kimi Code as a live ACP session, so its plan and steps stream back."""
+
+    def run(
+        self,
+        *,
+        worktree: Path,
+        request: str,
+        timeout_seconds: int,
+        is_cancelled: Callable[[], bool],
+        on_progress: ProgressCallback | None = None,
+    ) -> CodeAgentReport:
+        try:
+            client = AcpClient(
+                [self.executable, "acp"], cwd=worktree, environment=self._environment()
+            )
+        except FileNotFoundError as error:
+            raise CodingAgentError(
+                "Kimi Code executable was not found", category="unavailable"
+            ) from error
+        try:
+            session = AcpSession(client, cwd=worktree, on_progress=on_progress)
+            session.open()
+            stop_reason, reply = session.prompt(
+                _coding_prompt(request),
+                deadline=time.monotonic() + timeout_seconds,
+                is_cancelled=is_cancelled,
+            )
+        except AcpCancelled as error:
+            raise ExecutionCancelled("Coding task was cancelled") from error
+        except AcpTimeout as error:
+            raise CodingAgentError("Kimi Code timed out", category="timeout") from error
+        except AcpError as error:
+            raise CodingAgentError(
+                f"Kimi Code session failed: {error}",
+                category=_failure_category(f"{error}\n{error.diagnostic}"),
+            ) from error
+        finally:
+            client.close()
+        if stop_reason == "refusal":
+            raise CodingAgentError("Kimi Code refused the request", category="refused")
+        return _text_report(reply, "Kimi Code completed the requested repository change")
 
 
 class ClaudeCodeMiniMaxRunner:
@@ -249,6 +310,7 @@ class ClaudeCodeMiniMaxRunner:
         request: str,
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
+        on_progress: ProgressCallback | None = None,
     ) -> CodeAgentReport:
         command = [
             self.executable,
@@ -273,6 +335,7 @@ class ClaudeCodeMiniMaxRunner:
             timeout_seconds=timeout_seconds,
             is_cancelled=is_cancelled,
             environment=environment,
+            on_progress=on_progress,
             display_name="Claude Code with MiniMax",
         )
         try:
@@ -316,6 +379,7 @@ class FallbackCodeAgentRunner:
         request: str,
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
+        on_progress: ProgressCallback | None = None,
     ) -> CodeAgentReport:
         deadline = time.monotonic() + timeout_seconds
         attempts: list[RunnerAttempt] = []
@@ -336,11 +400,14 @@ class FallbackCodeAgentRunner:
             if remaining <= 0:
                 break
             try:
+                if on_progress is not None:
+                    on_progress(f"Coding agent started ({runner.provider})", "milestone")
                 report = runner.run(
                     worktree=worktree,
                     request=request,
                     timeout_seconds=remaining,
                     is_cancelled=is_cancelled,
+                    **({"on_progress": on_progress} if on_progress is not None else {}),
                 )
             except ExecutionCancelled:
                 raise
@@ -502,6 +569,7 @@ class CodingPullRequestExecutor:
         context: Mapping[str, Any] | None = None,
     ) -> ExecutionResult:
         del history
+        progress: ProgressCallback | None = (context or {}).get("progress")
         if not (self.repository_path / ".git").exists():
             raise CodingAgentError("Configured coding repository is not a Git repository")
         revision = dict((context or {}).get("revision_pull_request") or {})
@@ -691,12 +759,14 @@ class CodingPullRequestExecutor:
                 request=agent_request,
                 timeout_seconds=self.timeout_seconds,
                 is_cancelled=is_cancelled,
+                **({"on_progress": progress} if progress is not None else {}),
             )
             if is_cancelled():
                 raise ExecutionCancelled("Coding task was cancelled")
             if not _git(worktree, "status", "--porcelain").strip():
                 raise CodingAgentError("Coding agent completed without repository changes")
             _git(worktree, "diff", "--check")
+            _report(progress, "Agent finished; running validation")
             validation, report, attempts = self._validate_with_repair(
                 task_id=task_id,
                 branch=branch,
@@ -704,6 +774,7 @@ class CodingPullRequestExecutor:
                 agent_request=agent_request,
                 report=report,
                 is_cancelled=is_cancelled,
+                progress=progress,
             )
             if self.checkpoint_store is not None:
                 self.checkpoint_store.update(
@@ -730,6 +801,7 @@ class CodingPullRequestExecutor:
                 self.checkpoint_store.update(
                     task_id, CodingRunPhase.COMMITTED, commit_sha=commit_sha
                 )
+            _report(progress, f"Validation passed; pushing {branch}")
             _git(worktree, "push", self.remote, f"HEAD:refs/heads/{branch}", timeout=120)
             if self.checkpoint_store is not None:
                 self.checkpoint_store.update(task_id, CodingRunPhase.PUSHED)
@@ -789,6 +861,7 @@ class CodingPullRequestExecutor:
         agent_request: str,
         report: CodeAgentReport,
         is_cancelled: Callable[[], bool],
+        progress: ProgressCallback | None = None,
     ) -> tuple[list[dict[str, Any]], CodeAgentReport, list[dict[str, Any]]]:
         """Validate; on failure give the agent one repair pass, then keep the work if needed.
 
@@ -804,12 +877,15 @@ class CodingPullRequestExecutor:
                 raise
             results = error.details.get("validation", [])
         logger.info("Validation failed for task %s; starting one repair pass", task_id)
+        failed_step = _failed_required_step(results).get("id", "a check")
+        _report(progress, f"Validation failed ({failed_step}); the agent is repairing it")
         try:
             report = self.agent.run(
                 worktree=worktree,
                 request=_repair_agent_request(agent_request, results),
                 timeout_seconds=self.timeout_seconds,
                 is_cancelled=is_cancelled,
+                **({"on_progress": progress} if progress is not None else {}),
             )
             if is_cancelled():
                 raise ExecutionCancelled("Coding task was cancelled")
@@ -975,8 +1051,7 @@ def _validation_failure_reply(
     headline = _failure_headline(failed)
     reply = (
         f"I made the change, but the {failed.get('id', 'validation')} check still failed "
-        "after one repair attempt"
-        + (f": {headline}." if headline else ".")
+        "after one repair attempt" + (f": {headline}." if headline else ".")
     )
     if saved_branch:
         reply += (
@@ -1083,7 +1158,9 @@ def _run_code_agent_process(
     is_cancelled: Callable[[], bool],
     environment: Mapping[str, str],
     display_name: str,
+    on_progress: ProgressCallback | None = None,
 ) -> str:
+    watcher = _WorktreeWatcher(worktree, on_progress)
     with tempfile.TemporaryDirectory(prefix="assistant-code-agent-") as temporary:
         temporary_path = Path(temporary)
         stdout_path = temporary_path / "stdout.log"
@@ -1107,6 +1184,7 @@ def _run_code_agent_process(
                         process.terminate()
                         _wait_or_kill(process)
                         raise CodingAgentError(f"{display_name} timed out", category="timeout")
+                    watcher.poll()
                     time.sleep(0.2)
         except FileNotFoundError as error:
             raise CodingAgentError(
@@ -1119,6 +1197,65 @@ def _run_code_agent_process(
                 category=_failure_category(diagnostic),
             )
         return stdout_path.read_text(encoding="utf-8", errors="replace")
+
+
+def _report(progress: ProgressCallback | None, text: str) -> None:
+    if progress is not None:
+        try:
+            progress(text, "milestone")
+        except Exception:  # progress is best effort
+            logger.exception("Progress callback failed")
+
+
+class _WorktreeWatcher:
+    """For agents that can't stream their steps: report what changes in the worktree."""
+
+    def __init__(
+        self, worktree: Path, on_progress: ProgressCallback | None, *, interval: float = 20.0
+    ):
+        self.worktree = worktree
+        self.on_progress = on_progress
+        self.interval = interval
+        self._next = time.monotonic() + interval
+        self._last = ""
+
+    def poll(self) -> None:
+        if self.on_progress is None or time.monotonic() < self._next:
+            return
+        self._next = time.monotonic() + self.interval
+        try:
+            summary = worktree_summary(self.worktree)
+        except (CodingAgentError, OSError):
+            return
+        if summary and summary != self._last:
+            self._last = summary
+            _report_kind(self.on_progress, summary, "worktree")
+
+
+def _report_kind(progress: ProgressCallback, text: str, kind: str) -> None:
+    try:
+        progress(text, kind)
+    except Exception:
+        logger.exception("Progress callback failed")
+
+
+def worktree_summary(worktree: Path) -> str:
+    """E.g. "Changed app/web/index.html, app/api/routes.py (+40 −12)"."""
+    changed = [
+        line[3:].strip()
+        for line in _git(worktree, "status", "--porcelain", timeout=10).splitlines()
+        if line.strip()
+    ]
+    if not changed:
+        return ""
+    numbers = re.findall(
+        r"(\d+) insertion|(\d+) deletion", _git(worktree, "diff", "--shortstat", timeout=10)
+    )
+    added = sum(int(a) for a, _ in numbers if a)
+    removed = sum(int(d) for _, d in numbers if d)
+    shown = ", ".join(changed[:3]) + (f" and {len(changed) - 3} more" if len(changed) > 3 else "")
+    stats = f" (+{added} −{removed})" if added or removed else ""
+    return f"Changed {shown}{stats}"[:200]
 
 
 def _read_diagnostic(*paths: Path) -> str:

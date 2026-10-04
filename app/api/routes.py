@@ -61,6 +61,7 @@ from app.capabilities.models import CapabilityKind
 from app.deployments import HostDeployerSpoolError
 from app.direct_actions import run_direct_action
 from app.domain.enums import CODING_CAPABILITIES, TaskStatus
+from app.domain.transitions import TERMINAL_STATUSES
 from app.integrations.chat import ProviderError
 from app.integrations.github import GitHubError
 from app.offers import match_choice, offer_for, pending_choices, settle
@@ -261,6 +262,18 @@ def _triage(
     return response
 
 
+def _task_list_with_progress(request: Request, tasks: list) -> TaskListResponse:
+    """Tasks with what their agents last reported, for live cards."""
+    progress = _service(request).task_progress([task.id for task in tasks if active_status(task)])
+    return TaskListResponse(
+        tasks=[TaskResponse.from_model(task, progress.get(task.id)) for task in tasks]
+    )
+
+
+def active_status(task) -> bool:
+    return TaskStatus(task.status) not in TERMINAL_STATUSES
+
+
 CODING_WORKFLOW_REQUIRED = (
     "Coding work starts from a coding workflow (propose → approve → start), "
     "not from a plain task"
@@ -450,7 +463,7 @@ def list_chat_session_tasks(
         tasks = _service(request).list_chat_session_tasks(chat_session_id, limit=limit)
     except ChatSessionNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error
-    return TaskListResponse(tasks=[TaskResponse.from_model(task) for task in tasks])
+    return _task_list_with_progress(request, tasks)
 
 
 @router.get(
@@ -922,9 +935,10 @@ def get_pending_approval(task_id: str, request: Request) -> PendingApprovalRespo
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
 def get_task(task_id: str, request: Request) -> TaskResponse:
     try:
-        return TaskResponse.from_model(_service(request).get_task(task_id))
+        task = _service(request).get_task(task_id)
     except TaskNotFoundError as error:
         raise HTTPException(status_code=404, detail="Task not found") from error
+    return TaskResponse.from_model(task, _service(request).task_progress([task.id]).get(task.id))
 
 
 @router.get("/tasks/{task_id}/context", response_model=TaskContextResponse)

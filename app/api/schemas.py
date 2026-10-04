@@ -272,10 +272,17 @@ class TaskResponse(BaseModel):
     version: int
     created_at: datetime
     updated_at: datetime
+    #: The latest thing a running agent reported doing, and its current plan.
+    progress: str | None = None
+    plan: str | None = None
 
     @classmethod
-    def from_model(cls, task: TaskModel) -> TaskResponse:
-        return cls.model_validate(task)
+    def from_model(cls, task: TaskModel, progress: dict[str, str] | None = None) -> TaskResponse:
+        response = cls.model_validate(task)
+        if progress:
+            response.progress = progress.get("progress")
+            response.plan = progress.get("plan")
+        return response
 
 
 class EventResponse(BaseModel):

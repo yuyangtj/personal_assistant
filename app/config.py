@@ -62,6 +62,9 @@ class Settings:
     code_agent_model: str | None = None
     kimi_code_executable: str = "kimi"
     kimi_code_model: str | None = None
+    #: "acp" drives Kimi Code as a live session (progress, clean cancel); "prompt" is the
+    #: one-shot fallback.
+    kimi_code_protocol: str = "acp"
     claude_code_executable: str = "claude"
     minimax_anthropic_base_url: str = "https://api.minimaxi.com/anthropic"
     minimax_code_model: str | None = None
@@ -185,14 +188,10 @@ class Settings:
             ),
             triage_provider=os.getenv("ASSISTANT_TRIAGE_PROVIDER", defaults.triage_provider),
             triage_timeout_seconds=float(
-                os.getenv(
-                    "ASSISTANT_TRIAGE_TIMEOUT_SECONDS", str(defaults.triage_timeout_seconds)
-                )
+                os.getenv("ASSISTANT_TRIAGE_TIMEOUT_SECONDS", str(defaults.triage_timeout_seconds))
             ),
             triage_min_confidence=float(
-                os.getenv(
-                    "ASSISTANT_TRIAGE_MIN_CONFIDENCE", str(defaults.triage_min_confidence)
-                )
+                os.getenv("ASSISTANT_TRIAGE_MIN_CONFIDENCE", str(defaults.triage_min_confidence))
             ),
             brief_writeback_idle_seconds=int(
                 os.getenv(
@@ -273,6 +272,9 @@ class Settings:
                 "ASSISTANT_KIMI_CODE_EXECUTABLE", defaults.kimi_code_executable
             ),
             kimi_code_model=os.getenv("ASSISTANT_KIMI_CODE_MODEL") or None,
+            kimi_code_protocol=(
+                os.getenv("ASSISTANT_KIMI_CODE_PROTOCOL") or defaults.kimi_code_protocol
+            ).lower(),
             claude_code_executable=os.getenv(
                 "ASSISTANT_CLAUDE_CODE_EXECUTABLE", defaults.claude_code_executable
             ),
