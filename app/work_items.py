@@ -17,9 +17,19 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.domain.enums import EventType, TaskStatus
-from app.domain.task_context import _artifact, _artifact_label, _clean, build_task_context
+from app.domain.task_context import (
+    _artifact,
+    _artifact_label,
+    _clean,
+    build_task_context,
+    render_task_context,
+)
 from app.domain.work_items import (
     DEFAULT_SPACES,
+    MAX_CONTEXT_ACTIVITY,
+    MAX_CONTEXT_CHECKLIST,
+    MAX_CONTEXT_ITEMS,
+    SLUG_PATTERN,
     Brief,
     ChecklistEntry,
     WorkItemEventType,
@@ -30,6 +40,7 @@ from app.domain.work_items import (
 )
 from app.persistence.database import Database
 from app.persistence.models import (
+    ChatMessageModel,
     ChatSessionModel,
     ChatWorkItemModel,
     CodingRunModel,
@@ -278,6 +289,8 @@ def _work_item_summary(event: WorkItemEventModel) -> str:
         return f"Status: {payload.get('from')} → {payload.get('to')}"
     if kind == WorkItemEventType.TITLE_CHANGED.value:
         return f"Renamed to “{payload.get('to', '')}”"
+    if kind == WorkItemEventType.SLUG_CHANGED.value:
+        return f"Tag changed to #{payload.get('to', '')}"
     if kind == WorkItemEventType.BRIEF_UPDATED.value:
         fields = ", ".join(payload.get("fields", [])) or "brief"
         return f"Brief updated ({fields})"
@@ -378,6 +391,154 @@ def timeline(
     return entries[:limit]
 
 
+def work_item_context(session: Session, task: TaskModel) -> list[dict[str, Any]]:
+    """The work items a run is about: its own item plus its chat's focus, at most three."""
+    candidates: list[WorkItemModel] = []
+    if task.work_item_id:
+        candidates.append(get_work_item(session, task.work_item_id))
+    if task.chat_session_id:
+        candidates.extend(focused_items(session, task.chat_session_id))
+    seen: set[str] = set()
+    context: list[dict[str, Any]] = []
+    for item in candidates:
+        if item.id in seen or item.status == WorkItemStatus.ARCHIVED.value:
+            continue
+        seen.add(item.id)
+        context.append(
+            {
+                "slug": item.slug,
+                "title": item.title,
+                "kind": item.kind,
+                "status": item.status,
+                "brief": item.brief or {},
+                "open_checklist": [
+                    entry["text"] for entry in item.checklist or [] if not entry.get("done")
+                ][:MAX_CONTEXT_CHECKLIST],
+                "recent_activity": [
+                    entry["summary"]
+                    for entry in timeline(
+                        session, work_item_id=item.id, limit=MAX_CONTEXT_ACTIVITY
+                    )
+                ],
+            }
+        )
+        if len(context) == MAX_CONTEXT_ITEMS:
+            break
+    return context
+
+
+MAX_MATERIAL_MESSAGES = 40
+TERMINAL_TASK_STATUSES = frozenset(
+    {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value}
+)
+
+
+def _newer(value: datetime | None, since: datetime | None) -> bool:
+    return value is not None and (since is None or _aware(value) > _aware(since))
+
+
+def brief_material(
+    session: Session,
+    item: WorkItemModel,
+    *,
+    now: datetime,
+    idle_seconds: int,
+) -> str | None:
+    """New conversation and run results since the brief was last written, or None.
+
+    Conversation counts only once its chats have been quiet for ``idle_seconds``, so a
+    brief is not rewritten mid-discussion; a finished run counts immediately.
+    """
+    since = item.brief_synced_at
+    chat_ids = list(
+        session.scalars(
+            select(ChatWorkItemModel.chat_session_id).where(
+                ChatWorkItemModel.work_item_id == item.id
+            )
+        )
+    )
+    messages: list[ChatMessageModel] = []
+    if chat_ids:
+        messages = [
+            message
+            for message in session.scalars(
+                select(ChatMessageModel)
+                .where(ChatMessageModel.chat_session_id.in_(chat_ids))
+                .where(ChatMessageModel.role.in_(("user", "assistant")))
+                .order_by(ChatMessageModel.created_at.desc())
+                .limit(200)
+            )
+            if _newer(message.created_at, since)
+        ]
+    if messages and (now - _aware(messages[0].created_at)).total_seconds() < idle_seconds:
+        messages = []
+    runs = [
+        task
+        for task in session.scalars(
+            select(TaskModel)
+            .where(TaskModel.work_item_id == item.id)
+            .where(TaskModel.status.in_(TERMINAL_TASK_STATUSES))
+            .order_by(TaskModel.updated_at.desc())
+            .limit(20)
+        )
+        if _newer(task.updated_at, since)
+    ]
+    if not messages and not runs:
+        return None
+    parts: list[str] = []
+    if messages:
+        parts.append("CONVERSATION (oldest first)")
+        for message in reversed(messages[:MAX_MATERIAL_MESSAGES]):
+            parts.append(f"{message.role}: {_clean(message.content, limit=800) or ''}")
+    for task in reversed(runs):
+        context = build_task_context(task, TaskRepository.list_events(session, task.id))
+        parts.append("RUN RESULT\n" + render_task_context(context))
+    return "\n".join(parts)
+
+
+def record_writeback(
+    session: Session,
+    item_id: str,
+    *,
+    expected_version: int,
+    synced_at: datetime,
+    brief: Brief | None = None,
+    failure: str | None = None,
+) -> bool:
+    """Apply a generated brief and advance the watermark.
+
+    Returns False without changes when the item was edited meanwhile, so a person's
+    edit is never overwritten by a brief written from older state; it is retried.
+    """
+    item = get_work_item(session, item_id, for_update=True)
+    if item.version != expected_version:
+        return False
+    if brief is not None:
+        new_brief = brief.model_dump(mode="json")
+        fields = sorted(key for key in new_brief if new_brief[key] != (item.brief or {}).get(key))
+        if fields:
+            append_event(
+                session,
+                item,
+                WorkItemEventType.BRIEF_UPDATED,
+                {"fields": fields, "source": "writeback"},
+            )
+            item.brief = new_brief
+            item.version += 1
+            item.updated_at = utc_now()
+    elif failure is not None:
+        # Recorded without the raw model output; the watermark still advances so a
+        # persistently failing item cannot loop.
+        append_event(
+            session,
+            item,
+            WorkItemEventType.BRIEF_UPDATE_FAILED,
+            {"reason": _clean(failure, limit=200) or "unknown"},
+        )
+    item.brief_synced_at = synced_at
+    return True
+
+
 def _aware(value: datetime) -> datetime:
     # SQLite returns naive datetimes; PostgreSQL returns aware ones.
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
@@ -461,6 +622,7 @@ class WorkItemService:
         *,
         expected_version: int,
         title: str | None = None,
+        slug: str | None = None,
         status: WorkItemStatus | None = None,
         brief: Brief | None = None,
         links: Sequence[WorkItemLink] | None = None,
@@ -486,6 +648,20 @@ class WorkItemService:
                     )
                     item.title = normalized
                     changed = True
+            if slug is not None and slug != item.slug:
+                if not SLUG_PATTERN.fullmatch(slug):
+                    raise ValueError("slug must be lowercase letters, digits, and hyphens")
+                taken = session.scalar(select(WorkItemModel.id).where(WorkItemModel.slug == slug))
+                if taken is not None:
+                    raise ValueError(f"slug #{slug} is already used by another work item")
+                append_event(
+                    session,
+                    item,
+                    WorkItemEventType.SLUG_CHANGED,
+                    {"from": item.slug, "to": slug, "source": source},
+                )
+                item.slug = slug
+                changed = True
             if status is not None:
                 status = WorkItemStatus(status)
             if status is not None and status.value != item.status:

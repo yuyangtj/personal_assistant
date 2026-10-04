@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from time import monotonic
 
+from app.briefs import BriefWritebackJob, BriefWriter
 from app.capabilities import CapabilityRegistry
 from app.coding_runs import CodingRunStore
 from app.config import Settings
@@ -409,6 +410,8 @@ class TaskWorker:
         supports_coding: bool = True,
         coding_only: bool = False,
         deployment_sync_interval_seconds: float = 10.0,
+        brief_writeback: BriefWritebackJob | None = None,
+        brief_writeback_interval_seconds: float = 30.0,
     ):
         self.service = service
         self.manager = manager
@@ -422,6 +425,9 @@ class TaskWorker:
         self.coding_only = coding_only
         self.deployment_sync_interval_seconds = deployment_sync_interval_seconds
         self._last_deployment_sync: float | None = None
+        self.brief_writeback = brief_writeback
+        self.brief_writeback_interval_seconds = brief_writeback_interval_seconds
+        self._last_brief_writeback: float | None = None
         self._stop_event = threading.Event()
 
     def run_once(self) -> bool:
@@ -436,6 +442,7 @@ class TaskWorker:
         )
         if task is None:
             self._sync_deployments()
+            self._write_back_briefs()
             return False
 
         heartbeat = _LeaseHeartbeat(
@@ -496,6 +503,10 @@ class TaskWorker:
                 return True
 
             execution_context = dict(task.source_context or {})
+            if executor.id in {"model-conversation", "coding-pull-request"}:
+                work_items = self.service.work_item_context(task)
+                if work_items:
+                    execution_context["work_items"] = work_items
             if self.memory_service is not None and executor.id == "model-conversation":
                 execution_context["memories"] = [
                     memory.content for memory in self.memory_service.relevant(task.original_request)
@@ -582,6 +593,25 @@ class TaskWorker:
         if finished:
             logger.info("Deployments finished: %s", ", ".join(finished))
 
+    def _write_back_briefs(self) -> None:
+        """Refresh work item briefs while idle; the coding worker leaves this alone."""
+        if self.brief_writeback is None or self.coding_only:
+            return
+        now = monotonic()
+        if (
+            self._last_brief_writeback is not None
+            and now - self._last_brief_writeback < self.brief_writeback_interval_seconds
+        ):
+            return
+        self._last_brief_writeback = now
+        try:
+            written = self.brief_writeback.run_due()
+        except Exception:
+            logger.exception("Could not write back work item briefs")
+            return
+        if written:
+            logger.info("Updated %d work item briefs", written)
+
     def run_forever(self) -> None:
         logger.info("Worker %s started", self.worker_id)
         while not self._stop_event.is_set():
@@ -654,6 +684,15 @@ def main() -> None:
         memory_service=MemoryService(database),
         supports_coding=coding_executor is not None,
         coding_only=settings.worker_coding_only,
+        brief_writeback=(
+            BriefWritebackJob(
+                database,
+                BriefWriter(conversation_executor.client),
+                idle_seconds=settings.brief_writeback_idle_seconds,
+            )
+            if settings.brief_writeback_enabled and conversation_executor is not None
+            else None
+        ),
     )
 
     def stop_worker(_signum, _frame) -> None:

@@ -297,7 +297,7 @@ def append_chat_message(
 ) -> AppendChatMessageResponse:
     """Record what the user said. Nothing is executed until a task is confirmed."""
     try:
-        message, proposal = _service(request).append_chat_message(
+        posted = _service(request).append_chat_message(
             chat_session_id,
             content=body.content,
         )
@@ -306,12 +306,13 @@ def append_chat_message(
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return AppendChatMessageResponse(
-        message=ChatMessageResponse.from_model(message),
+        message=ChatMessageResponse.from_model(posted.message),
         proposal=(
-            TaskProposalResponse.model_validate(proposal.as_dict())
-            if proposal is not None
+            TaskProposalResponse.model_validate(posted.proposal.as_dict())
+            if posted.proposal is not None
             else None
         ),
+        focused_work_items=posted.focused_work_items,
     )
 
 
