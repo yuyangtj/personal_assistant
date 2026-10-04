@@ -29,6 +29,16 @@ logger = logging.getLogger(__name__)
 
 #: (text, kind) where kind is "plan", "tool", "worktree" or "milestone".
 ProgressCallback = Callable[[str, str], None]
+#: New instructions from the user for a running agent, or None when there are none.
+GuidanceSource = Callable[[], str | None]
+
+#: How often a running turn checks for new instructions, and how many it takes per run.
+GUIDANCE_INTERVAL = 2.0
+MAX_REDIRECTS = 5
+REDIRECT_PROMPT = """The user has new instructions while you work:
+{guidance}
+Adjust the work accordingly: keep what still fits and change what doesn't. Continue in
+the current worktree, and when you are done reply with the same JSON summary as before."""
 
 ACP_PROTOCOL_VERSION = 1
 _PLAN_MARKS = {"completed": "✓", "in_progress": "▸"}
@@ -201,38 +211,75 @@ class AcpSession:
         return message.get("result")
 
     def prompt(
-        self, text: str, *, deadline: float, is_cancelled: Callable[[], bool]
+        self,
+        text: str,
+        *,
+        deadline: float,
+        is_cancelled: Callable[[], bool],
+        next_guidance: GuidanceSource | None = None,
     ) -> tuple[str, str]:
-        """Run one turn; returns (stop reason, the agent's reply text)."""
+        """Run one turn; returns (stop reason, the agent's reply text).
+
+        New instructions from ``next_guidance`` interrupt the turn and continue the same
+        session with them, so the agent keeps everything it has read and done so far.
+        """
         if self.session_id is None:
             raise AcpError("session is not open")
-        request_id = self.client.request(
-            "session/prompt",
-            {"sessionId": self.session_id, "prompt": [{"type": "text", "text": text}]},
-        )
+        request_id = self._send_prompt(text)
         reply: list[str] = []
         cancelling_since: float | None = None
+        redirect: str | None = None
+        redirects = 0
+        next_check = time.monotonic()
         while True:
+            now = time.monotonic()
             if cancelling_since is None and is_cancelled():
                 self.client.notify("session/cancel", {"sessionId": self.session_id})
-                cancelling_since = time.monotonic()
-            if cancelling_since is None and time.monotonic() >= deadline:
+                cancelling_since = now
+            if cancelling_since is None and now >= deadline:
                 self.client.notify("session/cancel", {"sessionId": self.session_id})
                 raise AcpTimeout("agent turn timed out")
-            if cancelling_since is not None and time.monotonic() - cancelling_since > 15:
+            if cancelling_since is not None and now - cancelling_since > 15:
                 raise AcpCancelled("agent did not stop after cancel")
+            if (
+                next_guidance is not None
+                and cancelling_since is None
+                and redirect is None
+                and redirects < MAX_REDIRECTS
+                and now >= next_check
+            ):
+                next_check = now + GUIDANCE_INTERVAL
+                guidance = next_guidance()
+                if guidance:
+                    # Stop the current turn; the guidance becomes the next one.
+                    redirect = guidance
+                    redirects += 1
+                    self.client.notify("session/cancel", {"sessionId": self.session_id})
+                    self._progress(f"Redirected: {guidance[:160]}", "milestone")
             message = self.client.next_message(timeout=0.5)
             if message is None:
                 continue
             if message.get("id") == request_id and "method" not in message:
                 result = self._result(message, "session/prompt") or {}
                 stop_reason = str(result.get("stopReason") or "end_turn")
-                if cancelling_since is not None or stop_reason == "cancelled":
+                if cancelling_since is not None:
+                    raise AcpCancelled("agent turn was cancelled")
+                if redirect is not None:
+                    request_id = self._send_prompt(REDIRECT_PROMPT.format(guidance=redirect))
+                    redirect, reply = None, []
+                    continue
+                if stop_reason == "cancelled":
                     raise AcpCancelled("agent turn was cancelled")
                 return stop_reason, "".join(reply)
             chunk = self._handle(message)
             if chunk:
                 reply.append(chunk)
+
+    def _send_prompt(self, text: str) -> int:
+        return self.client.request(
+            "session/prompt",
+            {"sessionId": self.session_id, "prompt": [{"type": "text", "text": text}]},
+        )
 
     def _handle(self, message: dict[str, Any]) -> str:
         """React to a notification or agent request; returns any reply text it carried."""

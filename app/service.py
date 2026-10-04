@@ -1447,6 +1447,20 @@ class TaskService:
                 entry.setdefault(key, str(event.payload.get("text", "")))
         return progress
 
+    def user_messages_after(self, task_id: str, sequence: int) -> list[tuple[int, str]]:
+        """Messages the user sent to a running task after the given event sequence."""
+        with self.database.session() as session:
+            return [
+                (event.sequence, str(event.payload.get("message", "")))
+                for event in session.scalars(
+                    select(TaskEventModel)
+                    .where(TaskEventModel.task_id == task_id)
+                    .where(TaskEventModel.event_type == EventType.USER_MESSAGE_RECEIVED.value)
+                    .where(TaskEventModel.sequence > sequence)
+                    .order_by(TaskEventModel.sequence)
+                )
+            ]
+
     def add_user_message(self, task_id: str, message: str) -> None:
         normalized_message = message.strip()
         if not normalized_message:

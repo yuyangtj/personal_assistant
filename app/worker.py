@@ -94,6 +94,24 @@ class ProgressReporter:
         self.service.record_progress(self.task_id, text, kind)
 
 
+class GuidanceInbox:
+    """New instructions the user sent a running coding task, for its agent to pick up."""
+
+    def __init__(self, service: TaskService, task_id: str):
+        self.service = service
+        self.task_id = task_id
+        # Coding tasks only get user messages from steering, so read from the start:
+        # notes sent while the run was queued arrive before the agent begins.
+        self._seen = 0
+
+    def __call__(self) -> str | None:
+        messages = self.service.user_messages_after(self.task_id, self._seen)
+        if not messages:
+            return None
+        self._seen = messages[-1][0]
+        return "\n".join(text for _, text in messages if text.strip()) or None
+
+
 class _LeaseHeartbeat:
     def __init__(
         self,
@@ -503,6 +521,7 @@ class TaskWorker:
             execution_context = dict(task.source_context or {})
             if executor.id == "coding-pull-request":
                 execution_context["progress"] = ProgressReporter(self.service, task.id)
+                execution_context["guidance"] = GuidanceInbox(self.service, task.id)
             if executor.id == "supervisor":
                 execution_context["chat_session_id"] = task.chat_session_id
                 execution_context["origin_message_id"] = task.origin_message_id
@@ -795,13 +814,48 @@ def main() -> None:
         notifier=notifier,
     )
 
+    # More coding agents at once: extra claim loops, each with its own coding executor
+    # (the runner chain keeps per-run state) and its own worker id for leases.
+    extra_workers: list[TaskWorker] = []
+    if settings.worker_coding_only and coding_executor is not None:
+        for index in range(2, settings.coding_concurrency + 1):
+            extra_executor = build_coding_executor(
+                settings, provider_state_store=provider_state_store
+            )
+            if extra_executor is None:
+                break
+            extra_workers.append(
+                TaskWorker(
+                    service=task_service,
+                    manager=manager,
+                    executors={**executors, extra_executor.id: extra_executor},
+                    worker_id=f"{settings.worker_id}-{index}",
+                    lease_seconds=settings.worker_lease_seconds,
+                    poll_interval_seconds=settings.worker_poll_interval_seconds,
+                    workflow_service=workflow_service,
+                    supports_coding=True,
+                    coding_only=True,
+                    notifier=notifier,
+                )
+            )
+    extra_threads = [
+        threading.Thread(target=extra.run_forever, name=extra.worker_id, daemon=True)
+        for extra in extra_workers
+    ]
+    for thread in extra_threads:
+        thread.start()
+
     def stop_worker(_signum, _frame) -> None:
         worker.stop()
+        for extra in extra_workers:
+            extra.stop()
 
     signal.signal(signal.SIGINT, stop_worker)
     signal.signal(signal.SIGTERM, stop_worker)
     try:
         worker.run_forever()
+        for thread in extra_threads:
+            thread.join(timeout=60)
     finally:
         if conversation_executor is not None:
             conversation_executor.client.close()

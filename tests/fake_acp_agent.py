@@ -15,6 +15,7 @@ from pathlib import Path
 
 mode = os.environ.get("FAKE_ACP_MODE", "work")
 cancelled = threading.Event()
+prompts: list[str] = []
 session_id = "session_fake"
 cwd = Path.cwd()
 
@@ -71,8 +72,19 @@ def tool(call_id: str, title: str) -> None:
 
 
 def run_prompt(request_id: int) -> None:
+    if mode == "steer" and len(prompts) > 1:
+        # The redirected turn: follow the new instructions in the same session.
+        (cwd / "README.md").write_text(prompts[-1], encoding="utf-8")
+        update(
+            {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": '{"summary": "Followed the redirect"}'},
+            }
+        )
+        send({"id": request_id, "result": {"stopReason": "end_turn"}})
+        return
     plan(("Edit README", "in_progress"), ("Check the result", "pending"))
-    if mode == "hang":
+    if mode in ("hang", "steer"):
         while not cancelled.wait(0.05):
             pass
         send({"id": request_id, "result": {"stopReason": "cancelled"}})
@@ -112,6 +124,8 @@ for line in sys.stdin:
     elif method == "session/new":
         send({"id": message["id"], "result": {"sessionId": session_id}})
     elif method == "session/prompt":
+        prompts.append(message["params"]["prompt"][0]["text"])
+        cancelled.clear()  # a cancel only ends the turn it was sent for
         threading.Thread(target=run_prompt, args=(message["id"],), daemon=True).start()
     elif method == "session/cancel":
         cancelled.set()

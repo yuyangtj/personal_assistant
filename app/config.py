@@ -17,6 +17,8 @@ class Settings:
     worker_poll_interval_seconds: float = 1.0
     worker_lease_seconds: int = 60
     worker_coding_only: bool = False
+    #: How many coding agents the coding worker runs at once.
+    coding_concurrency: int = 2
     fake_executor_delay_seconds: float = 0.1
     capabilities_directory: Path = Path("capabilities")
     repositories_directory: Path = Path("repositories")
@@ -116,6 +118,10 @@ class Settings:
             ),
             worker_lease_seconds=int(
                 os.getenv("ASSISTANT_WORKER_LEASE_SECONDS", str(defaults.worker_lease_seconds))
+            ),
+            coding_concurrency=max(
+                1,
+                int(os.getenv("ASSISTANT_CODING_CONCURRENCY", str(defaults.coding_concurrency))),
             ),
             worker_coding_only=_as_bool(
                 os.getenv("ASSISTANT_WORKER_CODING_ONLY", str(defaults.worker_coding_only))

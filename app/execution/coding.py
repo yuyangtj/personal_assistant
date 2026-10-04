@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -18,11 +19,14 @@ from app.coding_runs import CodingRunPhase, CodingRunStore
 from app.decision import CodingDecision, CodingDecisionEngine
 from app.domain.work_items import render_work_item_context
 from app.execution.agent_session import (
+    GUIDANCE_INTERVAL,
+    MAX_REDIRECTS,
     AcpCancelled,
     AcpClient,
     AcpError,
     AcpSession,
     AcpTimeout,
+    GuidanceSource,
     ProgressCallback,
 )
 from app.execution.base import ConversationTurn, ExecutionResult
@@ -90,6 +94,7 @@ class CodeAgentRunner(Protocol):
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
         on_progress: ProgressCallback | None = None,
+        next_guidance: GuidanceSource | None = None,
     ) -> CodeAgentReport: ...
 
 
@@ -110,6 +115,7 @@ class CodexCliRunner:
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
         on_progress: ProgressCallback | None = None,
+        next_guidance: GuidanceSource | None = None,
     ) -> CodeAgentReport:
         with tempfile.TemporaryDirectory(prefix="assistant-codex-") as temporary:
             temporary_path = Path(temporary)
@@ -206,22 +212,22 @@ class KimiCodeCliRunner:
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
         on_progress: ProgressCallback | None = None,
+        next_guidance: GuidanceSource | None = None,
     ) -> CodeAgentReport:
-        command = [
-            self.executable,
-            "--prompt",
-            _coding_prompt(request),
-            "--output-format",
-            "text",
-        ]
+        def command(notes: Sequence[str] = ()) -> list[str]:
+            prompt = _coding_prompt(_with_redirects(request, notes))
+            return [self.executable, "--prompt", prompt, "--output-format", "text"]
+
         output = _run_code_agent_process(
-            command=command,
+            command=command(),
             worktree=worktree,
             timeout_seconds=timeout_seconds,
             is_cancelled=is_cancelled,
             environment=self._environment(),
             on_progress=on_progress,
             display_name="Kimi Code CLI",
+            next_guidance=next_guidance,
+            redirected_command=command,
         )
         return _text_report(output, "Kimi Code completed the requested repository change")
 
@@ -250,6 +256,7 @@ class KimiAcpRunner(KimiCodeCliRunner):
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
         on_progress: ProgressCallback | None = None,
+        next_guidance: GuidanceSource | None = None,
     ) -> CodeAgentReport:
         try:
             client = AcpClient(
@@ -266,6 +273,7 @@ class KimiAcpRunner(KimiCodeCliRunner):
                 _coding_prompt(request),
                 deadline=time.monotonic() + timeout_seconds,
                 is_cancelled=is_cancelled,
+                next_guidance=next_guidance,
             )
         except AcpCancelled as error:
             raise ExecutionCancelled("Coding task was cancelled") from error
@@ -311,6 +319,7 @@ class ClaudeCodeMiniMaxRunner:
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
         on_progress: ProgressCallback | None = None,
+        next_guidance: GuidanceSource | None = None,
     ) -> CodeAgentReport:
         command = [
             self.executable,
@@ -321,7 +330,10 @@ class ClaudeCodeMiniMaxRunner:
         ]
         if self.model:
             command.extend(["--model", self.model])
-        command.append(_coding_prompt(request))
+
+        def with_prompt(notes: Sequence[str] = ()) -> list[str]:
+            return [*command, _coding_prompt(_with_redirects(request, notes))]
+
         environment = _safe_agent_environment()
         environment.update(
             {
@@ -330,13 +342,15 @@ class ClaudeCodeMiniMaxRunner:
             }
         )
         output = _run_code_agent_process(
-            command=command,
+            command=with_prompt(),
             worktree=worktree,
             timeout_seconds=timeout_seconds,
             is_cancelled=is_cancelled,
             environment=environment,
             on_progress=on_progress,
             display_name="Claude Code with MiniMax",
+            next_guidance=next_guidance,
+            redirected_command=with_prompt,
         )
         try:
             body = json.loads(output)
@@ -380,6 +394,7 @@ class FallbackCodeAgentRunner:
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
         on_progress: ProgressCallback | None = None,
+        next_guidance: GuidanceSource | None = None,
     ) -> CodeAgentReport:
         deadline = time.monotonic() + timeout_seconds
         attempts: list[RunnerAttempt] = []
@@ -407,7 +422,7 @@ class FallbackCodeAgentRunner:
                     request=request,
                     timeout_seconds=remaining,
                     is_cancelled=is_cancelled,
-                    **({"on_progress": on_progress} if on_progress is not None else {}),
+                    **_optional(on_progress=on_progress, next_guidance=next_guidance),
                 )
             except ExecutionCancelled:
                 raise
@@ -547,6 +562,7 @@ class CodingPullRequestExecutor:
         checkpoint_store: CodingRunStore | None = None,
     ):
         self.repository_path = repository_path.resolve()
+        _share_repository(self.repository_path)
         self.worktree_root = worktree_root.resolve()
         self.github_repository = github_repository
         self.github = github
@@ -570,6 +586,7 @@ class CodingPullRequestExecutor:
     ) -> ExecutionResult:
         del history
         progress: ProgressCallback | None = (context or {}).get("progress")
+        guidance: GuidanceSource | None = (context or {}).get("guidance")
         if not (self.repository_path / ".git").exists():
             raise CodingAgentError("Configured coding repository is not a Git repository")
         revision = dict((context or {}).get("revision_pull_request") or {})
@@ -754,12 +771,16 @@ class CodingPullRequestExecutor:
                 _revision_agent_request(request, revision),
                 (context or {}).get("work_items"),
             )
+            # Instructions sent while the run was queued belong in the first prompt.
+            early = guidance() if guidance is not None else None
+            if early:
+                agent_request += "\n\nADDITIONAL INSTRUCTIONS FROM THE USER:\n" + early
             report = self.agent.run(
                 worktree=worktree,
                 request=agent_request,
                 timeout_seconds=self.timeout_seconds,
                 is_cancelled=is_cancelled,
-                **({"on_progress": progress} if progress is not None else {}),
+                **_optional(on_progress=progress, next_guidance=guidance),
             )
             if is_cancelled():
                 raise ExecutionCancelled("Coding task was cancelled")
@@ -775,6 +796,7 @@ class CodingPullRequestExecutor:
                 report=report,
                 is_cancelled=is_cancelled,
                 progress=progress,
+                guidance=guidance,
             )
             if self.checkpoint_store is not None:
                 self.checkpoint_store.update(
@@ -862,6 +884,7 @@ class CodingPullRequestExecutor:
         report: CodeAgentReport,
         is_cancelled: Callable[[], bool],
         progress: ProgressCallback | None = None,
+        guidance: GuidanceSource | None = None,
     ) -> tuple[list[dict[str, Any]], CodeAgentReport, list[dict[str, Any]]]:
         """Validate; on failure give the agent one repair pass, then keep the work if needed.
 
@@ -885,7 +908,7 @@ class CodingPullRequestExecutor:
                 request=_repair_agent_request(agent_request, results),
                 timeout_seconds=self.timeout_seconds,
                 is_cancelled=is_cancelled,
-                **({"on_progress": progress} if progress is not None else {}),
+                **_optional(on_progress=progress, next_guidance=guidance),
             )
             if is_cancelled():
                 raise ExecutionCancelled("Coding task was cancelled")
@@ -1150,6 +1173,12 @@ def _safe_agent_environment() -> dict[str, str]:
     return {name: value for name, value in os.environ.items() if name in allowed}
 
 
+class _Redirected(Exception):
+    def __init__(self, guidance: str):
+        super().__init__(guidance)
+        self.guidance = guidance
+
+
 def _run_code_agent_process(
     *,
     command: list[str],
@@ -1159,8 +1188,49 @@ def _run_code_agent_process(
     environment: Mapping[str, str],
     display_name: str,
     on_progress: ProgressCallback | None = None,
+    next_guidance: GuidanceSource | None = None,
+    redirected_command: Callable[[Sequence[str]], list[str]] | None = None,
+) -> str:
+    """Run a one-shot agent. New user instructions restart it in the same worktree.
+
+    A one-shot agent can't take input while it runs, so a redirect stops it and starts
+    it again with the instructions added; its partial changes stay in the worktree.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    notes: list[str] = []
+    steerable = next_guidance if redirected_command is not None else None
+    while True:
+        try:
+            return _run_agent_once(
+                command=command,
+                worktree=worktree,
+                deadline=deadline,
+                is_cancelled=is_cancelled,
+                environment=environment,
+                display_name=display_name,
+                on_progress=on_progress,
+                next_guidance=steerable if len(notes) < MAX_REDIRECTS else None,
+            )
+        except _Redirected as redirect:
+            notes.append(redirect.guidance)
+            _report(on_progress, f"Redirected: {redirect.guidance[:160]}")
+            assert redirected_command is not None
+            command = redirected_command(notes)
+
+
+def _run_agent_once(
+    *,
+    command: list[str],
+    worktree: Path,
+    deadline: float,
+    is_cancelled: Callable[[], bool],
+    environment: Mapping[str, str],
+    display_name: str,
+    on_progress: ProgressCallback | None,
+    next_guidance: GuidanceSource | None,
 ) -> str:
     watcher = _WorktreeWatcher(worktree, on_progress)
+    next_check = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="assistant-code-agent-") as temporary:
         temporary_path = Path(temporary)
         stdout_path = temporary_path / "stdout.log"
@@ -1174,7 +1244,6 @@ def _run_code_agent_process(
                     stderr=stderr,
                     env=dict(environment),
                 )
-                deadline = time.monotonic() + timeout_seconds
                 while process.poll() is None:
                     if is_cancelled():
                         process.terminate()
@@ -1184,6 +1253,13 @@ def _run_code_agent_process(
                         process.terminate()
                         _wait_or_kill(process)
                         raise CodingAgentError(f"{display_name} timed out", category="timeout")
+                    if next_guidance is not None and time.monotonic() >= next_check:
+                        next_check = time.monotonic() + GUIDANCE_INTERVAL
+                        guidance = next_guidance()
+                        if guidance:
+                            process.terminate()
+                            _wait_or_kill(process)
+                            raise _Redirected(guidance)
                     watcher.poll()
                     time.sleep(0.2)
         except FileNotFoundError as error:
@@ -1197,6 +1273,22 @@ def _run_code_agent_process(
                 category=_failure_category(diagnostic),
             )
         return stdout_path.read_text(encoding="utf-8", errors="replace")
+
+
+def _with_redirects(request: str, notes: Sequence[str]) -> str:
+    if not notes:
+        return request
+    return (
+        request
+        + "\n\nWHILE AN EARLIER ATTEMPT WAS WORKING, THE USER ADDED THESE INSTRUCTIONS "
+        "(the worktree already has its partial changes; continue from them):\n"
+        + "\n".join(f"- {note}" for note in notes)
+    )
+
+
+def _optional(**kwargs: Any) -> dict[str, Any]:
+    """Keyword arguments that are set, so runners without them keep working."""
+    return {name: value for name, value in kwargs.items() if value is not None}
 
 
 def _report(progress: ProgressCallback | None, text: str) -> None:
@@ -1353,20 +1445,41 @@ def _wait_or_kill(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=5)
 
 
+#: Shared checkouts that several coding runs use at once, each with its own lock: two
+#: agents work in separate worktrees, but fetches, worktree changes and branch deletes
+#: on the shared repository must not overlap.
+_REPOSITORY_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _share_repository(path: Path) -> None:
+    _REPOSITORY_LOCKS.setdefault(str(path), threading.Lock())
+
+
 def _git(directory: Path, *arguments: str, timeout: int = 60) -> str:
+    lock = _REPOSITORY_LOCKS.get(str(directory))
     try:
-        completed = subprocess.run(
-            ["git", "-C", str(directory), *arguments],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        if lock is None:
+            completed = _run_git(directory, arguments, timeout)
+        else:
+            with lock:
+                completed = _run_git(directory, arguments, timeout)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise CodingAgentError(f"Git operation failed: {arguments[0]}") from error
     if completed.returncode != 0:
         raise CodingAgentError(f"Git operation failed: {arguments[0]}")
     return completed.stdout
+
+
+def _run_git(
+    directory: Path, arguments: Sequence[str], timeout: int
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(directory), *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
 
 
 def _safe_ref(value: str) -> str:
