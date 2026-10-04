@@ -42,8 +42,11 @@ class DirectAction(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    type: Literal["checklist_add", "checklist_check", "remember"]
+    type: Literal["checklist_add", "checklist_check", "remember", "remind", "routine"]
     text: str = Field(min_length=1, max_length=300)
+    #: For remind/routine: local wall-clock time "YYYY-MM-DDTHH:MM" in the user's zone.
+    at: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
+    recurrence: Literal["none", "daily", "weekdays", "weekly", "monthly"] = "none"
     #: The work item's #tag for checklist actions; None means "the obvious one".
     work_item: str | None = Field(default=None, max_length=80)
     kind: Literal["fact", "preference", "project"] | None = None
@@ -97,7 +100,12 @@ Decide what the message needs:
   or checklist ("add oat milk to groceries"); {"type": "checklist_check", "text": entry,
   "work_item": tag or null} to tick an entry off; {"type": "remember", "text": the fact,
   "kind": "fact" | "preference" | "project"} when the user explicitly asks you to
-  remember something. Use tags from work_items; null when the list is not named.
+  remember something; {"type": "remind", "text": what to remind, "at":
+  "YYYY-MM-DDTHH:MM" local time, "recurrence": "none" | "daily" | "weekdays" | "weekly" |
+  "monthly", "work_item": tag or null} for reminders ("remind me tomorrow at 9 to call
+  mum"); {"type": "routine", ...same fields} when something should be done for the user
+  on a schedule ("every Monday at 8, summarize my open work"). Resolve relative dates
+  from the user's local time. Use tags from work_items; null when the list is not named.
 Pick repository_id only from the catalog ids, using names, aliases, and descriptions;
 use null when no repository fits or you are unsure. Write goal as one short imperative
 sentence. Set confidence from 0 to 1.
@@ -178,6 +186,8 @@ class Triager:
         focused_items: Sequence[dict] = (),
         recent_turns: Sequence[tuple[str, str]] = (),
         work_items: Sequence[dict] = (),
+        local_time: str | None = None,
+        timezone: str | None = None,
     ) -> TriageDecision:
         selected = self._enabled(selected_repository_id)
         if self.client is not None:
@@ -188,6 +198,7 @@ class Triager:
                     focused=focused_items,
                     recent=recent_turns,
                     work_items=work_items,
+                    clock={"local_time": local_time, "timezone": timezone},
                 )
                 return self._apply_rules(suggestion, text, selected=selected)
             except Exception as error:  # provider, timeout, or validation failure
@@ -215,6 +226,7 @@ class Triager:
         focused: Sequence[dict],
         recent: Sequence[tuple[str, str]],
         work_items: Sequence[dict] = (),
+        clock: dict | None = None,
     ) -> ModelSuggestion:
         client = self.client
         if client is None:
@@ -233,6 +245,7 @@ class Triager:
             "recent_turns": [
                 {"role": role, "text": _clip(content, 400)} for role, content in recent[-4:]
             ],
+            "user_clock": clock or {},
             "message": text,
         }
         messages = [

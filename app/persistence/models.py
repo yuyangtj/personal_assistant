@@ -336,3 +336,26 @@ class ChatWorkItemModel(Base):
     focused_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+
+
+class ScheduleModel(Base):
+    __tablename__ = "schedules"
+    __table_args__ = (Index("ix_schedules_due", "active", "next_run_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    work_item_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("work_items.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    chat_session_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("chat_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    recurrence: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )

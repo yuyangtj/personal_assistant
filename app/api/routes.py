@@ -63,6 +63,7 @@ from app.direct_actions import run_direct_action
 from app.domain.enums import CODING_CAPABILITIES, TaskStatus
 from app.integrations.chat import ProviderError
 from app.integrations.github import GitHubError
+from app.schedules import zone
 from app.service import (
     ApprovalConflictError,
     ApprovalNotFoundError,
@@ -123,15 +124,24 @@ def _triage(
             if message.role in ("user", "assistant")
         ],
         work_items=open_items,
+        local_time=body.local_time,
+        timezone=body.timezone,
     )
     response = TriageDecisionResponse.model_validate(decision.model_dump(mode="json"))
     if decision.action is not None:
         # T0: done now, without a chat model; the reply lands in the transcript.
+        timezone = body.timezone or request.app.state.settings.default_timezone
+        try:
+            zone(timezone)
+        except ValueError:
+            timezone = request.app.state.settings.default_timezone
         result = run_direct_action(
             decision.action,
             chat_session_id=chat_session_id,
             items=work_items,
             memory=request.app.state.memory_service,
+            schedules=request.app.state.schedule_service,
+            timezone=timezone,
         )
         _service(request).append_chat_message(
             chat_session_id, content=result.reply, role="assistant"

@@ -16,6 +16,7 @@ from app.memory import MemoryService
 from app.persistence.database import Database
 from app.providers import DatabaseProviderStateStore
 from app.repositories import RepositoryRegistry
+from app.schedules import ScheduleService
 from app.service import TaskService
 from app.triage import Triager
 from app.validation import ValidationProfileRegistry
@@ -58,6 +59,7 @@ def create_app(
     application.state.task_service = TaskService(database)
     application.state.memory_service = MemoryService(database)
     application.state.work_item_service = WorkItemService(database)
+    application.state.schedule_service = ScheduleService(database)
     application.state.triager = Triager(
         repository_registry,
         triage_client(resolved_settings) if resolved_settings.triage_model_enabled else None,

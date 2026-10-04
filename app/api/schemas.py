@@ -50,6 +50,9 @@ class AppendChatMessageRequest(BaseModel):
     content: str = Field(min_length=1, max_length=20_000)
     #: The client's repository picker; triage treats it as an override, not an intent.
     repository_id: str | None = Field(default=None, min_length=1, max_length=120)
+    #: The user's clock, so "tomorrow at 9" resolves in their timezone.
+    local_time: str | None = Field(default=None, max_length=40)
+    timezone: str | None = Field(default=None, max_length=64)
 
 
 class CreateTaskFromMessageRequest(BaseModel):
@@ -545,3 +548,32 @@ class TimelineEntryResponse(BaseModel):
 
 class TimelineResponse(BaseModel):
     entries: list[TimelineEntryResponse]
+
+
+class CreateScheduleRequest(BaseModel):
+    kind: Literal["reminder", "routine"] = "reminder"
+    message: str = Field(min_length=1, max_length=500)
+    run_at: datetime
+    recurrence: Literal["none", "daily", "weekdays", "weekly", "monthly"] = "none"
+    timezone: str = Field(default="UTC", max_length=64)
+    work_item_id: str | None = Field(default=None, max_length=80)
+    chat_session_id: str | None = Field(default=None, min_length=36, max_length=36)
+
+
+class ScheduleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: str
+    message: str
+    work_item_id: str | None
+    chat_session_id: str | None
+    next_run_at: datetime
+    recurrence: str
+    timezone: str
+    active: bool
+    last_run_at: datetime | None
+
+
+class ScheduleListResponse(BaseModel):
+    schedules: list[ScheduleResponse]

@@ -27,6 +27,11 @@ class Settings:
     deploy_spool_directory: Path | None = None
     brief_writeback_enabled: bool = False
     triage_model_enabled: bool = False
+    ntfy_topic_url: str | None = None
+    ntfy_token: str | None = None
+    public_url: str | None = None
+    default_timezone: str = "UTC"
+    scheduler_interval_seconds: float = 20.0
     triage_provider: str = "kimi"
     triage_timeout_seconds: float = 8.0
     triage_min_confidence: float = 0.6
@@ -159,6 +164,16 @@ class Settings:
             ),
             triage_model_enabled=_as_bool(
                 os.getenv("ASSISTANT_TRIAGE_MODEL_ENABLED", str(defaults.triage_model_enabled))
+            ),
+            ntfy_topic_url=os.getenv("ASSISTANT_NTFY_TOPIC_URL") or None,
+            ntfy_token=os.getenv("ASSISTANT_NTFY_TOKEN") or None,
+            public_url=os.getenv("ASSISTANT_PUBLIC_URL") or None,
+            default_timezone=os.getenv("ASSISTANT_DEFAULT_TIMEZONE", defaults.default_timezone),
+            scheduler_interval_seconds=float(
+                os.getenv(
+                    "ASSISTANT_SCHEDULER_INTERVAL_SECONDS",
+                    str(defaults.scheduler_interval_seconds),
+                )
             ),
             triage_provider=os.getenv("ASSISTANT_TRIAGE_PROVIDER", defaults.triage_provider),
             triage_timeout_seconds=float(

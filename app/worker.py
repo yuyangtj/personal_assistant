@@ -37,9 +37,11 @@ from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
 from app.manager.decisions import DelegateDecision, FailDecision
 from app.manager.model import ManagerModelClient, ValidatedManagerModelAdapter
 from app.memory import MemoryService
+from app.notify import Notifier, NullNotifier, build_notifier
 from app.persistence.database import Database
 from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
+from app.schedules import Scheduler
 from app.service import TaskService
 from app.validation import ValidationProfileRegistry
 from app.workflows import WorkflowRegistry, WorkflowService
@@ -358,6 +360,9 @@ class TaskWorker:
         deployment_sync_interval_seconds: float = 10.0,
         brief_writeback: BriefWritebackJob | None = None,
         brief_writeback_interval_seconds: float = 30.0,
+        scheduler: Scheduler | None = None,
+        scheduler_interval_seconds: float = 20.0,
+        notifier: Notifier | None = None,
     ):
         self.service = service
         self.manager = manager
@@ -374,6 +379,10 @@ class TaskWorker:
         self.brief_writeback = brief_writeback
         self.brief_writeback_interval_seconds = brief_writeback_interval_seconds
         self._brief_writeback_thread: threading.Thread | None = None
+        self.scheduler = scheduler
+        self.scheduler_interval_seconds = scheduler_interval_seconds
+        self._scheduler_thread: threading.Thread | None = None
+        self.notifier: Notifier = notifier or NullNotifier()
         self._stop_event = threading.Event()
 
     def run_once(self) -> bool:
@@ -485,6 +494,15 @@ class TaskWorker:
                     ),
                     approval=approval,
                 )
+                number = approval.get("number")
+                self.notifier.send(
+                    "Ready for your review",
+                    f"Pull request #{number}: {task.current_goal[:200]}"
+                    if number
+                    else task.current_goal[:200],
+                    priority=4,
+                    path=f"/?task={task.id}",
+                )
                 return True
             reply = result.output.get("reply") or result.output["summary"]
             self.service.complete_task(
@@ -506,6 +524,14 @@ class TaskWorker:
                 execution_id=execution_id,
                 **({"reply": user_message} if user_message else {}),
             )
+            if self.coding_only:
+                # Long coding runs finish while you are away; chat replies don't need a push.
+                self.notifier.send(
+                    "Coding task failed",
+                    user_message or task.current_goal[:200],
+                    priority=4,
+                    path=f"/?task={task.id}",
+                )
         finally:
             heartbeat.stop()
             self._sync_workflow(task.id)
@@ -537,6 +563,14 @@ class TaskWorker:
             return
         if finished:
             logger.info("Deployments finished: %s", ", ".join(finished))
+            for run_id in finished:
+                run = self.workflow_service.get_run(run_id)
+                self.notifier.send(
+                    f"Deployment {run.status}",
+                    f"{str(run.workflow_input.get('commit_sha', ''))[:7]} at stage "
+                    f"{run.current_stage or 'deploy'}",
+                    priority=3 if run.status == "completed" else 5,
+                )
 
     def start_brief_writeback(self) -> threading.Thread | None:
         """Refresh briefs on a background thread so model calls never delay chat replies."""
@@ -548,6 +582,30 @@ class TaskWorker:
             )
             self._brief_writeback_thread.start()
         return self._brief_writeback_thread
+
+    def start_scheduler(self) -> threading.Thread | None:
+        """Run due reminders and routines on a background thread (general worker only)."""
+        if self.scheduler is None or self.coding_only:
+            return None
+        if self._scheduler_thread is None or not self._scheduler_thread.is_alive():
+            self._scheduler_thread = threading.Thread(
+                target=self._scheduler_loop, name="scheduler", daemon=True
+            )
+            self._scheduler_thread.start()
+        return self._scheduler_thread
+
+    def _scheduler_loop(self) -> None:
+        scheduler = self.scheduler
+        if scheduler is None:
+            return
+        while not self._stop_event.wait(self.scheduler_interval_seconds):
+            try:
+                fired = scheduler.run_due()
+            except Exception:
+                logger.exception("Could not run due schedules")
+                continue
+            if fired:
+                logger.info("Ran %d due schedules", fired)
 
     def _brief_writeback_loop(self) -> None:
         job = self.brief_writeback
@@ -565,6 +623,7 @@ class TaskWorker:
     def run_forever(self) -> None:
         logger.info("Worker %s started", self.worker_id)
         self.start_brief_writeback()
+        self.start_scheduler()
         while not self._stop_event.is_set():
             processed = self.run_once()
             if not processed:
@@ -624,8 +683,22 @@ def main() -> None:
             else None
         ),
     )
+    task_service = TaskService(database)
+    notifier = build_notifier(
+        settings.ntfy_topic_url, token=settings.ntfy_token, public_url=settings.public_url
+    )
+
+    def start_routine(schedule) -> str | None:
+        task = task_service.create_task(
+            request=schedule.message,
+            chat_session_id=schedule.chat_session_id,
+            work_item_id=schedule.work_item_id,
+            source_context={"schedule_id": schedule.id, "timezone": schedule.timezone},
+        )
+        return task.id
+
     worker = TaskWorker(
-        service=TaskService(database),
+        service=task_service,
         manager=manager,
         executors=executors,
         worker_id=settings.worker_id,
@@ -644,6 +717,9 @@ def main() -> None:
             if settings.brief_writeback_enabled and conversation_executor is not None
             else None
         ),
+        scheduler=Scheduler(database, start_run=start_routine, notifier=notifier),
+        scheduler_interval_seconds=settings.scheduler_interval_seconds,
+        notifier=notifier,
     )
 
     def stop_worker(_signum, _frame) -> None:
