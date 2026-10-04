@@ -12,7 +12,7 @@ from tests.test_triage import ScriptedChat, suggestion
 CODING = suggestion(
     intent="propose_coding",
     repository_id="personal-assistant",
-    goal="Update the browser tab icon",
+    goal="Update the browser tab icon.",
     confidence=0.9,
 )
 RESEARCH = suggestion(
@@ -82,7 +82,7 @@ def test_coding_is_offered_in_chat_and_yes_proposes_the_workflow(client: TestCli
     assert asked["decision"]["handled"] is True
     offer = _messages(client, chat)[-1]
     assert offer["role"] == "assistant"
-    assert "Personal Assistant" in offer["content"]
+    assert "in Personal Assistant: “Update the browser tab icon”. Want me" in offer["content"]
     (choices,) = offer["blocks"]
     assert [option["label"] for option in choices["options"]] == [
         "Set up coding workflow",
