@@ -429,11 +429,11 @@ function syncWorkflowCard() {
   renderProposal();
 }
 
+// Triage decides what each message needs, so a message only offers a way back to the
+// coding workflow it started; there is no manual "create task" per message.
 function messageAction(m) {
   const run = state.workflowRuns.find((candidate) => candidate.origin_message_id === m.id);
-  if (run) return `<button class="ghost" data-workflow="${esc(run.id)}">View coding workflow</button>`;
-  if (state.repositoryId) return `<button class="ghost" data-propose="${m.id}">Propose coding workflow</button>`;
-  return `<button class="ghost" data-create="${m.id}">Create task</button>`;
+  return run ? `<button class="ghost" data-workflow="${esc(run.id)}">View coding workflow</button>` : "";
 }
 
 function renderTranscript() {
@@ -443,17 +443,15 @@ function renderTranscript() {
   $("transcript").innerHTML = state.messages.map((m) => {
     const task = m.linked_task_id ? byId[m.linked_task_id] : null;
     const who = m.role === "user" ? "YOU" : m.role === "system" ? "TASK REFERENCE" : "ASSISTANT";
-    const canCreate = m.role === "user" && !m.linked_task_id;
-    return `<div class="msg ${m.role}">
-      <div class="who">${who}</div>
-      <div class="bubble">${esc(m.content)}
-        ${canCreate ? `<div style="margin-top:6px">
-          ${messageAction(m)}</div>` : ""}
-        ${task ? `<button class="taskcard" data-task="${task.id}" type="button" aria-label="View task: ${esc(label(task.status))}">
-          <span class="dot ${active(task) ? "run" : task.status === "failed" ? "fail" : ""}"></span>
-          <span class="grow">Task · ${esc(label(task.status))}</span><span>View ›</span>
-        </button>` : ""}
-      </div></div>`;
+    const action = m.role === "user" && !m.linked_task_id ? messageAction(m) : "";
+    // The bubble keeps the message's own line breaks (pre-wrap), so no template
+    // whitespace may sit inside it.
+    const extras = (action ? `<div style="margin-top:6px">${action}</div>` : "")
+      + (task ? `<button class="taskcard" data-task="${task.id}" type="button" aria-label="View task: ${esc(label(task.status))}">`
+        + `<span class="dot ${active(task) ? "run" : task.status === "failed" ? "fail" : ""}"></span>`
+        + `<span class="grow">Task · ${esc(label(task.status))}</span><span>View ›</span></button>` : "");
+    return `<div class="msg ${m.role}"><div class="who">${who}</div>`
+      + `<div class="bubble">${esc(m.content)}${extras}</div></div>`;
   }).join("") || `<div class="empty">No messages yet.</div>`;
   if (atBottom) $("transcript").scrollTop = $("transcript").scrollHeight;
   renderProposal();
@@ -1099,10 +1097,7 @@ document.addEventListener("click", (e) => {
     state.workflowRun = state.workflowRuns.find((run) => run.id === workflow.dataset.workflow) || null;
     return renderProposal();
   }
-  const propose = e.target.closest("[data-propose]");
-  if (propose) return createCodingWorkflow(propose.dataset.propose);
-  const create = e.target.closest("[data-create]");
-  if (create) return createTask(create.dataset.create);
+
 });
 $("composer").onsubmit = (e) => {
   e.preventDefault();
@@ -1142,7 +1137,6 @@ $("new-item-form").onsubmit = async (event) => {
 };
 $("repository").onchange = (event) => {
   state.repositoryId = event.target.value || null;
-  renderTranscript();
   renderProposal();
 };
 $("close-task").onclick = () => {
