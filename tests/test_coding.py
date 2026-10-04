@@ -230,6 +230,123 @@ def test_failed_validation_output_is_truncated_persisted_and_exposed(
     assert context["coding_checkpoint"]["validation"] == checkpoint.validation_results
 
 
+def _feature_check_profile() -> ValidationProfile:
+    return ValidationProfile(
+        id="test-validation",
+        name="Test validation",
+        steps=(
+            ValidationStep(
+                id="tests",
+                command=(
+                    sys.executable,
+                    "-c",
+                    "import pathlib, sys\n"
+                    "ok = pathlib.Path('feature.txt').read_text() == 'fixed\\n'\n"
+                    "print('FAILED tests/test_feature.py::test_feature' if not ok else 'ok')\n"
+                    "sys.exit(0 if ok else 1)",
+                ),
+                timeout_seconds=30,
+            ),
+        ),
+    )
+
+
+def test_failed_validation_gets_one_repair_pass_with_the_output(
+    tmp_path: Path, database: Database
+) -> None:
+    repository, _remote = _repository(tmp_path)
+    task = TaskService(database).create_task(request="Implement repairable feature")
+    requests: list[str] = []
+
+    class Agent:
+        provider = "test-agent"
+
+        def run(self, *, worktree: Path, request: str, **_kwargs) -> CodeAgentReport:
+            requests.append(request)
+            content = "fixed\n" if len(requests) > 1 else "broken\n"
+            (worktree / "feature.txt").write_text(content, encoding="utf-8")
+            return CodeAgentReport(summary=f"Attempt {len(requests)}")
+
+    class GitHub:
+        def create_pull_request(self, **kwargs) -> GitHubPullRequest:
+            return GitHubPullRequest(
+                repository="acme/widget",
+                number=9,
+                url="https://github.com/acme/widget/pull/9",
+                head_branch=str(kwargs["head"]),
+                head_sha=_git(repository, "rev-parse", f"origin/{kwargs['head']}"),
+                base_branch="main",
+                state="open",
+                draft=True,
+                merged=False,
+            )
+
+    executor = CodingPullRequestExecutor(
+        repository_path=repository,
+        worktree_root=tmp_path / "worktrees",
+        github_repository="acme/widget",
+        github=GitHub(),  # type: ignore[arg-type]
+        agent=Agent(),  # type: ignore[arg-type]
+        repository_id="widget",
+        checkpoint_store=CodingRunStore(database),
+        validation_profile=_feature_check_profile(),
+    )
+
+    result = executor.execute(
+        task_id=task.id, request="Implement feature", is_cancelled=lambda: False
+    )
+
+    assert len(requests) == 2
+    assert "REPAIR PASS" in requests[1]
+    assert "FAILED tests/test_feature.py::test_feature" in requests[1]
+    assert result.output["approval_request"]["number"] == 9
+    assert result.output["summary"] == "Attempt 2"
+    assert CodingRunStore(database).get(task.id).phase == CodingRunPhase.PR_CREATED.value
+
+
+def test_work_that_still_fails_is_saved_on_a_branch_and_explained(
+    tmp_path: Path, database: Database
+) -> None:
+    repository, remote = _repository(tmp_path)
+    task = TaskService(database).create_task(request="Implement stubborn feature")
+    runs = {"agent": 0}
+
+    class Agent:
+        provider = "test-agent"
+
+        def run(self, *, worktree: Path, **_kwargs) -> CodeAgentReport:
+            runs["agent"] += 1
+            (worktree / "feature.txt").write_text(f"broken {runs['agent']}\n", encoding="utf-8")
+            return CodeAgentReport(summary="Still broken")
+
+    executor = CodingPullRequestExecutor(
+        repository_path=repository,
+        worktree_root=tmp_path / "worktrees",
+        github_repository="acme/widget",
+        github=object(),  # type: ignore[arg-type]
+        agent=Agent(),  # type: ignore[arg-type]
+        repository_id="widget",
+        checkpoint_store=CodingRunStore(database),
+        validation_profile=_feature_check_profile(),
+    )
+
+    with pytest.raises(CodingAgentError, match="after a repair attempt") as raised:
+        executor.execute(task_id=task.id, request="Implement feature", is_cancelled=lambda: False)
+
+    saved = f"assistant/task-{task.id.replace('-', '')[:12]}-validation-failed"
+    assert runs["agent"] == 2
+    assert raised.value.details["saved_branch"] == saved
+    assert _git(remote, "show", f"refs/heads/{saved}:feature.txt") == "broken 2"
+    assert not _git(remote, "branch", "--list", saved.removesuffix("-validation-failed"))
+    reply = raised.value.user_message
+    assert "tests check still failed" in reply
+    assert "FAILED tests/test_feature.py::test_feature" in reply
+    assert f"https://github.com/acme/widget/compare/main...{saved}" in reply
+    checkpoint = CodingRunStore(database).get(task.id)
+    assert checkpoint.phase == CodingRunPhase.VALIDATION_FAILED.value
+    assert not (tmp_path / "worktrees" / task.id).exists()
+
+
 def test_coding_runner_falls_back_from_quota_limit_with_clean_worktree(tmp_path: Path) -> None:
     repository, _remote = _repository(tmp_path)
 

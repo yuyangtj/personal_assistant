@@ -543,10 +543,12 @@ class TaskWorker:
                 self.service.finish_cancelled_execution(execution_id)
         except Exception as error:
             logger.exception("Task %s failed", task.id)
+            user_message = getattr(error, "user_message", None)
             self.service.fail_task(
                 task.id,
                 error=str(error),
                 execution_id=execution_id,
+                **({"reply": user_message} if user_message else {}),
             )
         finally:
             heartbeat.stop()
