@@ -81,6 +81,24 @@
   .chat-item:hover { background: var(--surface); }
   .chat-item.active { background: var(--surface); border-color: var(--border-strong); }
   .chat-item .when { color: var(--muted); font-size: 11px; }
+  .tabs { display: flex; gap: 4px; margin: 10px 0; }
+  .tab { background: transparent; color: var(--muted); padding: 6px 10px; border-radius: 8px; }
+  .tab.active { background: var(--surface); color: var(--text); }
+  .space-head { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; margin: 12px 0 4px; }
+  #new-item-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  #new-item-form select { flex: 1; max-width: none; }
+  #new-item-form input { flex: 1 1 100%; min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border-soft); border-radius: 8px; padding: 6px 8px; font: inherit; }
+  .focus-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 0; }
+  .focus-bar:empty { display: none; }
+  .chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border-strong); border-radius: 999px; padding: 1px 4px 1px 9px; font-size: 12px; background: var(--raised); }
+  .chip .chip-x { background: transparent; color: var(--muted); padding: 0 6px; font-size: 14px; line-height: 1; }
+  .focus-bar select { font-size: 12px; padding: 3px 6px; }
+  .brief-list { margin: 4px 0 8px; padding-left: 18px; font-size: 12.5px; }
+  .brief-label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; margin-top: 8px; }
+  .brief-text { font-size: 12.5px; margin: 2px 0 6px; }
+  .item-check { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 0; font-size: 12.5px; }
+  .item-check.done span { color: var(--muted); text-decoration: line-through; }
+  .timeline-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start; }
   main { display: flex; flex-direction: column; padding: 16px; gap: 10px; min-width: 0; }
   .main-head { display: flex; gap: 12px; align-items: center; }
   .repo-control { display: flex; align-items: center; gap: 7px; }
@@ -201,12 +219,24 @@
 </style>
 
 <aside>
-  <div class="row"><h1 class="grow">Conversations</h1>
+  <div class="row"><h1 class="grow">Assistant</h1>
     <button class="ghost mobile-only" id="close-chats" aria-label="Close conversations">Close</button></div>
-  <div class="sub">Chat is free. Tasks are confirmed.</div>
-  <div class="row"><button id="new-chat">New conversation</button>
-    <button class="ghost" id="reload-chats">Refresh</button></div>
-  <div id="chat-list" style="margin-top:12px"></div>
+  <div class="tabs" role="tablist">
+    <button class="tab active" id="tab-chats" role="tab" type="button" aria-selected="true">Chats</button>
+    <button class="tab" id="tab-items" role="tab" type="button" aria-selected="false">Work items</button></div>
+  <div id="chats-pane">
+    <div class="sub">Chat is free. Tasks are confirmed.</div>
+    <div class="row"><button id="new-chat">New conversation</button>
+      <button class="ghost" id="reload-chats">Refresh</button></div>
+    <div id="chat-list" style="margin-top:12px"></div>
+  </div>
+  <div id="items-pane" hidden>
+    <div class="sub">Goals that chats and runs build on. Mention one with #tag.</div>
+    <form id="new-item-form"><input id="new-item-title" maxlength="160" placeholder="New work item…" aria-label="New work item title">
+      <select id="new-item-space" aria-label="Space"><option value="general">General</option><option value="coding">Coding</option></select>
+      <button type="submit">Add</button></form>
+    <div id="item-list"></div>
+  </div>
 </aside>
 
 <main>
@@ -234,18 +264,19 @@
       </svg>
     </button>
     <span id="status" class="sub" style="margin:0"></span></div>
+  <div id="focus-bar" class="focus-bar" aria-label="Work items this chat is about"></div>
   <div id="transcript"><div class="empty">Start or pick a conversation on the left.</div></div>
   <div id="proposal-slot"></div>
   <div id="error" class="err"></div>
   <form id="composer">
-    <textarea id="input" rows="2" placeholder="Say something — this stores a message and runs nothing on its own…"></textarea>
+    <textarea id="input" rows="2" placeholder="Say something — mention a work item with #tag. Nothing runs on its own…"></textarea>
     <button id="send" type="submit">Send</button>
   </form>
 </main>
 
 <div class="scrim" id="detail-scrim"></div>
 <section class="detail" id="task-panel" aria-label="Task details">
-  <div class="row"><h1 class="grow">Task</h1><button class="ghost" id="close-task">Close</button></div>
+  <div class="row"><h1 class="grow" id="detail-title">Task</h1><button class="ghost" id="close-task">Close</button></div>
   <div id="task-detail"><div class="sub">Select a task card in the transcript.</div></div>
 </section>
 
@@ -268,7 +299,7 @@ const $ = (id) => document.getElementById(id);
 const state = { chats: [], repositories: [], deploymentTargets: [], repositoryId: null, chatId: null, messages: [], tasks: [], proposal: null,
                 proposalFor: null, workflowRun: null, taskId: null, busy: false, timer: null,
                 taskTimer: null, prPollAttempts: 0, pendingAction: null,
-                workflowRuns: [], dismissedWorkflows: new Set() };
+                workflowRuns: [], dismissedWorkflows: new Set(), items: [], focus: [], itemId: null };
 
 async function api(path, options) {
   const res = await fetch(path, {
@@ -357,11 +388,14 @@ async function openChat(id) {
 async function refreshTranscript() {
   if (!state.chatId) return;
   try {
-    const [msgs, tasks, runs] = await Promise.all([
+    const [msgs, tasks, runs, focus] = await Promise.all([
       api(`/chat-sessions/${state.chatId}/messages`),
       api(`/chat-sessions/${state.chatId}/tasks`),
       api(`/workflow-runs?chat_session_id=${encodeURIComponent(state.chatId)}&limit=50`),
+      api(`/chat-sessions/${state.chatId}/focus`),
     ]);
+    state.focus = focus.work_items;
+    renderFocusBar();
     state.messages = msgs.messages; state.tasks = tasks.tasks;
     state.workflowRuns = runs.runs.filter((run) => run.workflow_id === "coding-change");
     syncWorkflowCard();
@@ -468,7 +502,7 @@ function renderProposal() {
   if (answer) answer.onclick = () => createTask(state.proposalFor, null);
   $("confirm").onclick = () => codingWorkflow
     ? createCodingWorkflow(state.proposalFor)
-    : createTask(state.proposalFor, p);
+    : createTask(state.proposalFor, p, true);
   $("decline").onclick = () => { state.proposal = null; renderProposal(); };
 }
 
@@ -504,10 +538,12 @@ async function send(text) {
   finally { state.busy = false; $("send").disabled = false; }
 }
 
-async function createTask(messageId, proposal) {
+async function createTask(messageId, proposal, makeWorkItem = false) {
   state.proposal = null;
   try {
     const body = {
+      // A confirmed proposal is work worth keeping: it joins the chat's work item.
+      create_work_item: makeWorkItem,
       required_capabilities: proposal ? proposal.required_capabilities : [],
       source_context: { client: "web-console",
         local_time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
@@ -544,6 +580,128 @@ async function startCodingWorkflow(runId) {
     renderProposal();
     throw error;
   }
+}
+
+const ITEM_STATUSES = ["open", "active", "blocked", "done", "archived"];
+
+function showTab(tab) {
+  const items = tab === "items";
+  $("chats-pane").hidden = items;
+  $("items-pane").hidden = !items;
+  $("tab-chats").classList.toggle("active", !items);
+  $("tab-items").classList.toggle("active", items);
+  $("tab-chats").setAttribute("aria-selected", String(!items));
+  $("tab-items").setAttribute("aria-selected", String(items));
+  if (items) loadItems();
+}
+
+async function loadItems() {
+  try {
+    state.items = (await api("/work-items")).work_items;
+    const spaces = [...new Set(state.items.map((item) => item.space))].sort();
+    $("item-list").innerHTML = spaces.map((space) => `<div class="space-head">${esc(space)}</div>`
+      + state.items.filter((item) => item.space === space).map((item) => `
+        <button class="chat-item ${item.id === state.itemId ? "active" : ""}" data-item="${esc(item.id)}" type="button">
+          <div>${esc(item.title)}</div>
+          <div class="when">#${esc(item.slug)} · ${esc(label(item.status))}</div>
+        </button>`).join("")).join("") || `<div class="sub" style="margin-top:12px">No work items yet.</div>`;
+    renderFocusBar();
+  } catch (e) { fail(e); }
+}
+
+function renderFocusBar() {
+  if (!state.chatId) { $("focus-bar").innerHTML = ""; return; }
+  const focused = new Set(state.focus.map((item) => item.id));
+  const candidates = state.items.filter((item) => !focused.has(item.id) && item.status !== "done");
+  $("focus-bar").innerHTML = state.focus.map((item) => `
+    <span class="chip"><button type="button" class="link-button" data-item="${esc(item.id)}"
+      title="${esc(item.title)}">#${esc(item.slug)}</button><button type="button" class="chip-x"
+      data-unfocus="${esc(item.id)}" aria-label="Stop focusing on #${esc(item.slug)}">×</button></span>`).join("")
+    + (candidates.length ? `<select id="focus-add" aria-label="Focus this chat on a work item">
+        <option value="">+ Work item</option>${candidates.map((item) =>
+          `<option value="${esc(item.id)}">#${esc(item.slug)}</option>`).join("")}</select>` : "");
+  const add = $("focus-add");
+  if (add) add.onchange = async () => {
+    if (!add.value) return;
+    try {
+      state.focus = (await api(`/chat-sessions/${state.chatId}/focus/${add.value}`, { method: "PUT" })).work_items;
+      renderFocusBar();
+    } catch (e) { fail(e); }
+  };
+}
+
+function briefSection(title, value) {
+  if (Array.isArray(value)) {
+    return `<div class="brief-label">${title}</div>${value.length
+      ? `<ul class="brief-list">${value.map((entry) => `<li>${esc(entry)}</li>`).join("")}</ul>`
+      : `<div class="brief-text sub">Nothing yet</div>`}`;
+  }
+  return `<div class="brief-label">${title}</div><div class="brief-text">${esc(value || "—")}</div>`;
+}
+
+async function renderWorkItem(id) {
+  state.itemId = id;
+  state.taskId = null;
+  clearTimeout(state.taskTimer);
+  state.taskTimer = null;
+  try {
+    const [item, runs, timeline] = await Promise.all([
+      api(`/work-items/${id}`), api(`/work-items/${id}/runs`), api(`/work-items/${id}/timeline?limit=50`),
+    ]);
+    const brief = item.brief || {};
+    $("detail-title").textContent = "Work item";
+    $("task-detail").innerHTML = `
+      <div class="row wrap">${statusPill(item.status)}<span class="badge">#${esc(item.slug)}</span>
+        <span class="sub" style="margin:0">${esc(item.space)} · ${esc(item.kind)}</span></div>
+      <h2 style="text-transform:none;letter-spacing:normal;font-size:16px;color:var(--text)">${esc(item.title)}</h2>
+      <div class="row wrap"><label class="sub" for="item-status" style="margin:0">Status</label>
+        <select id="item-status">${ITEM_STATUSES.map((value) =>
+          `<option value="${value}" ${value === item.status ? "selected" : ""}>${label(value)}</option>`).join("")}</select>
+        <button type="button" class="ghost" data-discuss="">Discuss in a new chat</button></div>
+      <div class="panel-card"><h3>Brief</h3>
+        ${briefSection("Goal", brief.goal)}${briefSection("Where it stands", brief.status_summary)}
+        ${briefSection("Decisions", brief.decisions || [])}${briefSection("Next steps", brief.next_steps || [])}
+        ${briefSection("Open questions", brief.open_questions || [])}
+        <div class="sub">Updated automatically after a chat goes quiet or a run finishes.</div></div>
+      <div class="panel-card"><h3>Checklist</h3>
+        ${(item.checklist || []).map((entry) => `<div class="item-check ${entry.done ? "done" : ""}">
+          <input type="checkbox" data-check="${esc(entry.id)}" ${entry.done ? "checked" : ""} aria-label="Done: ${esc(entry.text)}">
+          <span>${esc(entry.text)}</span>
+          <button type="button" class="chip-x ghost" data-remove-entry="${esc(entry.id)}" aria-label="Remove ${esc(entry.text)}">×</button></div>`).join("")
+          || `<div class="sub">No entries.</div>`}
+        <form id="checklist-form" style="margin-top:6px"><textarea id="checklist-text" rows="1" maxlength="300"
+          placeholder="Add an entry…" aria-label="New checklist entry"></textarea><button type="submit">Add</button></form></div>
+      ${(item.links || []).length ? `<div class="panel-card"><h3>Links</h3>${item.links.map((link) => link.url
+        ? `<div><a href="${esc(link.url)}" target="_blank" rel="noreferrer">${esc(link.label)}</a></div>`
+        : `<div class="sub" style="margin:0">${esc(link.kind)}: ${esc(link.label)}</div>`).join("")}</div>` : ""}
+      <div class="panel-card"><h3>Runs</h3>${runs.tasks.map((task) => `
+        <button class="taskcard" data-task="${esc(task.id)}" type="button">
+          <span class="dot ${active(task) ? "run" : task.status === "failed" ? "fail" : ""}"></span>
+          <span class="grow">${esc(task.original_request.slice(0, 90))}</span><span>${esc(label(task.status))}</span></button>`).join("")
+        || `<div class="sub">No runs yet.</div>`}</div>
+      <div class="panel-card"><h3>Timeline</h3>${timeline.entries.map((entry) => `
+        <div class="ev timeline-entry"><div>${esc(entry.summary)}<div class="sub" style="margin:0">${esc(new Date(entry.at).toLocaleString())}</div></div>
+          <button type="button" class="ghost" data-discuss="${esc(entry.summary)}" aria-label="Discuss: ${esc(entry.summary)}">Discuss</button></div>`).join("")
+        || `<div class="sub">Nothing yet.</div>`}</div>`;
+    $("item-status").onchange = async (event) => {
+      try {
+        await api(`/work-items/${item.id}`, { method: "PATCH",
+          body: JSON.stringify({ version: item.version, status: event.target.value }) });
+        await Promise.all([renderWorkItem(item.id), loadItems()]);
+      } catch (e) { fail(e); await renderWorkItem(item.id); }
+    };
+    $("checklist-form").onsubmit = async (event) => {
+      event.preventDefault();
+      const text = $("checklist-text").value.trim();
+      if (!text) return;
+      try {
+        await api(`/work-items/${item.id}/checklist`, { method: "POST", body: JSON.stringify({ text }) });
+        await renderWorkItem(item.id);
+      } catch (e) { fail(e); }
+    };
+    openTaskPanel();
+    clearError();
+  } catch (e) { fail(e); }
 }
 
 function openTaskPanel() {
@@ -717,6 +875,8 @@ function closeActionDialog() {
 async function renderTask(id) {
   const taskChanged = state.taskId !== id;
   state.taskId = id;
+  state.itemId = null;
+  $("detail-title").textContent = "Task";
   clearTimeout(state.taskTimer);
   state.taskTimer = null;
   if (taskChanged) state.prPollAttempts = 0;
@@ -871,6 +1031,24 @@ document.addEventListener("click", (e) => {
   if (taskNav) return renderTask(taskNav.dataset.taskNav);
   const task = e.target.closest("[data-task]");
   if (task) return renderTask(task.dataset.task);
+  const item = e.target.closest("[data-item]");
+  if (item) return renderWorkItem(item.dataset.item);
+  const unfocus = e.target.closest("[data-unfocus]");
+  if (unfocus) {
+    return api(`/chat-sessions/${state.chatId}/focus/${unfocus.dataset.unfocus}`, { method: "DELETE" })
+      .then((body) => { state.focus = body.work_items; renderFocusBar(); }).catch(fail);
+  }
+  const discuss = e.target.closest("[data-discuss]");
+  if (discuss && state.itemId) {
+    return api(`/work-items/${state.itemId}/discuss`, { method: "POST",
+      body: JSON.stringify({ about: discuss.dataset.discuss || null }) })
+      .then((chat) => { closeTaskPanel(); return openChat(chat.id); }).catch(fail);
+  }
+  const removeEntry = e.target.closest("[data-remove-entry]");
+  if (removeEntry && state.itemId) {
+    return api(`/work-items/${state.itemId}/checklist/${removeEntry.dataset.removeEntry}`, { method: "DELETE" })
+      .then(() => renderWorkItem(state.itemId)).catch(fail);
+  }
   const workflow = e.target.closest("[data-workflow]");
   if (workflow) {
     state.dismissedWorkflows.delete(workflow.dataset.workflow);
@@ -896,6 +1074,28 @@ $("new-chat").onclick = async () => {
   catch (e) { fail(e); }
 };
 $("reload-chats").onclick = loadChats;
+$("tab-chats").onclick = () => showTab("chats");
+$("tab-items").onclick = () => showTab("items");
+document.addEventListener("change", (e) => {
+  const check = e.target.closest("[data-check]");
+  if (!check || !state.itemId) return;
+  api(`/work-items/${state.itemId}/checklist/${check.dataset.check}`, { method: "PATCH",
+    body: JSON.stringify({ done: check.checked }) }).then(() => renderWorkItem(state.itemId)).catch(fail);
+});
+$("new-item-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const title = $("new-item-title").value.trim();
+  if (!title) return;
+  try {
+    // Created while a chat is open, the item is focused on that chat.
+    const item = await api("/work-items", { method: "POST", body: JSON.stringify({
+      title, space: $("new-item-space").value, chat_session_id: state.chatId || null }) });
+    $("new-item-title").value = "";
+    await loadItems();
+    if (state.chatId) await refreshTranscript();
+    await renderWorkItem(item.id);
+  } catch (e) { fail(e); }
+};
 $("repository").onchange = (event) => {
   state.repositoryId = event.target.value || null;
   renderTranscript();
@@ -903,6 +1103,8 @@ $("repository").onchange = (event) => {
 };
 $("close-task").onclick = () => {
   state.taskId = null;
+  state.itemId = null;
+  $("detail-title").textContent = "Task";
   clearTimeout(state.taskTimer);
   state.taskTimer = null;
   state.prPollAttempts = 0;
@@ -1002,5 +1204,5 @@ const theme = {
 };
 theme.init();
 $("theme-toggle").onclick = () => theme.toggle();
-Promise.all([loadChats(), loadRepositories(), loadDeploymentTargets()]);
+Promise.all([loadChats(), loadRepositories(), loadDeploymentTargets(), loadItems()]);
 </script>
