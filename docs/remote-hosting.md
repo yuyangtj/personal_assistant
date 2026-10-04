@@ -122,29 +122,99 @@ Git-ignored `backups/` directory with permissions restricted to the current user
 
 ## Approved post-merge deployments
 
-The task UI can dispatch `.github/workflows/deploy.yml` only after the coding task has
-merged and a second approval has authorized the exact merge SHA. Before using it, create
-the GitHub `production` environment and configure these environment secrets:
+The task UI can deploy a merged commit only after a second approval has authorized the
+exact merge SHA. The server deploys itself: the API writes a request file into a spool
+directory, and a systemd-managed **host deployer** outside Docker Compose runs
+`scripts/redeploy-remote.sh` for it. The API never gets the Docker socket, and no SSH
+key or GitHub Actions run is involved. The flow is drawn in
+[`host-deployment-flow.svg`](host-deployment-flow.svg).
 
-| Secret | Value |
-| --- | --- |
-| `DEPLOY_HOST` | DNS name or IP of the remote server |
-| `DEPLOY_USER` | Restricted SSH user that owns the checkout and can run Docker Compose |
-| `DEPLOY_PATH` | Absolute path to the trusted repository clone on that server |
-| `DEPLOY_SSH_PRIVATE_KEY` | Private key dedicated to this deployment route |
-| `DEPLOY_KNOWN_HOSTS` | Pinned `known_hosts` line for the server, collected out of band |
+1. The API checks that the approved SHA is still the head of `main` (GitHub API) and
+   that no coding run is executing, then writes `requests/<run>.json`.
+2. `assistant-deployer.path` notices the file and starts `assistant-deployer.service`,
+   which runs `scripts/host-deployer.sh` as the deploy user.
+3. The deployer runs `redeploy-remote.sh` with the expected SHA. The script refuses a
+   mismatched `origin/main`, backs up PostgreSQL, builds images tagged
+   `personal-assistant:<sha>`, and waits for `/health`.
+4. If the new release is unhealthy, the script restarts the previous release's images
+   (kept locally, the newest three) and exits `3`. The run is then reported as
+   `rolled_back`.
+5. The deployer writes `status/<run>.json`. The worker reads it every 10 seconds, so
+   the run finishes even though the API restarted during its own rollout. Full logs
+   stay in `logs/<run>.log` on the host.
 
-Give the API's GitHub credential **Actions: write** in addition to its existing repository,
-pull-request, contents, and checks permissions. Configure required reviewers on the
-`production` GitHub environment if you want a third gate after the assistant approval.
+A deployment refuses to start while a coding run is executing, because the rollout
+recreates the coding worker. Pass `"force": true` in the deployment workflow input to
+override this.
 
-The first deployment after installing this feature must still be run manually with
-`./scripts/redeploy-remote.sh` so the server checkout contains the SHA-guarded script.
-Subsequent approved deployments pull `main`, refuse a mismatched commit, back up the
-database, rebuild the Compose stack, and wait for `/health` automatically.
+### One-time setup
+
+Harden the server first. These steps use the Hetzner console or your laptop:
+
+- **Cloud Firewall.** Create a Hetzner Cloud Firewall for the server that allows TCP 22
+  from your own IP only, plus TCP 80, TCP 443 and UDP 443. Docker publishes ports
+  around `ufw`, so the cloud firewall is the layer that actually holds.
+- **Swap.** Builds on a 4 GB server can run the stack out of memory. Add swap once:
+
+  ```bash
+  sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
+  sudo mkswap /swapfile && sudo swapon /swapfile
+  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+  ```
+
+- **ARM64.** The cax11 is ARM64. `postgres` and `caddy` publish arm64 images; confirm
+  that `docker compose ... --profile coding build coding-worker` succeeds before
+  relying on the coding worker.
+- **SSH.** Use key-only SSH login (`PasswordAuthentication no`).
+
+Then install the deployer. Run these over SSH as the user that owns the checkout and is
+in the `docker` group. The installer must run before the first redeploy, because the
+API's spool mounts must exist on the host:
+
+```bash
+cd /srv/personal-assistant/repos/personal_assistant   # the trusted deployment checkout
+git pull --ff-only origin main
+sudo ./scripts/install-host-deployer.sh
+./scripts/redeploy-remote.sh
+systemctl status assistant-deployer.path
+```
+
+The installer creates `/srv/personal-assistant/deploy/{requests,processing,done,status,logs}`
+owned by the deploy user, renders the units from `deploy/systemd/`, and enables them.
+Use a different spool by setting `ASSISTANT_HOST_DEPLOY_SPOOL` for both the installer and
+`.env.remote`.
+
+After the first host deployment succeeds, remove the old GitHub Actions route's
+credentials: delete the `DEPLOY_*` secrets from the GitHub `production` environment and
+drop **Actions: write** from the API's GitHub token. The disabled
+`personal-assistant-production-actions` target and `.github/workflows/deploy.yml` stay
+in the repository as a fallback; re-enabling them needs those secrets again.
+
+### Operating it
+
+```bash
+journalctl -u assistant-deployer.service -n 50        # what the deployer did
+ls /srv/personal-assistant/deploy/status/              # reported runs
+less /srv/personal-assistant/deploy/logs/<run>.log     # full redeploy output
+```
+
+To check the rollback path without shipping a broken commit:
+
+```bash
+ASSISTANT_DEPLOY_SIMULATE_HEALTH_FAILURE=1 ./scripts/redeploy-remote.sh
+echo $?   # 3: the previous release is serving again
+./scripts/redeploy-remote.sh                           # put the current release back
+```
+
+A request that is still in `processing/` after a reboot or a killed deploy is reported
+as `failed` the next time the deployer starts, including at boot. Manual deploys with
+`./scripts/redeploy-remote.sh` stay available at any time; they use the same image
+tagging and rollback.
 
 The ordered SQL migrations are idempotent and run before each API/worker rollout.
-PostgreSQL and Caddy certificate state live in named Docker volumes.
+Keep them backward compatible, because a rollback runs the previous release's code
+against the new schema. PostgreSQL and Caddy certificate state live in named Docker
+volumes.
 
 ## Backup and restore
 
@@ -169,6 +239,9 @@ the PostgreSQL container.
 - The general worker keeps code execution disabled. Coding runs only in the explicit
   `coding` Compose profile after startup preflight verifies clean repository identity,
   required executables, validation commands, and push access.
+- No container has the Docker socket. Containers can only queue a deployment of the
+  exact `origin/main` head through the spool; the host deployer re-verifies the SHA,
+  accepts only its registered target, and runs as an unprivileged `docker`-group user.
 
 For a public multi-user service, replace this single-operator login with real accounts,
 per-user authorization, rate limiting, and audit/retention policies. The Phase 1 stack

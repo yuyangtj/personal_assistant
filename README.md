@@ -29,6 +29,8 @@ agent, tool, approval, and Slack integrations.
 - Persist coding-provider health and cooldown state across worker restarts.
 - Rank coding runners through an explainable task-profile and runtime-state decision engine.
 - Require an exact-head-SHA approval before the GitHub merge operation.
+- Deploy an approved merge on the server itself through a host deployer, with
+  automatic rollback to the previous release when the health check fails.
 
 The fake executor remains as a credential-free fallback, and a scripted client
 exercises the manager inference boundary in tests. Kimi and MiniMax conversational
@@ -38,6 +40,8 @@ capability remains disabled until its CLI runner is implemented and tested.
 
 The before-and-after architecture diagrams are in
 [`docs/architecture.md`](docs/architecture.md).
+The redesigned core model (spaces, work items, chats, runs, timeline) and tiered
+orchestration are in [`docs/assistant-core-model.md`](docs/assistant-core-model.md).
 The model-versus-authority boundary and workflow APIs are described in
 [`docs/controlled-workflows.md`](docs/controlled-workflows.md).
 Provider cooldown persistence and operational fields are described in

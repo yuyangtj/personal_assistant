@@ -6,7 +6,7 @@ from app.api.routes import router
 from app.capabilities import CapabilityRegistry
 from app.config import Settings
 from app.decision import CodingRunnerRegistry
-from app.deployments import DeploymentRegistry
+from app.deployments import DeploymentRegistry, HostDeployerSpool
 from app.integrations.gemini_tts import GeminiTtsClient
 from app.integrations.github import GitHubClient
 from app.integrations.speech import CachedSpeechSynthesizer
@@ -64,6 +64,11 @@ def create_app(
         workflow_registry,
         repository_registry,
         deployment_registry,
+        host_deployer=(
+            HostDeployerSpool(resolved_settings.deploy_spool_directory)
+            if resolved_settings.deploy_spool_directory
+            else None
+        ),
     )
     application.state.provider_state_store = DatabaseProviderStateStore(database)
     application.state.speech_synthesizer = (

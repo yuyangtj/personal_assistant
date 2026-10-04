@@ -1,0 +1,45 @@
+direction: right
+
+you: "You\nphone · web · voice" {shape: person}
+
+space: "Space (pack)\ncoding repo · shopping · finance · home" {
+  style.fill: "#F5F3FF"
+}
+
+chat: "Chat session\n(disposable)" {
+  style.fill: "#EAF4FF"
+}
+
+item: "Work Item\nkind: goal | list | routine | watch" {
+  style.fill: "#FFF7E6"
+  brief: "Brief (source of truth)\ngoal · decisions · status · next steps"
+  checklist: "Checklist / list entries"
+  links: "Links\nPRs · repos · products · devices"
+}
+
+run: "Run\ntier · agent profile · cost · result" {
+  style.fill: "#EAF4FF"
+}
+
+events: "Event log\n(immutable)" {shape: cylinder; style.fill: "#ECFDF5"}
+timeline: "Timeline\n(view over events)" {style.fill: "#ECFDF5"}
+memory: "Memory\nfacts & preferences about you" {shape: cylinder; style.fill: "#ECFDF5"}
+
+you -> chat: "talk"
+you -> item: "create directly"
+you -> timeline: "browse"
+
+chat <-> item: "focus on 0..n\n(many-to-many)"
+chat -> item.brief: "write-back summary" {style.stroke-dash: 4}
+item -> run: "spawns 0..n"
+run -> item.brief: "updates status" {style.stroke-dash: 4}
+space -> item: "contains"
+
+chat -> events
+run -> events
+item -> events: "brief changes"
+events -> timeline
+timeline -> chat: "Discuss this →\nnew chat focused on item"
+
+memory -> chat: "context"
+chat -> memory: "remember …" {style.stroke-dash: 4}

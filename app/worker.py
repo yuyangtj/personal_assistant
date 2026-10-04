@@ -8,12 +8,13 @@ import subprocess
 import threading
 from collections.abc import Mapping
 from pathlib import Path
+from time import monotonic
 
 from app.capabilities import CapabilityRegistry
 from app.coding_runs import CodingRunStore
 from app.config import Settings
 from app.decision import CodingDecisionEngine, CodingRunnerRegistry
-from app.deployments import DeploymentRegistry
+from app.deployments import DeploymentRegistry, HostDeployerSpool
 from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.coding import (
     ClaudeCodeMiniMaxRunner,
@@ -405,6 +406,7 @@ class TaskWorker:
         memory_service: MemoryService | None = None,
         supports_coding: bool = True,
         coding_only: bool = False,
+        deployment_sync_interval_seconds: float = 10.0,
     ):
         self.service = service
         self.manager = manager
@@ -416,6 +418,8 @@ class TaskWorker:
         self.memory_service = memory_service
         self.supports_coding = supports_coding
         self.coding_only = coding_only
+        self.deployment_sync_interval_seconds = deployment_sync_interval_seconds
+        self._last_deployment_sync: float | None = None
         self._stop_event = threading.Event()
 
     def run_once(self) -> bool:
@@ -429,6 +433,7 @@ class TaskWorker:
             coding_only=self.coding_only,
         )
         if task is None:
+            self._sync_deployments()
             return False
 
         heartbeat = _LeaseHeartbeat(
@@ -554,6 +559,25 @@ class TaskWorker:
         except Exception:
             logger.exception("Could not synchronize workflow for task %s", task_id)
 
+    def _sync_deployments(self) -> None:
+        """Reconcile running deployments while idle; the coding worker leaves this alone."""
+        if self.workflow_service is None or self.coding_only:
+            return
+        now = monotonic()
+        if (
+            self._last_deployment_sync is not None
+            and now - self._last_deployment_sync < self.deployment_sync_interval_seconds
+        ):
+            return
+        self._last_deployment_sync = now
+        try:
+            finished = self.workflow_service.sync_running_deployments()
+        except Exception:
+            logger.exception("Could not synchronize running deployments")
+            return
+        if finished:
+            logger.info("Deployments finished: %s", ", ".join(finished))
+
     def run_forever(self) -> None:
         logger.info("Worker %s started", self.worker_id)
         while not self._stop_event.is_set():
@@ -609,6 +633,11 @@ def main() -> None:
         WorkflowRegistry.from_directory(settings.workflows_directory),
         RepositoryRegistry.from_directory(settings.repositories_directory),
         DeploymentRegistry.from_directory(settings.deployment_targets_directory),
+        host_deployer=(
+            HostDeployerSpool(settings.deploy_spool_directory)
+            if settings.deploy_spool_directory
+            else None
+        ),
     )
     worker = TaskWorker(
         service=TaskService(database),

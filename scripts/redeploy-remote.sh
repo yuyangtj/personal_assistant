@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Rebuilds and restarts the remote stack at origin/main.
+#
+# Exit codes: 0 deployed and healthy; 3 new release unhealthy and the previous release
+# was restored; any other non-zero value means the deployment failed.
 set -Eeuo pipefail
 
 SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,10 +11,42 @@ ENV_FILE="${ASSISTANT_DEPLOY_ENV_FILE:-${REPOSITORY_ROOT}/.env.remote}"
 COMPOSE_FILE="${REPOSITORY_ROOT}/compose.remote.yaml"
 DEPLOY_BRANCH="${ASSISTANT_DEPLOY_BRANCH:-main}"
 EXPECTED_SHA="${ASSISTANT_DEPLOY_EXPECTED_SHA:-}"
+SIMULATE_HEALTH_FAILURE="${ASSISTANT_DEPLOY_SIMULATE_HEALTH_FAILURE:-0}"
+CURRENT_TAG_FILE="${REPOSITORY_ROOT}/.deploy-current-tag"
+RELEASES_TO_KEEP=3
+EXIT_ROLLED_BACK=3
 PROVIDER="${1:-minimax}"
 
 usage() {
     echo "Usage: $0 [minimax|kimi]" >&2
+}
+
+wait_for_health() {
+    local _
+    for _ in $(seq 1 30); do
+        if "${compose[@]}" exec -T api python -c \
+            'import json, urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2))["status"] == "ok"' \
+            >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
+prune_release_images() {
+    # `docker image ls` lists newest first; keep the serving release plus the newest
+    # older ones so a rollback never needs a rebuild.
+    local repository tag
+    for repository in personal-assistant personal-assistant-coding; do
+        docker image ls "${repository}" --format '{{.Tag}}' \
+            | grep -E '^[0-9a-f]{40}$' \
+            | grep -vx "${release_tag}" \
+            | tail -n +"${RELEASES_TO_KEEP}" \
+            | while read -r tag; do
+                docker image rm "${repository}:${tag}" >/dev/null 2>&1 || true
+            done || true  # grep finds nothing on the first releases
+    done
 }
 
 set_env_value() {
@@ -85,27 +121,45 @@ if "${compose[@]}" ps --status running --services 2>/dev/null | grep -qx postgre
     "${compose[@]}" exec -T postgres pg_dump -U assistant -d assistant -Fc > "${backup_path}"
 fi
 
-echo "Building and starting the remote stack..."
+release_tag="$(git rev-parse HEAD)"
+previous_tag=""
+if [[ -f "${CURRENT_TAG_FILE}" ]]; then
+    previous_tag="$(tr -d '[:space:]' < "${CURRENT_TAG_FILE}")"
+fi
+
+echo "Building and starting release ${release_tag}..."
+export ASSISTANT_IMAGE_TAG="${release_tag}"
 "${compose[@]}" up -d --build --remove-orphans
 
 echo "Waiting for the API health check..."
 healthy=false
-for _ in $(seq 1 30); do
-    if "${compose[@]}" exec -T api python -c \
-        'import json, urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2))["status"] == "ok"' \
-        >/dev/null 2>&1; then
-        healthy=true
-        break
-    fi
-    sleep 2
-done
+if [[ "${SIMULATE_HEALTH_FAILURE}" == 1 ]]; then
+    echo "ASSISTANT_DEPLOY_SIMULATE_HEALTH_FAILURE=1: treating the health check as failed." >&2
+elif wait_for_health; then
+    healthy=true
+fi
 
 if [[ "${healthy}" != true ]]; then
-    echo "Deployment started, but the API did not become healthy within 60 seconds." >&2
+    echo "Release ${release_tag} did not become healthy within 60 seconds." >&2
     "${compose[@]}" ps >&2
     "${compose[@]}" logs --tail=80 api migrate postgres >&2
+    if [[ ! "${previous_tag}" =~ ^[0-9a-f]{40}$ || "${previous_tag}" == "${release_tag}" ]]; then
+        echo "No earlier release image is recorded, so there is nothing to roll back to." >&2
+        exit 1
+    fi
+    echo "Rolling back to release ${previous_tag}..." >&2
+    export ASSISTANT_IMAGE_TAG="${previous_tag}"
+    # Migrations are backward compatible, so the previous images run on the new schema.
+    if "${compose[@]}" up -d --no-build --remove-orphans && wait_for_health; then
+        echo "Rolled back: release ${previous_tag} is serving." >&2
+        exit "${EXIT_ROLLED_BACK}"
+    fi
+    echo "Rollback to ${previous_tag} also failed to become healthy." >&2
     exit 1
 fi
+
+printf '%s\n' "${release_tag}" > "${CURRENT_TAG_FILE}"
+prune_release_images
 
 "${compose[@]}" ps
 echo "Deployment complete: https://$(sed -n 's/^ASSISTANT_DOMAIN=//p' "${ENV_FILE}" | tail -n 1)"

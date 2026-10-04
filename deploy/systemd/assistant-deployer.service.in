@@ -1,0 +1,19 @@
+# Rendered by scripts/install-host-deployer.sh; edit the template, not /etc/systemd/system.
+[Unit]
+Description=Personal assistant host deployer
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@DEPLOY_USER@
+SupplementaryGroups=docker
+WorkingDirectory=@REPOSITORY_ROOT@
+Environment=ASSISTANT_HOST_DEPLOY_SPOOL=@SPOOL@
+ExecStart=@REPOSITORY_ROOT@/scripts/host-deployer.sh
+TimeoutStartSec=45min
+
+[Install]
+# Also run once at boot so a deployment interrupted by a restart is reported as failed.
+WantedBy=multi-user.target

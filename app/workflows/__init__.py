@@ -10,12 +10,14 @@ from app.workflows.registry import (
     WorkflowRegistryError,
 )
 from app.workflows.service import (
+    WorkflowIntegrationUnavailableError,
     WorkflowRunConflictError,
     WorkflowRunNotFoundError,
     WorkflowService,
 )
 
 __all__ = [
+    "WorkflowIntegrationUnavailableError",
     "WorkflowManifest",
     "WorkflowNotFoundError",
     "WorkflowRegistry",

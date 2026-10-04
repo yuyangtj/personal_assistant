@@ -1,5 +1,8 @@
 # Architecture
 
+For the target model (work items, disposable chats, tiered agents) see
+[`assistant-core-model.md`](assistant-core-model.md).
+
 ## Previous foundation
 
 ```mermaid

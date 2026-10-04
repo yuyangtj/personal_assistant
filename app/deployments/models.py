@@ -10,8 +10,8 @@ from app.capabilities.models import IDENTIFIER_PATTERN
 
 
 class DeploymentStrategy(StrEnum):
-    COMPOSE_PULL_REDEPLOY = "compose_pull_redeploy"
     GITHUB_ACTIONS = "github_actions"
+    HOST_DEPLOYER = "host_deployer"
 
 
 class DeploymentTarget(BaseModel):
@@ -44,9 +44,11 @@ class DeploymentTarget(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def github_actions_requires_workflow(self) -> DeploymentTarget:
+    def workflow_file_matches_strategy(self) -> DeploymentTarget:
         if self.strategy == DeploymentStrategy.GITHUB_ACTIONS and not self.workflow_file:
             raise ValueError("github_actions targets require workflow_file")
+        if self.strategy == DeploymentStrategy.HOST_DEPLOYER and self.workflow_file:
+            raise ValueError("host_deployer targets must not set workflow_file")
         return self
 
 

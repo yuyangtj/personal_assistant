@@ -1,0 +1,10 @@
+# Fallback route: GitHub Actions SSHes into the server and runs redeploy-remote.sh.
+# Enable only if the host deployer is unavailable; it needs the DEPLOY_* GitHub secrets.
+id: personal-assistant-production-actions
+name: Personal Assistant production (GitHub Actions)
+repository_id: personal-assistant
+environment: production
+strategy: github_actions
+workflow_file: deploy.yml
+requires_approval: true
+enabled: false

@@ -1,0 +1,47 @@
+# Deploy directly on the Hetzner server, without the GitHub Actions + SSH round trip.
+direction: right
+
+classes: {
+  built: {style.fill: "#EAF4FF"; style.stroke: "#2563EB"; style.stroke-width: 2}
+  new: {style.fill: "#FFF7E6"; style.stroke: "#D97706"; style.stroke-width: 2}
+  ext: {style.fill: "#F5F3FF"; style.stroke: "#7C3AED"}
+  layer: {style.fill: "#FFFFFF"; style.stroke: "#AAB4C3"; style.stroke-width: 2}
+}
+
+phone: "Phone\napprove merge SHA\napprove deploy SHA" {shape: person}
+github: "GitHub\nmain branch" {class: ext}
+
+server: "Hetzner cax11 (ARM64, 4 GB)" {
+  class: layer
+
+  compose: "Docker Compose stack" {
+    class: layer
+    api: "API\nstart_deployment()\nsync_deployment()" {class: built}
+    worker: "Worker\nreconcile running deploys" {class: new}
+  }
+
+  spool: "Deploy spool\n/srv/personal-assistant/deploy" {
+    class: layer
+    requests: "requests/<run>.json\n(API writes)" {class: new}
+    status: "status/<run>.json\n(API reads)" {class: new}
+  }
+
+  host: "Host (outside Compose)" {
+    class: layer
+    path: "systemd .path unit\nwatches requests/" {class: new}
+    deployer: "assistant-deployer\nflock · verify SHA = origin/main\nredeploy-remote.sh\nhealth check · rollback" {class: new}
+    checkout: "Trusted checkout\n+ images tagged by SHA" {class: built}
+  }
+}
+
+phone -> server.compose.api: "approve"
+server.compose.api -> github: "branch head == SHA?"
+server.compose.api -> server.spool.requests: "atomic write"
+server.spool.requests -> server.host.path
+server.host.path -> server.host.deployer: "start"
+server.host.deployer -> github: "git pull --ff-only"
+server.host.deployer -> server.host.checkout
+server.host.deployer -> server.compose: "compose up -d\n(or roll back to previous tag)"
+server.host.deployer -> server.spool.status: "running → succeeded | rolled_back | failed"
+server.spool.status -> server.compose.worker: "poll"
+server.compose.worker -> phone: "result notification" {style.stroke-dash: 4}

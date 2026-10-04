@@ -1,13 +1,16 @@
+import json
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.deployments import HostDeployerSpool
 from app.integrations.github import (
     GitHubCheckRun,
     GitHubMergeResult,
     GitHubPullRequest,
     GitHubReviewComment,
-    GitHubWorkflowRun,
 )
 from app.integrations.speech import SpeechAudio
 from app.persistence.models import ExecutionModel, TaskModel
@@ -575,11 +578,15 @@ def test_pull_request_merge_requires_reviewed_sha_and_completes_task(
     assert event_types[-1] == "TASK_COMPLETED"
 
 
-def test_merged_task_can_dispatch_and_sync_approved_deployment(
+def test_merged_task_can_submit_and_sync_approved_host_deployment(
     client: TestClient,
+    tmp_path: Path,
 ) -> None:
     task_id, _ = _pending_pull_request_task(client)
-    dispatched: dict[str, object] = {}
+    spool = HostDeployerSpool(tmp_path)
+    spool.requests_directory.mkdir()
+    spool.status_directory.mkdir()
+    client.app.state.workflow_service.host_deployer = spool
 
     class GitHub:
         def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
@@ -605,18 +612,8 @@ def test_merged_task_can_dispatch_and_sync_approved_deployment(
         def get_branch_head(self, **_kwargs) -> str:
             return "b" * 40
 
-        def dispatch_workflow(self, **kwargs) -> None:
-            dispatched.update(kwargs)
-
-        def find_workflow_run(self, **_kwargs) -> GitHubWorkflowRun:
-            return GitHubWorkflowRun(
-                id=42,
-                url="https://github.com/yuyangtj/personal_assistant/actions/runs/42",
-                status="completed",
-                conclusion="success",
-                head_sha="b" * 40,
-                display_title=f"Deploy {deployment_id}",
-            )
+        def dispatch_workflow(self, **_kwargs) -> None:
+            raise AssertionError("host deployments must not dispatch GitHub Actions")
 
     client.app.state.github_client = GitHub()
     merged = client.post(
@@ -651,22 +648,43 @@ def test_merged_task_can_dispatch_and_sync_approved_deployment(
     started = client.post(f"/workflow-runs/{deployment_id}/start")
     assert started.status_code == 200
     assert started.json()["status"] == "running"
-    assert dispatched["workflow_file"] == "deploy.yml"
-    assert dispatched["inputs"] == {
-        "commit_sha": "b" * 40,
-        "workflow_run_id": deployment_id,
-    }
+    request_document = json.loads(
+        (spool.requests_directory / f"{deployment_id}.json").read_text()
+    )
+    assert request_document["commit_sha"] == "b" * 40
+    assert request_document["deployment_target_id"] == "personal-assistant-production"
 
+    # The deployer has not picked the request up yet, and GitHub is not needed to sync.
+    client.app.state.github_client = None
+    pending = client.post(f"/workflow-runs/{deployment_id}/sync")
+    assert pending.json()["status"] == "running"
+
+    (spool.status_directory / f"{deployment_id}.json").write_text(
+        json.dumps(
+            {
+                "workflow_run_id": deployment_id,
+                "state": "succeeded",
+                "stage": "promote",
+                "commit_sha": "b" * 40,
+                "previous_sha": "c" * 40,
+                "started_at": "2026-10-04T12:00:00+00:00",
+                "finished_at": "2026-10-04T12:03:00+00:00",
+                "log_tail": "Deployment complete",
+            }
+        )
+    )
     completed = client.post(f"/workflow-runs/{deployment_id}/sync")
     assert completed.status_code == 200
     assert completed.json()["status"] == "completed"
+    assert completed.json()["current_stage"] == "promote"
     events = client.get(f"/workflow-runs/{deployment_id}/events").json()["events"]
     assert [event["event_type"] for event in events] == [
         "WORKFLOW_PROPOSED",
         "WORKFLOW_APPROVED",
-        "DEPLOYMENT_DISPATCHED",
+        "DEPLOYMENT_SUBMITTED",
         "WORKFLOW_COMPLETED",
     ]
+    assert events[-1]["payload"]["previous_sha"] == "c" * 40
 
 
 def test_pull_request_approval_requires_separate_authorization(client: TestClient) -> None:

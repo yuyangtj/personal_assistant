@@ -24,6 +24,7 @@ class Settings:
     coding_runners_directory: Path = Path("coding-runners")
     validation_profiles_directory: Path = Path("validation-profiles")
     deployment_targets_directory: Path = Path("deployment-targets")
+    deploy_spool_directory: Path | None = None
     default_repository_id: str | None = None
     kimi_api_key: str | None = None
     kimi_base_url: str = "https://api.kimi.com/coding/v1"
@@ -141,6 +142,9 @@ class Settings:
                     "ASSISTANT_DEPLOYMENT_TARGETS_DIRECTORY",
                     str(defaults.deployment_targets_directory),
                 )
+            ),
+            deploy_spool_directory=(
+                Path(value) if (value := os.getenv("ASSISTANT_DEPLOY_SPOOL_DIRECTORY")) else None
             ),
             default_repository_id=os.getenv("ASSISTANT_DEFAULT_REPOSITORY_ID") or None,
             kimi_api_key=os.getenv("ASSISTANT_KIMI_API_KEY") or os.getenv("KIMI_API_KEY") or None,
