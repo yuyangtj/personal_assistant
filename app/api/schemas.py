@@ -123,6 +123,9 @@ class TriageDecisionResponse(BaseModel):
     repository_id: str | None = None
     question: str | None = None
     options: list[TriageOptionResponse] = Field(default_factory=list)
+    action: dict[str, Any] | None = None
+    #: For direct actions, what was done (also posted as the assistant's reply).
+    result: str | None = None
     source: str
 
 

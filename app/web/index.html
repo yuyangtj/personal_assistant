@@ -536,6 +536,14 @@ async function send(text) {
     });
     // The server decides what the message needs; the repository picker is only an override.
     const decision = posted.decision || { intent: "answer" };
+    if (decision.intent === "direct_action") {
+      // Already done on the server; its reply is in the transcript.
+      state.proposal = null;
+      await refreshTranscript();
+      if (state.itemId) await renderWorkItem(state.itemId);
+      await loadItems();
+      return;
+    }
     state.proposal = decision.intent === "answer" ? null : decision;
     state.proposalFor = posted.message.id;
     // The newest message's choice replaces an older workflow card; that workflow stays
