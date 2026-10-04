@@ -127,6 +127,7 @@ class TriageDecisionResponse(BaseModel):
     question: str | None = None
     options: list[TriageOptionResponse] = Field(default_factory=list)
     action: dict[str, Any] | None = None
+    capabilities: list[str] = Field(default_factory=list)
     #: For direct actions, what was done (also posted as the assistant's reply).
     result: str | None = None
     source: str

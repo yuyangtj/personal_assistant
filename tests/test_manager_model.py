@@ -130,6 +130,7 @@ def test_validated_adapter_returns_analysis_and_usage() -> None:
         "shell_execution",
         "task_execution",
         "testing",
+        "web_research",
     ]
 
 

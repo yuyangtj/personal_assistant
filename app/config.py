@@ -28,6 +28,8 @@ class Settings:
     brief_writeback_enabled: bool = False
     triage_model_enabled: bool = False
     ntfy_topic_url: str | None = None
+    tavily_api_key: str | None = None
+    brave_search_api_key: str | None = None
     ntfy_token: str | None = None
     public_url: str | None = None
     default_timezone: str = "UTC"
@@ -166,6 +168,8 @@ class Settings:
                 os.getenv("ASSISTANT_TRIAGE_MODEL_ENABLED", str(defaults.triage_model_enabled))
             ),
             ntfy_topic_url=os.getenv("ASSISTANT_NTFY_TOPIC_URL") or None,
+            tavily_api_key=os.getenv("TAVILY_API_KEY") or None,
+            brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY") or None,
             ntfy_token=os.getenv("ASSISTANT_NTFY_TOKEN") or None,
             public_url=os.getenv("ASSISTANT_PUBLIC_URL") or None,
             default_timezone=os.getenv("ASSISTANT_DEFAULT_TIMEZONE", defaults.default_timezone),

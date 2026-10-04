@@ -71,6 +71,8 @@ class TriageDecision(BaseModel):
     question: str | None = None
     options: tuple[TriageOption, ...] = ()
     action: DirectAction | None = None
+    #: Capabilities a confirmed task should require, e.g. web_research for research.
+    capabilities: tuple[str, ...] = ()
     source: Literal["model", "rules"]
 
 
@@ -82,6 +84,7 @@ class ModelSuggestion(BaseModel):
     intent: Literal["answer", "propose_coding", "propose_task", "direct_action"]
     repository_id: str | None = Field(default=None, max_length=120)
     action: DirectAction | None = None
+    needs_web_search: bool = False
     goal: str = Field(default="", max_length=600)
     confidence: float = Field(ge=0, le=1)
     reason: str = Field(default="", max_length=300)
@@ -94,7 +97,8 @@ Decide what the message needs:
   repositories (features, fixes, UI changes, tests, refactors), even when phrased
   casually ("the toggle looks wrong, can you sort it").
 - "propose_task": other real work that should be tracked (research, planning,
-  comparisons, errands), not code changes.
+  comparisons, errands), not code changes. Set "needs_web_search": true when it needs
+  current facts from the web (products, prices, news, comparisons).
 - "direct_action": a small bookkeeping request done instantly, with "action":
   {"type": "checklist_add", "text": entry, "work_item": tag or null} to add to a list
   or checklist ("add oat milk to groceries"); {"type": "checklist_check", "text": entry,
@@ -172,7 +176,9 @@ class Triager:
         *,
         min_confidence: float = 0.6,
         max_attempts: int = 2,
+        research_available: bool = False,
     ):
+        self.research_available = research_available
         self.repositories = repositories
         self.client = client
         self.min_confidence = min_confidence
@@ -390,11 +396,17 @@ class Triager:
                 candidates=self._mentioned(text),
                 source="model",
             )
+        research = (
+            intent == TriageIntent.PROPOSE_TASK
+            and suggestion.needs_web_search
+            and self.research_available
+        )
         return TriageDecision(
             intent=intent,
             goal=goal,
             reason=reason,
             confidence=suggestion.confidence,
+            capabilities=("web_research",) if research else (),
             source="model",
         )
 

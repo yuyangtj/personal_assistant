@@ -495,7 +495,7 @@ function renderProposal() {
     actions = `<button id="confirm">Propose workflow</button>
       <button class="quiet" id="answer-in-chat">Answer in chat</button>`;
   } else if (d.intent === "propose_task") {
-    title = "Track this as a task?";
+    title = (d.capabilities || []).includes("web_research") ? "Research this on the web?" : "Track this as a task?";
     actions = `<button id="confirm">Create task</button>
       <button class="quiet" id="answer-in-chat">Answer in chat</button>`;
   } else {
@@ -515,12 +515,12 @@ function renderProposal() {
   const confirm = $("confirm");
   if (confirm) confirm.onclick = () => d.intent === "propose_coding"
     ? createCodingWorkflow(messageId, d.repository_id)
-    : createTask(messageId, d.goal, true);
+    : createTask(messageId, d.goal, true, d.capabilities || []);
   document.querySelectorAll("[data-option]").forEach((button) => {
     button.onclick = () => {
       const option = d.options[Number(button.dataset.option)];
       if (option.intent === "propose_coding") return createCodingWorkflow(messageId, option.repository_id);
-      if (option.intent === "propose_task") return createTask(messageId, d.goal, true);
+      if (option.intent === "propose_task") return createTask(messageId, d.goal, true, d.capabilities || []);
       return createTask(messageId);
     };
   });
@@ -562,12 +562,13 @@ function localIsoTime() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
-async function createTask(messageId, goal = null, makeWorkItem = false) {
+async function createTask(messageId, goal = null, makeWorkItem = false, capabilities = []) {
   state.proposal = null;
   try {
     const body = {
       // Confirmed work is worth keeping: it joins the chat's work item.
       create_work_item: makeWorkItem,
+      required_capabilities: capabilities,
       source_context: { client: "web-console",
         local_time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     };

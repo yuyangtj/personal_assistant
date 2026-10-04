@@ -64,6 +64,9 @@ def create_app(
         repository_registry,
         triage_client(resolved_settings) if resolved_settings.triage_model_enabled else None,
         min_confidence=resolved_settings.triage_min_confidence,
+        research_available=bool(
+            resolved_settings.tavily_api_key or resolved_settings.brave_search_api_key
+        ),
     )
     application.state.capability_registry = registry
     application.state.repository_registry = repository_registry
