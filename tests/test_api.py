@@ -14,6 +14,7 @@ from app.integrations.github import (
 )
 from app.integrations.speech import SpeechAudio
 from app.persistence.models import ExecutionModel, TaskModel
+from app.service import TaskService
 from app.workflows import WorkflowRunConflictError
 
 
@@ -57,18 +58,13 @@ def test_repositories_are_listed_and_task_accepts_trusted_repository(client: Tes
         "personal-assistant",
     ]
 
-    created = client.post(
+    # A repository makes it coding work, which only a coding workflow may start.
+    direct = client.post(
         "/tasks",
         json={"request": "Implement the metric", "repository_id": "analytics"},
     )
-    assert created.status_code == 201
-    assert created.json()["source_context"]["repository_id"] == "analytics-agent-playground"
-
-    rejected = client.post(
-        "/tasks",
-        json={"request": "Implement something", "repository_id": "unknown"},
-    )
-    assert rejected.status_code == 422
+    assert direct.status_code == 422
+    assert "coding workflow" in direct.json()["detail"]
 
 
 def test_provider_runtime_state_is_visible_without_exposing_credentials(
@@ -255,6 +251,55 @@ def test_chat_message_can_propose_one_coding_workflow_then_link_started_task(
     messages = client.get(f"/chat-sessions/{chat['id']}/messages").json()["messages"]
     original = next(item for item in messages if item["id"] == message["id"])
     assert original["linked_task_id"] == started.json()["task_id"]
+
+
+def test_public_task_routes_refuse_coding_work(client: TestClient) -> None:
+    chat = client.post("/chat-sessions", json={}).json()
+    message = client.post(
+        f"/chat-sessions/{chat['id']}/messages", json={"content": "Fix the login bug"}
+    ).json()["message"]
+    parent = client.post("/tasks", json={"request": "Say hello"}).json()
+
+    attempts = [
+        client.post(
+            "/tasks", json={"request": "Fix it", "required_capabilities": ["coding"]}
+        ),
+        client.post(
+            "/tasks",
+            json={"request": "Fix it", "source_context": {"repository_id": "analytics"}},
+        ),
+        client.post(
+            f"/chat-sessions/{chat['id']}/messages/{message['id']}/task",
+            json={"required_capabilities": ["pull_request_creation"]},
+        ),
+        client.post(
+            f"/tasks/{parent['id']}/follow-up",
+            json={"request": "Now change the code", "required_capabilities": ["coding"]},
+        ),
+    ]
+
+    assert [response.status_code for response in attempts] == [422, 422, 422, 422]
+    assert all("coding workflow" in response.json()["detail"] for response in attempts)
+
+
+def test_follow_up_on_a_coding_task_is_a_conversation(
+    client: TestClient, service: TaskService
+) -> None:
+    coding = service.create_task(
+        request="Update the toggle icon",
+        required_capabilities=["coding", "pull_request_creation"],
+        source_context={"repository_id": "personal-assistant"},
+    )
+
+    follow_up = client.post(
+        f"/tasks/{coding.id}/follow-up", json={"request": "What changed?"}
+    ).json()
+
+    assert "repository_id" not in follow_up["source_context"]
+    assert follow_up["source_context"]["parent_task"]["task_id"] == coding.id
+    assert service.claim_next_task(
+        worker_id="conversation-worker", lease_seconds=30, supports_coding=False
+    ).id == follow_up["id"]
 
 
 def test_message_with_coding_workflow_cannot_become_chat_only_task(

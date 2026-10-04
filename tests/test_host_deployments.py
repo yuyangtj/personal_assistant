@@ -335,3 +335,23 @@ def test_worker_throttles_and_coding_worker_skips_deployment_sync(
     coding_worker.run_once()
     worker.run_once()
     assert workflows.get_run(run_id).status == "running"
+
+
+def test_sync_gives_up_when_the_deployer_never_reports(
+    workflows: WorkflowService, database: Database
+) -> None:
+    from datetime import timedelta
+
+    from app.persistence.models import WorkflowRunModel, utc_now
+
+    run_id = _approved_run(workflows)
+    workflows.start_deployment(run_id, github=GitHub())
+    assert workflows.sync_deployment(run_id, github=None).status == "running"
+
+    with database.session() as session, session.begin():
+        session.get(WorkflowRunModel, run_id).updated_at = utc_now() - timedelta(minutes=31)
+
+    run = workflows.sync_deployment(run_id, github=None)
+
+    assert (run.status, run.current_stage) == ("failed", "deploy")
+    assert "did not report" in workflows.list_events(run_id)[-1].payload["reason"]

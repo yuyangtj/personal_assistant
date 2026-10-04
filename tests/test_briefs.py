@@ -65,6 +65,19 @@ def test_mentions_focus_the_chat_and_unknown_tags_are_ignored(client: TestClient
     assert [entry["id"] for entry in focus] == [item["id"]]
 
 
+def test_mentions_in_a_task_sent_to_a_chat_focus_it(client: TestClient) -> None:
+    item = client.post("/work-items", json={"title": "Add voice login"}).json()
+    chat = client.post("/chat-sessions", json={}).json()
+
+    client.post(
+        "/tasks",
+        json={"request": "status of #add-voice-login?", "chat_session_id": chat["id"]},
+    )
+
+    focus = client.get(f"/chat-sessions/{chat['id']}/focus").json()["work_items"]
+    assert [entry["id"] for entry in focus] == [item["id"]]
+
+
 def test_slugs_are_short_and_can_be_renamed(client: TestClient) -> None:
     long = client.post(
         "/work-items",
@@ -229,7 +242,8 @@ def test_a_concurrent_edit_wins_over_the_write_back(
 
     class EditingChat(ScriptedChat):
         def complete(self, messages, *, max_tokens: int = 700) -> ChatCompletion:
-            items.update(item.id, expected_version=1, title="Voice login v2")
+            current = items.get(item.id)
+            items.update(item.id, expected_version=current.version, title="Voice login v2")
             return super().complete(messages, max_tokens=max_tokens)
 
     assert _job(database, EditingChat(json.dumps(VALID_BRIEF)), minutes_later=0).run_due() == 0
@@ -238,3 +252,44 @@ def test_a_concurrent_edit_wins_over_the_write_back(
     assert current.title == "Voice login v2"
     assert current.brief_synced_at is None
     assert "BRIEF_UPDATED" not in _events(database, item.id)
+
+
+def test_brief_writeback_runs_off_the_task_loop(service: TaskService) -> None:
+    import threading
+    import time
+
+    started = threading.Event()
+
+    class SlowJob:
+        def run_due(self) -> int:
+            started.set()
+            time.sleep(2)
+            return 0
+
+    executors = {"model-conversation": object()}
+    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(executors)
+    worker = TaskWorker(
+        service=service,
+        manager=DeterministicManager(registry),
+        executors=executors,  # type: ignore[arg-type]
+        worker_id="test",
+        brief_writeback=SlowJob(),  # type: ignore[arg-type]
+        brief_writeback_interval_seconds=0.01,
+    )
+
+    thread = worker.start_brief_writeback()
+    assert thread is not None and started.wait(timeout=1)
+    began = time.monotonic()
+    assert worker.run_once() is False
+    assert time.monotonic() - began < 0.5
+
+    coding_worker = TaskWorker(
+        service=service,
+        manager=DeterministicManager(registry),
+        executors=executors,  # type: ignore[arg-type]
+        worker_id="coding",
+        coding_only=True,
+        brief_writeback=SlowJob(),  # type: ignore[arg-type]
+    )
+    assert coding_worker.start_brief_writeback() is None
+    worker.stop()

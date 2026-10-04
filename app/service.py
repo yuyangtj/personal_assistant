@@ -8,7 +8,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 
 from app.capabilities.models import IDENTIFIER_PATTERN
-from app.domain.enums import EventType, ExecutionStatus, TaskStatus
+from app.domain.enums import CODING_CAPABILITIES, EventType, ExecutionStatus, TaskStatus
 from app.domain.proposals import TaskProposal, propose_task
 from app.domain.task_context import build_task_context, render_task_context
 from app.domain.transitions import TERMINAL_STATUSES, ensure_transition
@@ -64,6 +64,10 @@ class MessageHasWorkflowError(ValueError):
 
 MAX_REPLY_CHARACTERS = 4000
 DEFAULT_FAILURE_REPLY = "Sorry, I couldn't finish that request."
+MALFORMED_REPOSITORY_REPLY = (
+    "That needs code changes, which run through a coding workflow. "
+    "Select the repository in the chat and propose it there."
+)
 CANCELLED_REPLY = "Okay, I've stopped working on that."
 REPLY_EMOTIONS = {"Warm", "Curious", "Excited", "Concerned", "Neutral"}
 MAX_HISTORY_TURNS = 6
@@ -74,6 +78,19 @@ def _reply_payload(text: str, *, emotion: str, intensity: float, outcome: str) -
     """User-facing speech for clients such as the Android avatar."""
     normalized = " ".join(text.split())[:MAX_REPLY_CHARACTERS]
     return {"text": normalized, "emotion": emotion, "intensity": intensity, "outcome": outcome}
+
+
+def _focus_mentions(session, chat_session_id: str, text: str) -> list[str]:
+    """Focus the chat on every existing work item the text mentions as #slug."""
+    focused: list[str] = []
+    for slug in mentioned_slugs(text):
+        try:
+            item = get_work_item(session, slug)
+        except LookupError:
+            continue
+        focus_chat(session, chat_session_id=chat_session_id, item=item)
+        focused.append(item.slug)
+    return focused
 
 
 def _chat_title(request: str) -> str:
@@ -220,6 +237,8 @@ class TaskService:
                     linked_task_id=task.id,
                 )
                 task.origin_message_id = origin.id
+                # Clients that send a turn as a task (voice, the app) mention items too.
+                _focus_mentions(session, chat_session.id, normalized_request)
             TaskRepository.append_event(
                 session,
                 task,
@@ -323,15 +342,11 @@ class TaskService:
                 chat_session.title = _chat_title(normalized_content)
             chat_session.updated_at = datetime.now(UTC)
             session.flush()
-            focused: list[str] = []
-            if role == "user":
-                for slug in mentioned_slugs(normalized_content):
-                    try:
-                        item = get_work_item(session, slug)
-                    except LookupError:
-                        continue
-                    focus_chat(session, chat_session_id=chat_session.id, item=item)
-                    focused.append(item.slug)
+            focused = (
+                _focus_mentions(session, chat_session.id, normalized_content)
+                if role == "user"
+                else []
+            )
             proposal = propose_task(normalized_content) if role == "user" else None
             return PostedMessage(message=message, proposal=proposal, focused_work_items=focused)
 
@@ -445,7 +460,10 @@ class TaskService:
             parent_repository_id = (parent.source_context or {}).get("repository_id")
 
         next_source_context = {**(source_context or {}), "parent_task": context}
-        if parent_repository_id and "repository_id" not in next_source_context:
+        # Only coding work (a PR revision) carries the repository on; a plain follow-up is
+        # a conversation about the parent, which no coding worker should pick up.
+        wants_coding = bool(CODING_CAPABILITIES.intersection(required_capabilities or []))
+        if wants_coding and parent_repository_id and "repository_id" not in next_source_context:
             next_source_context["repository_id"] = parent_repository_id
 
         return self.create_task(
@@ -627,6 +645,26 @@ class TaskService:
         coding_only: bool = False,
     ) -> TaskModel | None:
         with self.database.session() as session, session.begin():
+            # Such tasks were skipped on every poll and stayed queued forever.
+            for malformed in TaskRepository.malformed_queued(session):
+                ensure_transition(malformed.status, TaskStatus.FAILED)
+                self._record_assistant_reply(
+                    session,
+                    malformed,
+                    _reply_payload(
+                        MALFORMED_REPOSITORY_REPLY,
+                        emotion="Concerned",
+                        intensity=0.6,
+                        outcome="failed",
+                    ),
+                )
+                malformed.status = TaskStatus.FAILED.value
+                TaskRepository.append_event(
+                    session,
+                    malformed,
+                    EventType.TASK_FAILED,
+                    {"error": "Task names a repository but requires no coding capability"},
+                )
             return TaskRepository.claim_next(
                 session,
                 worker_id=worker_id,

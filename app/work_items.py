@@ -57,6 +57,10 @@ from app.persistence.repository import ChatMessageRepository, TaskRepository
 logger = logging.getLogger(__name__)
 
 MAX_TITLE_CHARACTERS = 160
+#: Statuses new work may join; done or archived items get a fresh item instead.
+RESUMABLE_STATUSES = frozenset(
+    {WorkItemStatus.OPEN.value, WorkItemStatus.ACTIVE.value, WorkItemStatus.BLOCKED.value}
+)
 
 #: Run events that belong on a work item's timeline. Everything else (polling, raw tool
 #: output, plans, leases) stays in the task's own event stream.
@@ -244,6 +248,17 @@ def link_task(session: Session, *, task: TaskModel, item: WorkItemModel) -> None
         return
     task.work_item_id = item.id
     item.updated_at = utc_now()
+    if item.status == WorkItemStatus.OPEN.value:
+        # Work started on it.
+        append_event(
+            session,
+            item,
+            WorkItemEventType.STATUS_CHANGED,
+            {"from": item.status, "to": WorkItemStatus.ACTIVE.value, "source": "run"},
+            task_id=task.id,
+        )
+        item.status = WorkItemStatus.ACTIVE.value
+        item.version += 1
     append_event(
         session,
         item,
@@ -262,12 +277,12 @@ def resolve_for_run(
     space_slug: str,
     links: Sequence[WorkItemLink] = (),
 ) -> WorkItemModel:
-    """The work item new work belongs to: the chat's only focus, or a new focused item."""
+    """The work item new work belongs to: the chat's only unfinished focus, or a new one."""
     if chat_session_id is not None:
         focused = [
             item
             for item in focused_items(session, chat_session_id)
-            if item.status != WorkItemStatus.ARCHIVED.value
+            if item.status in RESUMABLE_STATUSES
         ]
         if len(focused) == 1:
             return focused[0]

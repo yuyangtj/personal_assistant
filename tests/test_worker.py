@@ -68,6 +68,7 @@ def test_expired_worker_lease_is_recovered_and_reclaimed(
 def test_non_coding_worker_skips_registered_repository_task(service: TaskService) -> None:
     coding = service.create_task(
         request="Implement a feature",
+        required_capabilities=["coding", "pull_request_creation"],
         source_context={"repository_id": "personal-assistant"},
     )
     regular = service.create_task(request="Say hello")
@@ -103,7 +104,7 @@ def test_coding_only_worker_skips_regular_task(service: TaskService) -> None:
     assert service.get_task(regular.id).status == TaskStatus.CREATED.value
 
 
-def test_workers_quarantine_repository_task_without_coding_capability(
+def test_workers_fail_repository_task_without_coding_capability(
     service: TaskService,
 ) -> None:
     malformed = service.create_task(
@@ -128,7 +129,11 @@ def test_workers_quarantine_repository_task_without_coding_capability(
         )
         is None
     )
-    assert service.get_task(malformed.id).status == TaskStatus.CREATED.value
+    # Previously skipped on every poll and left queued forever; now it ends with a reason.
+    assert service.get_task(malformed.id).status == TaskStatus.FAILED.value
+    events = service.list_events(malformed.id)
+    assert [event.event_type for event in events][-2:] == ["ASSISTANT_REPLY", "TASK_FAILED"]
+    assert "coding workflow" in events[-2].payload["text"]
 
 
 def test_coding_worker_preflight_rejects_missing_registered_checkout(tmp_path) -> None:

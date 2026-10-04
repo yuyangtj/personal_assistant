@@ -427,7 +427,7 @@ class TaskWorker:
         self._last_deployment_sync: float | None = None
         self.brief_writeback = brief_writeback
         self.brief_writeback_interval_seconds = brief_writeback_interval_seconds
-        self._last_brief_writeback: float | None = None
+        self._brief_writeback_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
     def run_once(self) -> bool:
@@ -442,7 +442,6 @@ class TaskWorker:
         )
         if task is None:
             self._sync_deployments()
-            self._write_back_briefs()
             return False
 
         heartbeat = _LeaseHeartbeat(
@@ -593,27 +592,33 @@ class TaskWorker:
         if finished:
             logger.info("Deployments finished: %s", ", ".join(finished))
 
-    def _write_back_briefs(self) -> None:
-        """Refresh work item briefs while idle; the coding worker leaves this alone."""
+    def start_brief_writeback(self) -> threading.Thread | None:
+        """Refresh briefs on a background thread so model calls never delay chat replies."""
         if self.brief_writeback is None or self.coding_only:
+            return None
+        if self._brief_writeback_thread is None or not self._brief_writeback_thread.is_alive():
+            self._brief_writeback_thread = threading.Thread(
+                target=self._brief_writeback_loop, name="brief-writeback", daemon=True
+            )
+            self._brief_writeback_thread.start()
+        return self._brief_writeback_thread
+
+    def _brief_writeback_loop(self) -> None:
+        job = self.brief_writeback
+        if job is None:
             return
-        now = monotonic()
-        if (
-            self._last_brief_writeback is not None
-            and now - self._last_brief_writeback < self.brief_writeback_interval_seconds
-        ):
-            return
-        self._last_brief_writeback = now
-        try:
-            written = self.brief_writeback.run_due()
-        except Exception:
-            logger.exception("Could not write back work item briefs")
-            return
-        if written:
-            logger.info("Updated %d work item briefs", written)
+        while not self._stop_event.wait(self.brief_writeback_interval_seconds):
+            try:
+                written = job.run_due()
+            except Exception:
+                logger.exception("Could not write back work item briefs")
+                continue
+            if written:
+                logger.info("Updated %d work item briefs", written)
 
     def run_forever(self) -> None:
         logger.info("Worker %s started", self.worker_id)
+        self.start_brief_writeback()
         while not self._stop_event.is_set():
             processed = self.run_once()
             if not processed:

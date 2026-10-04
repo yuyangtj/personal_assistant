@@ -1,5 +1,9 @@
 from enum import StrEnum
 
+#: Capabilities that run a coding agent against a repository. Only a coding workflow
+#: (propose → approve → start) or a PR revision may create tasks that require them.
+CODING_CAPABILITIES = frozenset({"coding", "pull_request_creation", "coding-pull-request"})
+
 
 class TaskStatus(StrEnum):
     CREATED = "created"

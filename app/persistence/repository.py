@@ -7,7 +7,7 @@ from uuid import uuid4
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from app.domain.enums import EventType, TaskStatus
+from app.domain.enums import CODING_CAPABILITIES, EventType, TaskStatus
 from app.persistence.models import (
     ChatMessageModel,
     ChatSessionModel,
@@ -200,18 +200,31 @@ class TaskRepository:
     def _is_coding_task(task: TaskModel) -> bool:
         capabilities = set(task.required_capabilities or [])
         return bool(
-            capabilities.intersection({"coding", "pull_request_creation", "coding-pull-request"})
+            capabilities.intersection(CODING_CAPABILITIES)
             or (task.source_context or {}).get("repository_id")
         )
 
     @staticmethod
     def _is_malformed_repository_task(task: TaskModel) -> bool:
         capabilities = set(task.required_capabilities or [])
-        coding_capabilities = {"coding", "pull_request_creation", "coding-pull-request"}
         return bool(
             (task.source_context or {}).get("repository_id")
-            and not capabilities.intersection(coding_capabilities)
+            and not capabilities.intersection(CODING_CAPABILITIES)
         )
+
+    @staticmethod
+    def malformed_queued(session: Session, *, limit: int = 20) -> list[TaskModel]:
+        """Queued tasks naming a repository without a coding capability; no worker runs them."""
+        candidates = session.scalars(
+            select(TaskModel)
+            .where(TaskModel.status == TaskStatus.CREATED.value)
+            .order_by(TaskModel.created_at)
+            .limit(100)
+            .with_for_update(skip_locked=True)
+        )
+        return [task for task in candidates if TaskRepository._is_malformed_repository_task(task)][
+            :limit
+        ]
 
     @staticmethod
     def recover_expired(session: Session, *, now: datetime) -> list[str]:
