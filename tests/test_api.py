@@ -1240,3 +1240,9 @@ def test_root_redirects_to_web_console(client: TestClient) -> None:
 
     assert response.status_code == 307
     assert response.headers["location"] == "/ui"
+
+
+def test_root_redirect_keeps_push_links(client: TestClient) -> None:
+    response = client.get("/?task=abc", follow_redirects=False)
+
+    assert response.headers["location"] == "/ui?task=abc"

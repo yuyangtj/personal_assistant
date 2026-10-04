@@ -890,8 +890,10 @@ def web_console() -> FileResponse:
 
 
 @router.get("/", include_in_schema=False)
-def web_console_root() -> RedirectResponse:
-    return RedirectResponse(url="/ui", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+def web_console_root(request: Request) -> RedirectResponse:
+    # Keep the query: push notifications link to /?task=<id>.
+    query = f"?{request.url.query}" if request.url.query else ""
+    return RedirectResponse(url=f"/ui{query}", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @router.get("/health", response_model=HealthResponse)
