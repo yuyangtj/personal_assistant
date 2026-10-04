@@ -315,19 +315,22 @@ def test_coding_runner_cooldown_survives_runner_recreation(
     assert second.attempts[0].category == "cooldown"
 
 
-def test_kimi_runner_configures_its_model_through_the_environment(tmp_path: Path) -> None:
-    capture = tmp_path / "capture.txt"
-    executable = tmp_path / "kimi"
-    executable.write_text(
-        "#!/bin/sh\n"
-        f'{{ printf "%s\\n" "$@"; env | grep -E "^KIMI_" | sort; }} > "{capture}"\n'
-        "echo 'Updated the toggle icon.'\n"
-    )
-    executable.chmod(0o755)
+def test_kimi_runner_configures_its_model_through_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Capture the process call instead of running a fake executable: the coding worker
+    # validates inside a container whose /tmp is mounted noexec.
+    calls: list[dict] = []
+
+    def fake_process(**kwargs) -> str:
+        calls.append(kwargs)
+        return "Updated the toggle icon."
+
+    monkeypatch.setattr("app.execution.coding._run_code_agent_process", fake_process)
     runner = KimiCodeCliRunner(
         api_key="kimi-secret",
         base_url="https://api.kimi.com/coding/v1/",
-        executable=str(executable),
+        executable="kimi",
     )
 
     report = runner.run(
@@ -337,12 +340,15 @@ def test_kimi_runner_configures_its_model_through_the_environment(tmp_path: Path
         is_cancelled=lambda: False,
     )
 
-    recorded = capture.read_text().splitlines()
-    assert "--model" not in recorded
-    assert "KIMI_MODEL_NAME=kimi-for-coding" in recorded
-    assert "KIMI_MODEL_API_KEY=kimi-secret" in recorded
-    assert "KIMI_MODEL_BASE_URL=https://api.kimi.com/coding/v1" in recorded
-    assert not any(line.startswith("KIMI_API_KEY=") for line in recorded)
+    (call,) = calls
+    assert call["command"][0] == "kimi"
+    assert "--model" not in call["command"]
+    environment = call["environment"]
+    assert environment["KIMI_MODEL_NAME"] == "kimi-for-coding"
+    assert environment["KIMI_MODEL_API_KEY"] == "kimi-secret"
+    assert environment["KIMI_MODEL_BASE_URL"] == "https://api.kimi.com/coding/v1"
+    assert "KIMI_API_KEY" not in environment
+    assert call["worktree"] == tmp_path
     assert "Updated the toggle icon." in report.summary
 
 
