@@ -11,6 +11,7 @@ from app.domain.enums import EventType, ExecutionStatus, TaskStatus
 from app.domain.proposals import TaskProposal, propose_task
 from app.domain.task_context import build_task_context, render_task_context
 from app.domain.transitions import TERMINAL_STATUSES, ensure_transition
+from app.domain.work_items import WorkItemLink
 from app.execution.actions import validate_action
 from app.execution.base import ConversationTurn
 from app.persistence.database import Database
@@ -26,6 +27,12 @@ from app.persistence.models import (
     utc_now,
 )
 from app.persistence.repository import ChatMessageRepository, ChatSessionRepository, TaskRepository
+from app.work_items import (
+    get_work_item,
+    item_title,
+    link_task,
+    resolve_for_run,
+)
 from app.workflows.models import WorkflowRunStatus
 
 
@@ -92,7 +99,11 @@ class TaskService:
         parent_task_id: str | None = None,
         external_source: str | None = None,
         external_key: str | None = None,
+        work_item_id: str | None = None,
+        work_item_space: str | None = None,
     ) -> TaskModel:
+        """Create a run. ``work_item_space`` joins it to the chat's only focused work item,
+        or to a new focused one in that space, inside the same transaction."""
         normalized_request = request.strip()
         if not normalized_request:
             raise ValueError("Task request cannot be empty")
@@ -146,6 +157,28 @@ class TaskService:
                         return existing_task
             if parent_task_id is not None and TaskRepository.get(session, parent_task_id) is None:
                 raise TaskNotFoundError(parent_task_id)
+            work_item = (
+                get_work_item(session, work_item_id) if work_item_id is not None else None
+            )
+            if work_item is None and work_item_space is not None:
+                repository_id = normalized_context.get("repository_id")
+                work_item = resolve_for_run(
+                    session,
+                    chat_session_id=chat_session_id,
+                    title=item_title(goal or normalized_request),
+                    space_slug=work_item_space,
+                    links=(
+                        [
+                            WorkItemLink(
+                                kind="repository",
+                                label=str(repository_id),
+                                ref=str(repository_id),
+                            )
+                        ]
+                        if repository_id
+                        else []
+                    ),
+                )
 
             task = TaskModel(
                 id=str(uuid4()),
@@ -188,6 +221,8 @@ class TaskService:
                     "source": external_source,
                 },
             )
+            if work_item is not None:
+                link_task(session, task=task, item=work_item)
             session.flush()
             return task
 
@@ -288,8 +323,14 @@ class TaskService:
         goal: str | None = None,
         required_capabilities: list[str] | None = None,
         source_context: dict[str, Any] | None = None,
+        work_item_id: str | None = None,
+        create_work_item: bool = False,
     ) -> TaskModel:
-        """Launch work from a message the user already sent, on their explicit confirmation."""
+        """Launch work from a message the user already sent, on their explicit confirmation.
+
+        Ordinary chat turns stay unlinked. With ``create_work_item`` (the client's "make this
+        a task"), the run joins the chat's only focused work item or a new focused one.
+        """
         with self.database.session() as session:
             if ChatSessionRepository.get(session, chat_session_id) is None:
                 raise ChatSessionNotFoundError(chat_session_id)
@@ -312,6 +353,7 @@ class TaskService:
                 )
             content = message.content
 
+        repository_id = (source_context or {}).get("repository_id")
         return self.create_task(
             request=content,
             goal=goal,
@@ -319,6 +361,10 @@ class TaskService:
             source_context=source_context,
             chat_session_id=chat_session_id,
             origin_message_id=message_id,
+            work_item_id=work_item_id,
+            work_item_space=(
+                ("coding" if repository_id else "general") if create_work_item else None
+            ),
         )
 
     def get_user_chat_message(
@@ -370,6 +416,7 @@ class TaskService:
             events = TaskRepository.list_events(session, parent.id)
             context = build_task_context(parent, events)
             chat_session_id = parent.chat_session_id
+            parent_work_item_id = parent.work_item_id
             parent_repository_id = (parent.source_context or {}).get("repository_id")
 
         next_source_context = {**(source_context or {}), "parent_task": context}
@@ -383,6 +430,7 @@ class TaskService:
             source_context=next_source_context,
             chat_session_id=chat_session_id,
             parent_task_id=task_id,
+            work_item_id=parent_work_item_id,
         )
 
     def ensure_task_chat_session(self, task_id: str) -> ChatSessionModel:

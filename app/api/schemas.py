@@ -9,12 +9,20 @@ from app.capabilities.models import CapabilityManifest
 from app.decision import CodingRunnerManifest
 from app.deployments import DeploymentTarget
 from app.domain.enums import EventType, TaskStatus
+from app.domain.work_items import (
+    Brief,
+    WorkItemKind,
+    WorkItemLink,
+    WorkItemStatus,
+)
 from app.persistence.models import (
     ChatMessageModel,
+    SpaceModel,
     TaskEventModel,
     TaskModel,
     WorkflowRunEventModel,
     WorkflowRunModel,
+    WorkItemModel,
 )
 from app.validation import ValidationProfile
 from app.workflows.models import WorkflowManifest, WorkflowRunStatus
@@ -29,6 +37,7 @@ class CreateTaskRequest(BaseModel):
     chat_session_id: str | None = Field(default=None, min_length=36, max_length=36)
     external_source: str | None = Field(default=None, max_length=32)
     external_key: str | None = Field(default=None, max_length=255)
+    work_item_id: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class AddMessageRequest(BaseModel):
@@ -48,6 +57,8 @@ class CreateTaskFromMessageRequest(BaseModel):
     required_capabilities: list[str] = Field(default_factory=list, max_length=20)
     repository_id: str | None = Field(default=None, min_length=1, max_length=120)
     source_context: dict[str, Any] = Field(default_factory=dict)
+    work_item_id: str | None = Field(default=None, min_length=1, max_length=80)
+    create_work_item: bool = False
 
 
 class FollowUpTaskRequest(BaseModel):
@@ -212,6 +223,7 @@ class TaskResponse(BaseModel):
     origin_message_id: str | None
     parent_task_id: str | None
     superseded_by_task_id: str | None
+    work_item_id: str | None
     claimed_by: str | None
     version: int
     created_at: datetime
@@ -410,3 +422,98 @@ class WorkflowRunEventResponse(BaseModel):
 
 class WorkflowRunEventListResponse(BaseModel):
     events: list[WorkflowRunEventResponse]
+
+
+class SpaceResponse(BaseModel):
+    id: str
+    slug: str
+    name: str
+    kind: str
+
+    @classmethod
+    def from_model(cls, space: SpaceModel) -> SpaceResponse:
+        return cls(id=space.id, slug=space.slug, name=space.name, kind=space.kind)
+
+
+class SpaceListResponse(BaseModel):
+    spaces: list[SpaceResponse]
+
+
+class CreateWorkItemRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    kind: WorkItemKind = WorkItemKind.GOAL
+    space: str = Field(default="general", min_length=1, max_length=64)
+    brief: Brief | None = None
+    links: list[WorkItemLink] = Field(default_factory=list, max_length=50)
+    chat_session_id: str | None = Field(default=None, min_length=36, max_length=36)
+
+
+class UpdateWorkItemRequest(BaseModel):
+    version: int = Field(ge=1)
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    status: WorkItemStatus | None = None
+    brief: Brief | None = None
+    links: list[WorkItemLink] | None = Field(default=None, max_length=50)
+
+
+class AddChecklistEntryRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=300)
+
+
+class UpdateChecklistEntryRequest(BaseModel):
+    done: bool
+
+
+class DiscussWorkItemRequest(BaseModel):
+    about: str | None = Field(default=None, max_length=1000)
+
+
+class WorkItemResponse(BaseModel):
+    id: str
+    slug: str
+    space: str
+    kind: WorkItemKind
+    title: str
+    status: WorkItemStatus
+    brief: dict[str, Any]
+    checklist: list[dict[str, Any]]
+    links: list[dict[str, Any]]
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_model(cls, item: WorkItemModel, *, space: str) -> WorkItemResponse:
+        return cls(
+            id=item.id,
+            slug=item.slug,
+            space=space,
+            kind=WorkItemKind(item.kind),
+            title=item.title,
+            status=WorkItemStatus(item.status),
+            brief=item.brief or {},
+            checklist=list(item.checklist or []),
+            links=list(item.links or []),
+            version=item.version,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+
+
+class WorkItemListResponse(BaseModel):
+    work_items: list[WorkItemResponse]
+
+
+class TimelineEntryResponse(BaseModel):
+    id: str
+    source: Literal["work_item", "task"]
+    event_type: str
+    at: datetime
+    work_item_id: str | None
+    task_id: str | None
+    chat_session_id: str | None
+    summary: str
+
+
+class TimelineResponse(BaseModel):
+    entries: list[TimelineEntryResponse]

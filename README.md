@@ -31,6 +31,8 @@ agent, tool, approval, and Slack integrations.
 - Require an exact-head-SHA approval before the GitHub merge operation.
 - Deploy an approved merge on the server itself through a host deployer, with
   automatic rollback to the previous release when the health check fails.
+- Track durable work items (goal, list, routine, watch) with a brief, checklist, and
+  links; chats focus on them, runs link to them, and a timeline merges their history.
 
 The fake executor remains as a credential-free fallback, and a scripted client
 exercises the manager inference boundary in tests. Kimi and MiniMax conversational

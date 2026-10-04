@@ -83,6 +83,9 @@ class TaskModel(Base):
     superseded_by_task_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    work_item_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("work_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     external_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     external_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     claimed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -255,4 +258,81 @@ class CodingRunModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class SpaceModel(Base):
+    __tablename__ = "spaces"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
+class WorkItemModel(Base):
+    __tablename__ = "work_items"
+    __table_args__ = (
+        Index("ix_work_items_space_status_updated", "space_id", "status", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    space_id: Mapped[str] = mapped_column(String(36), ForeignKey("spaces.id"), nullable=False)
+    slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    brief: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    checklist: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    links: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    brief_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class WorkItemEventModel(Base):
+    __tablename__ = "work_item_events"
+    __table_args__ = (
+        UniqueConstraint("work_item_id", "sequence", name="uq_work_item_events_sequence"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    work_item_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("work_items.id", ondelete="CASCADE"), nullable=False
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    chat_session_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("chat_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, index=True
+    )
+
+
+class ChatWorkItemModel(Base):
+    __tablename__ = "chat_work_items"
+
+    chat_session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    work_item_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("work_items.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    focused_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
     )
