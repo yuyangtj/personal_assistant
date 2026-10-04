@@ -20,6 +20,7 @@ from app.persistence.database import Database
 from app.service import TaskService
 from app.worker import (
     TaskWorker,
+    _build_code_agent_runners,
     build_coding_executor,
     build_conversation_executor,
     build_manager,
@@ -564,3 +565,22 @@ def test_worker_pauses_coding_task_for_pull_request_merge_approval(
     event_types = [event.event_type for event in service.list_events(task.id)]
     assert event_types[-2:] == ["ARTIFACT_CREATED", "APPROVAL_REQUESTED"]
     assert "TASK_COMPLETED" not in event_types
+
+
+def test_kimi_code_runner_gets_model_endpoint_and_is_skipped_without_a_key() -> None:
+    configured = _build_code_agent_runners(
+        Settings(
+            code_agent_providers="kimi,minimax-claude",
+            kimi_api_key="kimi-secret",
+            kimi_base_url="https://api.kimi.com/coding/v1",
+            minimax_api_key="minimax-secret",
+        )
+    )
+    assert [runner.provider for runner in configured] == ["kimi-code", "minimax-claude-code"]
+    kimi = configured[0]
+    assert (kimi.model, kimi.base_url) == ("kimi-for-coding", "https://api.kimi.com/coding/v1")
+
+    without_kimi = _build_code_agent_runners(
+        Settings(code_agent_providers="kimi,minimax-claude", minimax_api_key="minimax-secret")
+    )
+    assert [runner.provider for runner in without_kimi] == ["minimax-claude-code"]

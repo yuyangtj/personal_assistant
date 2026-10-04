@@ -188,13 +188,17 @@ def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
     runners: list[CodeAgentRunner] = []
     for provider in providers:
         if provider == "kimi":
-            runners.append(
-                KimiCodeCliRunner(
-                    executable=settings.kimi_code_executable,
-                    model=settings.kimi_code_model,
-                    api_key=settings.kimi_api_key,
+            if settings.kimi_api_key:
+                runners.append(
+                    KimiCodeCliRunner(
+                        api_key=settings.kimi_api_key,
+                        base_url=settings.kimi_base_url,
+                        executable=settings.kimi_code_executable,
+                        model=settings.kimi_code_model or "kimi-for-coding",
+                    )
                 )
-            )
+            else:
+                logger.warning("Skipping Kimi Code runner: no Kimi API key")
         elif provider == "minimax-claude":
             if settings.minimax_api_key:
                 runners.append(
@@ -266,8 +270,6 @@ def preflight_coding_executor(executor: RepositoryCodingExecutor) -> None:
         executable = getattr(runner, "executable", None)
         if isinstance(executable, str) and shutil.which(executable) is None:
             problems.append(f"coding runner executable not found: {executable}")
-        if isinstance(runner, KimiCodeCliRunner) and not runner.api_key:
-            problems.append("Kimi coding runner requires KIMI_API_KEY")
     if problems:
         raise ValueError("Coding worker preflight failed: " + "; ".join(problems))
 

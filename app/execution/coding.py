@@ -170,13 +170,17 @@ class KimiCodeCliRunner:
     def __init__(
         self,
         *,
+        api_key: str,
+        base_url: str,
         executable: str = "kimi",
-        model: str | None = None,
-        api_key: str | None = None,
+        model: str = "kimi-for-coding",
     ):
+        if not api_key:
+            raise ValueError("A Kimi API key is required for Kimi Code")
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
         self.executable = executable
         self.model = model
-        self.api_key = api_key
 
     def run(
         self,
@@ -186,13 +190,23 @@ class KimiCodeCliRunner:
         timeout_seconds: int,
         is_cancelled: Callable[[], bool],
     ) -> CodeAgentReport:
-        command = [self.executable]
-        if self.model:
-            command.extend(["--model", self.model])
-        command.extend(["--prompt", _coding_prompt(request), "--output-format", "text"])
+        command = [
+            self.executable,
+            "--prompt",
+            _coding_prompt(request),
+            "--output-format",
+            "text",
+        ]
+        # Kimi Code only runs a model it has configured. With no config.toml in the
+        # agent's throwaway home, the KIMI_MODEL_* variables define the default model.
         environment = _safe_agent_environment()
-        if self.api_key:
-            environment["KIMI_API_KEY"] = self.api_key
+        environment.update(
+            {
+                "KIMI_MODEL_NAME": self.model,
+                "KIMI_MODEL_API_KEY": self.api_key,
+                "KIMI_MODEL_BASE_URL": self.base_url,
+            }
+        )
         output = _run_code_agent_process(
             command=command,
             worktree=worktree,

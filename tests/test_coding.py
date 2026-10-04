@@ -13,6 +13,7 @@ from app.execution.coding import (
     CodingAgentError,
     CodingPullRequestExecutor,
     FallbackCodeAgentRunner,
+    KimiCodeCliRunner,
     RepositoryCodingExecutor,
     _text_report,
 )
@@ -312,6 +313,42 @@ def test_coding_runner_cooldown_survives_runner_recreation(
     assert calls == {"limited": 1, "backup": 2}
     assert second.attempts[0].outcome == "skipped"
     assert second.attempts[0].category == "cooldown"
+
+
+def test_kimi_runner_configures_its_model_through_the_environment(tmp_path: Path) -> None:
+    capture = tmp_path / "capture.txt"
+    executable = tmp_path / "kimi"
+    executable.write_text(
+        "#!/bin/sh\n"
+        f'{{ printf "%s\\n" "$@"; env | grep -E "^KIMI_" | sort; }} > "{capture}"\n'
+        "echo 'Updated the toggle icon.'\n"
+    )
+    executable.chmod(0o755)
+    runner = KimiCodeCliRunner(
+        api_key="kimi-secret",
+        base_url="https://api.kimi.com/coding/v1/",
+        executable=str(executable),
+    )
+
+    report = runner.run(
+        worktree=tmp_path,
+        request="Update the toggle icon",
+        timeout_seconds=30,
+        is_cancelled=lambda: False,
+    )
+
+    recorded = capture.read_text().splitlines()
+    assert "--model" not in recorded
+    assert "KIMI_MODEL_NAME=kimi-for-coding" in recorded
+    assert "KIMI_MODEL_API_KEY=kimi-secret" in recorded
+    assert "KIMI_MODEL_BASE_URL=https://api.kimi.com/coding/v1" in recorded
+    assert not any(line.startswith("KIMI_API_KEY=") for line in recorded)
+    assert "Updated the toggle icon." in report.summary
+
+
+def test_kimi_runner_requires_an_api_key() -> None:
+    with pytest.raises(ValueError, match="Kimi API key"):
+        KimiCodeCliRunner(api_key="", base_url="https://api.kimi.com/coding/v1")
 
 
 def test_text_report_normalizes_kimi_fenced_json() -> None:
