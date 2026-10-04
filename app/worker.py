@@ -27,6 +27,7 @@ from app.execution.coding import (
     RepositoryCodingExecutor,
 )
 from app.execution.fake import ExecutionCancelled
+from app.execution.tool_agent import ToolAgentExecutor
 from app.integrations.factory import chat_client_chain
 from app.integrations.factory import provider_order as _provider_order
 from app.integrations.fallback import FallbackManagerModelClient
@@ -43,6 +44,7 @@ from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.schedules import Scheduler
 from app.service import TaskService
+from app.tools.search import build_search
 from app.validation import ValidationProfileRegistry
 from app.workflows import WorkflowRegistry, WorkflowService
 
@@ -457,7 +459,7 @@ class TaskWorker:
                 return True
 
             execution_context = dict(task.source_context or {})
-            if executor.id in {"model-conversation", "coding-pull-request"}:
+            if executor.id in {"model-conversation", "coding-pull-request", "tool-agent"}:
                 work_items = self.service.work_item_context(task)
                 if work_items:
                     execution_context["work_items"] = work_items
@@ -654,6 +656,12 @@ def main() -> None:
             "%s conversation credentials are not set; conversation falls back to fake",
             settings.conversation_model_provider,
         )
+    search = build_search(
+        tavily_api_key=settings.tavily_api_key, brave_api_key=settings.brave_search_api_key
+    )
+    if search is not None and conversation_executor is not None:
+        executors[ToolAgentExecutor.id] = ToolAgentExecutor(conversation_executor.client, search)
+        logger.info("Web research agent enabled with %s search", search.name)
     provider_state_store = DatabaseProviderStateStore(database)
     coding_executor = build_coding_executor(
         settings,

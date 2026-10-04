@@ -572,6 +572,7 @@ def test_capabilities_include_enabled_and_planned_adapters(client: TestClient) -
         "fake-executor",
         "kimi-code",
         "model-conversation",
+        "tool-agent",
     ]
     assert capabilities[0]["availability"]["enabled"] is True
     assert capabilities[1]["availability"]["enabled"] is True
@@ -583,6 +584,7 @@ def test_capabilities_include_enabled_and_planned_adapters(client: TestClient) -
         "coding-pull-request",
         "fake-executor",
         "model-conversation",
+        "tool-agent",
     ]
 
 
