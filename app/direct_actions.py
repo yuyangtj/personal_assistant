@@ -9,9 +9,12 @@ item page, and memories archived.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.domain.work_items import WorkItemKind
 from app.memory import MemoryService
+from app.persistence.models import utc_now
+from app.schedules import Recurrence, ScheduleKind, ScheduleService, zone
 from app.triage import DirectAction
 from app.work_items import RESUMABLE_STATUSES, WorkItemNotFoundError, WorkItemService
 
@@ -40,13 +43,67 @@ def _target_item(action: DirectAction, chat_session_id: str, items: WorkItemServ
     raise WorkItemNotFoundError("ambiguous")
 
 
+def _schedule(
+    action: DirectAction,
+    *,
+    chat_session_id: str,
+    items: WorkItemService,
+    schedules: ScheduleService,
+    timezone: str,
+    now: datetime,
+) -> DirectActionResult:
+    if not action.at:
+        return DirectActionResult(False, "When should that be? Give me a day and time.")
+    try:
+        local = datetime.fromisoformat(action.at).replace(tzinfo=zone(timezone))
+    except ValueError:
+        return DirectActionResult(False, "I couldn't read that time; try a day and time.")
+    if local <= now and action.recurrence == "none":
+        return DirectActionResult(False, "That time has already passed.")
+    item = None
+    if action.work_item:
+        try:
+            item = items.get(action.work_item.lstrip("#"))
+        except WorkItemNotFoundError:
+            item = None
+    schedules.create(
+        kind=ScheduleKind.REMINDER if action.type == "remind" else ScheduleKind.ROUTINE,
+        message=action.text,
+        run_at=local,
+        recurrence=Recurrence(action.recurrence),
+        timezone=timezone,
+        work_item_id=item.id if item else None,
+        chat_session_id=chat_session_id,
+    )
+    when = local.strftime("%a %d %b %H:%M")
+    repeat = "" if action.recurrence == "none" else f", repeating {action.recurrence}"
+    verb = "I'll remind you" if action.type == "remind" else "I'll do this"
+    return DirectActionResult(
+        True, f"{verb} {when}{repeat}: {action.text}", item.slug if item else None
+    )
+
+
 def run_direct_action(
     action: DirectAction,
     *,
     chat_session_id: str,
     items: WorkItemService,
     memory: MemoryService,
+    schedules: ScheduleService | None = None,
+    timezone: str = "UTC",
+    now: datetime | None = None,
 ) -> DirectActionResult:
+    if action.type in ("remind", "routine"):
+        if schedules is None:
+            return DirectActionResult(False, "Reminders aren't available here.")
+        return _schedule(
+            action,
+            chat_session_id=chat_session_id,
+            items=items,
+            schedules=schedules,
+            timezone=timezone,
+            now=now or utc_now(),
+        )
     if action.type == "remember":
         memory.create(
             kind=action.kind or "fact", content=action.text, chat_session_id=chat_session_id

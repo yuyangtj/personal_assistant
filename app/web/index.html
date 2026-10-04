@@ -532,7 +532,8 @@ async function send(text) {
   try {
     if (!state.chatId) { state.chatId = (await api("/chat-sessions", { method: "POST", body: "{}" })).id; }
     const posted = await api(`/chat-sessions/${state.chatId}/messages`, {
-      method: "POST", body: JSON.stringify({ content: text, repository_id: state.repositoryId }),
+      method: "POST", body: JSON.stringify({ content: text, repository_id: state.repositoryId,
+        local_time: localIsoTime(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
     });
     // The server decides what the message needs; the repository picker is only an override.
     const decision = posted.decision || { intent: "answer" };
@@ -553,6 +554,12 @@ async function send(text) {
     if (!state.proposal) await createTask(posted.message.id);
   } catch (e) { fail(e); }
   finally { state.busy = false; $("send").disabled = false; }
+}
+
+function localIsoTime() {
+  // The user's wall-clock time, so "tomorrow at 9" resolves in their timezone.
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 async function createTask(messageId, goal = null, makeWorkItem = false) {
@@ -661,8 +668,9 @@ async function renderWorkItem(id) {
   clearTimeout(state.taskTimer);
   state.taskTimer = null;
   try {
-    const [item, runs, timeline] = await Promise.all([
+    const [item, runs, timeline, schedules] = await Promise.all([
       api(`/work-items/${id}`), api(`/work-items/${id}/runs`), api(`/work-items/${id}/timeline?limit=50`),
+      api(`/schedules?work_item_id=${encodeURIComponent(id)}`),
     ]);
     const brief = item.brief || {};
     $("detail-title").textContent = "Work item";
@@ -690,6 +698,11 @@ async function renderWorkItem(id) {
       ${(item.links || []).length ? `<div class="panel-card"><h3>Links</h3>${item.links.map((link) => link.url
         ? `<div><a href="${esc(link.url)}" target="_blank" rel="noreferrer">${esc(link.label)}</a></div>`
         : `<div class="sub" style="margin:0">${esc(link.kind)}: ${esc(link.label)}</div>`).join("")}</div>` : ""}
+      <div class="panel-card"><h3>Schedules</h3>${schedules.schedules.map((schedule) => `
+        <div class="item-check"><span>⏰</span><span>${esc(schedule.message)}
+          <div class="sub" style="margin:0">${esc(schedule.kind)} · next ${esc(new Date(schedule.next_run_at).toLocaleString())}${schedule.recurrence !== "none" ? ` · ${esc(schedule.recurrence)}` : ""}</div></span>
+          <button type="button" class="chip-x ghost" data-cancel-schedule="${esc(schedule.id)}" aria-label="Cancel ${esc(schedule.message)}">×</button></div>`).join("")
+        || `<div class="sub">None. Say “remind me tomorrow at 9 to …” in a chat about this item.</div>`}</div>
       <div class="panel-card"><h3>Runs</h3>${runs.tasks.map((task) => `
         <button class="taskcard" data-task="${esc(task.id)}" type="button">
           <span class="dot ${active(task) ? "run" : task.status === "failed" ? "fail" : ""}"></span>
@@ -1059,6 +1072,11 @@ document.addEventListener("click", (e) => {
     return api(`/work-items/${state.itemId}/discuss`, { method: "POST",
       body: JSON.stringify({ about: discuss.dataset.discuss || null }) })
       .then((chat) => { closeTaskPanel(); return openChat(chat.id); }).catch(fail);
+  }
+  const cancelSchedule = e.target.closest("[data-cancel-schedule]");
+  if (cancelSchedule && state.itemId) {
+    return api(`/schedules/${cancelSchedule.dataset.cancelSchedule}`, { method: "DELETE" })
+      .then(() => renderWorkItem(state.itemId)).catch(fail);
   }
   const removeEntry = e.target.closest("[data-remove-entry]");
   if (removeEntry && state.itemId) {

@@ -8,8 +8,11 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from app.api.schemas import (
     AddChecklistEntryRequest,
     ChatSessionResponse,
+    CreateScheduleRequest,
     CreateWorkItemRequest,
     DiscussWorkItemRequest,
+    ScheduleListResponse,
+    ScheduleResponse,
     SpaceListResponse,
     SpaceResponse,
     TaskListResponse,
@@ -23,6 +26,7 @@ from app.api.schemas import (
 )
 from app.domain.work_items import WorkItemKind, WorkItemStatus
 from app.persistence.models import WorkItemModel
+from app.schedules import Recurrence, ScheduleKind, ScheduleNotFoundError
 from app.work_items import (
     SpaceNotFoundError,
     WorkItemConflictError,
@@ -242,3 +246,50 @@ def unfocus_chat(chat_session_id: str, reference: str, request: Request) -> Work
     except LookupError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error
     return WorkItemListResponse(work_items=_responses(request, items))
+
+
+@router.get("/schedules", response_model=ScheduleListResponse)
+def list_schedules(
+    request: Request, work_item_id: str | None = None, include_inactive: bool = False
+) -> ScheduleListResponse:
+    item_id = None
+    if work_item_id:
+        try:
+            item_id = _items(request).get(work_item_id).id
+        except WorkItemNotFoundError as error:
+            raise _not_found(error) from error
+    schedules = request.app.state.schedule_service.list(
+        work_item_id=item_id, active_only=not include_inactive
+    )
+    return ScheduleListResponse(
+        schedules=[ScheduleResponse.model_validate(schedule) for schedule in schedules]
+    )
+
+
+@router.post("/schedules", response_model=ScheduleResponse, status_code=status.HTTP_201_CREATED)
+def create_schedule(body: CreateScheduleRequest, request: Request) -> ScheduleResponse:
+    try:
+        schedule = request.app.state.schedule_service.create(
+            kind=ScheduleKind(body.kind),
+            message=body.message,
+            run_at=body.run_at,
+            recurrence=Recurrence(body.recurrence),
+            timezone=body.timezone,
+            work_item_id=body.work_item_id,
+            chat_session_id=body.chat_session_id,
+        )
+    except WorkItemNotFoundError as error:
+        raise _not_found(error) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return ScheduleResponse.model_validate(schedule)
+
+
+@router.delete("/schedules/{schedule_id}", response_model=ScheduleResponse)
+def cancel_schedule(schedule_id: str, request: Request) -> ScheduleResponse:
+    try:
+        return ScheduleResponse.model_validate(
+            request.app.state.schedule_service.cancel(schedule_id)
+        )
+    except ScheduleNotFoundError as error:
+        raise _not_found(error) from error
