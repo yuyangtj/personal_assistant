@@ -1206,32 +1206,52 @@ def test_pull_request_rejection_leaves_pr_unmerged_and_cancels_task(
         assert execution.completed_at is not None
 
 
+def _console(client: TestClient) -> str:
+    """The console page plus the stylesheet and scripts it loads."""
+    from app.api.web import WEB_STATIC
+
+    page = client.get("/ui")
+    assert page.status_code == 200
+    return page.text + "".join(client.get(f"/ui/static/{name}").text for name in WEB_STATIC)
+
+
 def test_web_console_is_served(client: TestClient) -> None:
     response = client.get("/ui")
+    console = _console(client)
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "<title>Assistant Console</title>" in response.text
     assert 'id="task-panel"' in response.text
     assert 'id="action-dialog"' in response.text
-    assert "Coding progress" in response.text
-    assert "Action blocked:" in response.text
-    assert "Approve and start" in response.text
-    assert "Refresh CI" in response.text
-    assert "Propose deployment" in response.text
-    assert "Approve deployment" in response.text
-    assert "prPollAttempts" in response.text
-    assert "defaultRepository" not in response.text
-    assert "window.prompt" not in response.text
+    assert "Coding progress" in console
+    assert "Action blocked:" in console
+    assert "Approve and start" in console
+    assert "Refresh CI" in console
+    assert "Propose deployment" in console
+    assert "Approve deployment" in console
+    assert "prPollAttempts" in console
+    assert "defaultRepository" not in console
+    assert "window.prompt" not in console
 
 
 def test_web_console_uses_accessible_navigation_controls(client: TestClient) -> None:
-    response = client.get("/ui")
+    console = _console(client)
 
-    assert '<button class="chat-item ${c.id === state.chatId ? "active" : ""}"' in response.text
-    assert '<button class="taskcard"' in response.text
-    assert 'aria-label="Task details"' in response.text
-    assert 'type="password" autocomplete="off" required' in response.text
+    assert '<button class="chat-item ${c.id === state.chatId ? "active" : ""}"' in console
+    assert '<button class="taskcard"' in console
+    assert 'aria-label="Task details"' in console
+    assert 'type="password" autocomplete="off" required' in console
+
+
+def test_console_code_is_served_behind_an_allow_list(client: TestClient) -> None:
+    script = client.get("/ui/static/state.js")
+
+    assert script.headers["content-type"].startswith("text/javascript")
+    assert script.headers["cache-control"] == "no-cache"
+    assert client.get("/ui/static/console.css").headers["content-type"].startswith("text/css")
+    assert client.get("/ui/static/../index.html").status_code == 404
+    assert client.get("/ui/static/secret.js").status_code == 404
 
 
 def test_root_redirects_to_web_console(client: TestClient) -> None:
