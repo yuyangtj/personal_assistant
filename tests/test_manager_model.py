@@ -125,6 +125,7 @@ def test_validated_adapter_returns_analysis_and_usage() -> None:
     ] == [
         "coding",
         "conversation",
+        "groceries",
         "pull_request_creation",
         "repository_analysis",
         "shell_execution",

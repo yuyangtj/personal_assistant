@@ -47,7 +47,9 @@ const CODING_CAPABILITIES = ["coding", "pull_request_creation", "coding-pull-req
 
 // Say what the work is doing rather than naming the task machinery.
 // The supervisor answering a message is a chat reply, not separate work.
-const workCapabilities = (task) => (task.required_capabilities || []).filter((c) => c !== "supervision");
+// So is the grocery agent looking something up in the user's stores.
+const CHAT_CAPABILITIES = ["supervision", "groceries"];
+const workCapabilities = (task) => (task.required_capabilities || []).filter((c) => !CHAT_CAPABILITIES.includes(c));
 
 function taskCardLabel(task) {
   const caps = workCapabilities(task);
@@ -62,6 +64,7 @@ function taskCardLabel(task) {
   if (!active(task)) return `${kind} · ${label(task.status)}`;
   // What the agent itself last reported, e.g. "Writing app/web/index.html".
   if (task.progress) return `${kind} · ${task.progress}`;
+  if ((task.required_capabilities || []).includes("groceries")) return "Checking your stores…";
   return research ? "Researching…" : kind === "Reply" ? "Thinking…" : `${kind} working…`;
 }
 

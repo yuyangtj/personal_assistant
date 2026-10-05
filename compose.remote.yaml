@@ -59,6 +59,8 @@ services:
       ASSISTANT_GEMINI_TTS_TIMEOUT_SECONDS: ${ASSISTANT_GEMINI_TTS_TIMEOUT_SECONDS:-30}
       ASSISTANT_GEMINI_TTS_CACHE_ENTRIES: ${ASSISTANT_GEMINI_TTS_CACHE_ENTRIES:-128}
       ASSISTANT_GITHUB_TOKEN: ${ASSISTANT_GITHUB_TOKEN:-}
+      ASSISTANT_MCP_GATEWAY_URL: ${ASSISTANT_MCP_GATEWAY_URL:-}
+      ASSISTANT_MCP_GATEWAY_TOKEN: ${ASSISTANT_MCP_GATEWAY_TOKEN:-}
       ASSISTANT_GITHUB_API_BASE_URL: ${ASSISTANT_GITHUB_API_BASE_URL:-https://api.github.com}
       ASSISTANT_APPROVAL_TOKEN: ${ASSISTANT_APPROVAL_TOKEN:?set ASSISTANT_APPROVAL_TOKEN}
       ASSISTANT_DEPLOY_SPOOL_DIRECTORY: /deploy
@@ -113,6 +115,8 @@ services:
       ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH: ${ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH:-}
       ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH: ${ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH:-}
       ASSISTANT_WORKER_ID: worker-remote
+      ASSISTANT_MCP_GATEWAY_URL: ${ASSISTANT_MCP_GATEWAY_URL:-}
+      ASSISTANT_MCP_GATEWAY_TOKEN: ${ASSISTANT_MCP_GATEWAY_TOKEN:-}
       # Read-only use: notice PRs merged or closed on GitHub.
       ASSISTANT_GITHUB_TOKEN: ${ASSISTANT_GITHUB_TOKEN:-}
       KIMI_API_KEY: ${KIMI_API_KEY:-}
@@ -211,6 +215,28 @@ services:
     networks:
       - private
 
+  # The MCP servers (Willys, Lidl) and their gateway, built from the private mcp-servers
+  # repository next to this one. Opt-in through the "mcp" profile.
+  mcp-tools:
+    profiles: ["mcp"]
+    build:
+      context: ${ASSISTANT_MCP_SERVERS_DIR:-../mcp-servers}
+    image: personal-assistant-mcp-tools:${ASSISTANT_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      MCP_GATEWAY_TOKEN: ${ASSISTANT_MCP_GATEWAY_TOKEN:-}
+      WILLYS_PLUSNUMMER: ${WILLYS_PLUSNUMMER:-}
+      WILLYS_PASSWORD: ${WILLYS_PASSWORD:-}
+      LIDL_USERNAME: ${LIDL_USERNAME:-}
+      LIDL_PASSWORD: ${LIDL_PASSWORD:-}
+    volumes:
+      - mcp-sessions:/home/node
+    # Chromium runs without its own sandbox here, so the container is the boundary.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      - private
+
   caddy:
     image: caddy:2.10-alpine
     restart: unless-stopped
@@ -236,5 +262,6 @@ networks:
 
 volumes:
   assistant-postgres:
+  mcp-sessions:
   caddy-data:
   caddy-config:

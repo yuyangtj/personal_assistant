@@ -14,6 +14,7 @@ COPY coding-runners ./coding-runners
 COPY validation-profiles ./validation-profiles
 COPY deployment-targets ./deployment-targets
 COPY spaces ./spaces
+COPY toolsets ./toolsets
 
 RUN pip install --no-cache-dir .
 

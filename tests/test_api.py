@@ -569,20 +569,23 @@ def test_capabilities_include_enabled_and_planned_adapters(client: TestClient) -
     assert [capability["id"] for capability in capabilities] == [
         "coding-pull-request",
         "fake-executor",
+        "grocery-agent",
         "kimi-code",
         "model-conversation",
         "supervisor",
         "tool-agent",
     ]
-    assert capabilities[0]["availability"]["enabled"] is True
-    assert capabilities[1]["availability"]["enabled"] is True
-    assert capabilities[2]["availability"]["enabled"] is False
-    assert capabilities[3]["availability"]["enabled"] is True
+    enabled_by_id = {c["id"]: c["availability"]["enabled"] for c in capabilities}
+    assert enabled_by_id["coding-pull-request"] is True
+    assert enabled_by_id["fake-executor"] is True
+    assert enabled_by_id["kimi-code"] is False
+    assert enabled_by_id["model-conversation"] is True
 
     enabled = client.get("/capabilities", params={"include_disabled": False}).json()
     assert [capability["id"] for capability in enabled["capabilities"]] == [
         "coding-pull-request",
         "fake-executor",
+        "grocery-agent",
         "model-conversation",
         "supervisor",
         "tool-agent",

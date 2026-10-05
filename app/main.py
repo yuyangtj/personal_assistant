@@ -71,6 +71,7 @@ def create_app(
         research_available=bool(
             resolved_settings.tavily_api_key or resolved_settings.brave_search_api_key
         ),
+        groceries_available=bool(resolved_settings.mcp_gateway_url),
         spaces=space_registry,
     )
     application.state.capability_registry = registry
