@@ -243,6 +243,7 @@ class PullRequestStatusResponse(BaseModel):
     head_matches: bool
     state: str
     draft: bool
+    merged: bool = False
     mergeable: bool | None
     required_checks_state: Literal["passed", "pending", "failed", "missing"]
     checks: list[PullRequestCheckResponse]

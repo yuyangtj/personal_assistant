@@ -28,6 +28,7 @@ from app.api.schemas import (
     TaskListResponse,
     TaskResponse,
 )
+from app.coding.reconcile import PullRequestReconciler
 from app.domain.enums import TaskStatus
 from app.integrations.github import GitHubError
 from app.services import (
@@ -47,6 +48,7 @@ def _live_pull_request_status(
     approval: dict[str, object],
     *,
     include_review_threads: bool = True,
+    settle: bool = False,
 ) -> PullRequestStatusResponse:
     github = request.app.state.github_client
     if github is None:
@@ -62,6 +64,14 @@ def _live_pull_request_status(
     number = int(approval["number"])
     expected_sha = str(approval["expected_head_sha"])
     pull_request = github.get_pull_request(repository=repository, number=number)
+    if settle and (pull_request.merged or pull_request.state == "closed"):
+        # Merged or closed on GitHub directly: close the gate now instead of leaving the
+        # console offering buttons for a PR that is already done.
+        PullRequestReconciler(
+            task_service(request),
+            github,
+            on_change=request.app.state.workflow_service.sync_for_task,
+        ).settle_task(task_id, pull_request)
     if (
         pull_request.repository != repository
         or pull_request.head_branch != str(approval.get("head_branch") or "")
@@ -98,6 +108,7 @@ def _live_pull_request_status(
         head_matches=pull_request.head_sha == expected_sha,
         state=pull_request.state,
         draft=pull_request.draft,
+        merged=pull_request.merged,
         mergeable=pull_request.mergeable,
         required_checks_state=aggregate,
         checks=[
@@ -361,7 +372,7 @@ def mark_pull_request_ready(
 def get_pull_request_status(task_id: str, request: Request) -> PullRequestStatusResponse:
     try:
         approval = task_service(request).get_pending_approval(task_id)
-        return _live_pull_request_status(request, task_id, approval)
+        return _live_pull_request_status(request, task_id, approval, settle=True)
     except TaskNotFoundError as error:
         raise HTTPException(status_code=404, detail="Task not found") from error
     except ApprovalNotFoundError as error:

@@ -222,6 +222,15 @@ async function renderTask(id) {
     if (approval) {
       try { prStatus = await pullRequestStatus(id); }
       catch (error) { prStatusError = error.message || String(error); }
+      // Merged or closed on GitHub: the server has just closed the gate, so show the
+      // finished task (and its reply in the chat) instead of buttons for a done PR.
+      if (prStatus && (prStatus.merged || prStatus.state === "closed")
+        && state.settledPrTask !== id) {
+        state.settledPrTask = id;
+        if (state.chatId) await refreshTranscript();
+        if (state.taskId === id) return renderTask(id);
+        return;
+      }
     }
     let deploymentRun = await taskDeployment(id);
     if (deploymentRun?.status === "running") {
@@ -237,7 +246,9 @@ async function renderTask(id) {
       && prStatus.state === "open" && prStatus.required_checks_state === "passed"
       && prStatus.mergeable === true;
     const revisionReady = prStatus && prStatus.head_matches && prStatus.state === "open";
-    const primaryGate = approval ? gateReason(prStatus, approval.draft ? "ready" : "merge") : "";
+    // GitHub is the truth for draft: the PR may have been marked ready there.
+    const draft = approval && (prStatus ? prStatus.draft : approval.draft);
+    const primaryGate = approval ? gateReason(prStatus, draft ? "ready" : "merge") : "";
     const repository = task.source_context.repository_id || "No repository";
     const codingTask = task.required_capabilities.some((capability) =>
       ["coding", "pull_request_creation", "coding-pull-request"].includes(capability));
@@ -272,8 +283,8 @@ async function renderTask(id) {
       ${prStatusError ? `<div class="gate-notice">Could not load live GitHub status: ${esc(prStatusError)}</div>` : ""}
       ${approval ? `<div id="gate-reason" class="gate-notice ${primaryGate ? "" : "pass"}">${primaryGate ? `Action blocked: ${esc(primaryGate)}` : "Exact commit and required checks are ready for an authorized action."}</div>` : ""}
       <div class="row wrap" style="margin-top:10px">
-        ${approval && approval.draft ? `<button id="mark-ready" ${ciReady ? "" : "disabled"} title="${esc(primaryGate)}">Mark ready for review</button>` : ""}
-        ${approval && !approval.draft ? `<button id="approve-merge" ${ciReady ? "" : "disabled"} title="${esc(primaryGate)}">Approve and merge</button>` : ""}
+        ${approval && draft ? `<button id="mark-ready" ${ciReady ? "" : "disabled"} title="${esc(primaryGate)}">Mark ready for review</button>` : ""}
+        ${approval && !draft ? `<button id="approve-merge" ${ciReady ? "" : "disabled"} title="${esc(primaryGate)}">Approve and merge</button>` : ""}
         ${approval && approval.head_branch ? `<button class="quiet" id="request-revision" ${revisionReady ? "" : "disabled"} title="${esc(gateReason(prStatus, "revision"))}">Request revision</button>` : ""}
         ${active(task) ? `<button class="quiet" id="cancel-task">Cancel</button>` : ""}
         <button class="ghost" id="discuss">Discuss in chat</button></div>
@@ -350,8 +361,15 @@ async function renderTask(id) {
       state.taskTimer = setTimeout(() => {
         if (state.taskId === id) renderTask(id);
       }, 5000);
+    } else if (approval && task.status === "waiting_for_approval") {
+      // Settled checks still change on GitHub (marked ready, merged, closed); look again
+      // now and then while this task stays open.
+      state.taskTimer = setTimeout(() => {
+        if (state.taskId === id) renderTask(id);
+      }, 30000);
     }
     if (deploymentRun?.status === "running") {
+      clearTimeout(state.taskTimer);
       state.taskTimer = setTimeout(() => {
         if (state.taskId === id) renderTask(id);
       }, 5000);
