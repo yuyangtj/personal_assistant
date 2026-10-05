@@ -5,7 +5,7 @@
 // replies, timers and alarms, and simple answers that stay on the phone. In a browser
 // none of this exists and the console works as before.
 const phone = { bridge: window.AndroidAssistant || null, caps: null, routes: new Map(), next: 0,
-                turns: {}, speakFor: null, listening: false };
+                turns: {}, speakFor: null, listening: false, dictated: false };
 
 function phoneSend(message) { phone.bridge.postMessage(JSON.stringify(message)); }
 
@@ -109,7 +109,9 @@ function onPhoneMessage(message) {
     else if (message.state === "partial") $("input").value = message.text || "";
     else if (message.state === "final") {
       showListening(false);
+      // Into the box to check or edit first; the reply is still spoken when it's sent.
       $("input").value = message.text || "";
+      phone.dictated = Boolean(message.text);
       $("input").focus();
     } else if (message.state === "error") {
       showListening(false);
