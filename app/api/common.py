@@ -9,7 +9,7 @@ from fastapi import HTTPException, Request
 from app.api.schemas import TaskListResponse, TaskResponse
 from app.domain.enums import CODING_CAPABILITIES, TaskStatus
 from app.domain.transitions import TERMINAL_STATUSES
-from app.service import TaskService
+from app.services import TaskService
 
 
 def task_service(request: Request) -> TaskService:

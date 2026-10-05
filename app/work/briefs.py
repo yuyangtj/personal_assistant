@@ -21,7 +21,7 @@ from app.integrations.chat import ChatClient, ChatMessage
 from app.integrations.model_json import extract_json_object
 from app.persistence.database import Database
 from app.persistence.models import WorkItemModel, utc_now
-from app.work_items import brief_material, record_writeback
+from app.work.items import brief_material, record_writeback
 
 logger = logging.getLogger(__name__)
 

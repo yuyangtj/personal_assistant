@@ -14,9 +14,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.blocks import ChoiceOption, ChoicesBlock, validate_blocks
+from app.chat.blocks import ChoiceOption, ChoicesBlock, validate_blocks
+from app.chat.triage import TriageDecision, TriageIntent
 from app.persistence.models import ChatMessageModel
-from app.triage import TriageDecision, TriageIntent
 
 _YES = re.compile(
     r"^(yes|yeah|yep|yup|sure|ok|okay|go ahead|go for it|do it|please do|pls do|"

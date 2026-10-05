@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from app.persistence.models import WorkflowRunModel
 from app.repositories import RepositoryRegistry
-from app.service import TaskService
+from app.services import TaskService
 from app.workflows import WorkflowService
 from app.workflows.service import WorkflowRunConflictError
 

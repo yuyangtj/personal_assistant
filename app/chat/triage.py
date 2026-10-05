@@ -23,7 +23,7 @@ from app.integrations.chat import ChatClient, ChatMessage
 from app.integrations.model_json import extract_json_object
 from app.repositories import RepositoryRegistry
 from app.repositories.models import RepositoryManifest
-from app.spaces import SpaceRegistry
+from app.work.spaces import SpaceRegistry
 
 logger = logging.getLogger(__name__)
 

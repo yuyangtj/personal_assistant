@@ -14,7 +14,7 @@ from app.execution.fake import ExecutionCancelled
 from app.integrations.chat import ChatCompletion, ChatMessage
 from app.integrations.kimi import KimiChatClient, KimiError
 from app.manager import DeterministicManager
-from app.service import TaskService
+from app.services import TaskService
 from app.worker import TaskWorker
 
 

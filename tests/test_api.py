@@ -14,7 +14,7 @@ from app.integrations.github import (
 )
 from app.integrations.speech import SpeechAudio
 from app.persistence.models import ExecutionModel, TaskModel
-from app.service import TaskService
+from app.services import TaskService
 from app.workflows import WorkflowRunConflictError
 
 

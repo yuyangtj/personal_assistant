@@ -4,8 +4,8 @@ import json
 
 from fastapi.testclient import TestClient
 
+from app.chat.triage import TriageIntent, Triager
 from app.repositories import RepositoryRegistry
-from app.triage import TriageIntent, Triager
 from tests.test_triage import ScriptedChat, suggestion
 
 

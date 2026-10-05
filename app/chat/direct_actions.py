@@ -11,12 +11,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from app.chat.triage import DirectAction
 from app.domain.work_items import WorkItemKind
-from app.memory import MemoryService
 from app.persistence.models import utc_now
 from app.schedules import Recurrence, ScheduleKind, ScheduleService, zone
-from app.triage import DirectAction
-from app.work_items import RESUMABLE_STATUSES, WorkItemNotFoundError, WorkItemService
+from app.work.items import RESUMABLE_STATUSES, WorkItemNotFoundError, WorkItemService
+from app.work.memory import MemoryService
 
 
 @dataclass(frozen=True)

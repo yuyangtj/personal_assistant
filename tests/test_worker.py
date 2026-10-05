@@ -8,16 +8,16 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.capabilities import CapabilityRegistry
+from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
 from app.config import Settings
 from app.domain.enums import TaskStatus
 from app.execution.base import ExecutionResult
-from app.execution.coding import CodingPullRequestExecutor, RepositoryCodingExecutor
 from app.execution.fake import FakeExecutor
 from app.integrations.fallback import FallbackChatClient, FallbackManagerModelClient
 from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
 from app.manager.model import ScriptedManagerModelClient, ValidatedManagerModelAdapter
 from app.persistence.database import Database
-from app.service import TaskService
+from app.services import TaskService
 from app.worker import (
     TaskWorker,
     _build_code_agent_runners,
@@ -592,7 +592,7 @@ def test_kimi_code_runner_gets_model_endpoint_and_is_skipped_without_a_key() -> 
 
 
 def test_failed_task_reply_uses_the_errors_user_message(service: TaskService) -> None:
-    from app.execution.coding import CodingAgentError
+    from app.coding.base import CodingAgentError
 
     class ExplainingExecutor(FakeExecutor):
         def execute(self, **_kwargs):

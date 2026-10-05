@@ -7,24 +7,19 @@ from pathlib import Path
 
 import pytest
 
-from app.coding_runs import CodingRunPhase, CodingRunStore
-from app.execution.coding import (
-    CodeAgentReport,
-    CodingAgentError,
-    CodingPullRequestExecutor,
-    FallbackCodeAgentRunner,
-    KimiCodeCliRunner,
-    RepositoryCodingExecutor,
-    _text_report,
-)
+from app.coding.base import CodeAgentReport, CodingAgentError
+from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
+from app.coding.reports import text_report
+from app.coding.runners import FallbackCodeAgentRunner, KimiCodeCliRunner
+from app.coding.runs import CodingRunPhase, CodingRunStore
 from app.integrations.github import GitHubPullRequest
 from app.persistence.database import Database
 from app.providers import DatabaseProviderStateStore
-from app.service import TaskService
+from app.services import TaskService
 from app.validation import ValidationProfile, ValidationStep
 
 
-def _git(directory: Path, *arguments: str) -> str:
+def git(directory: Path, *arguments: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(directory), *arguments],
         check=True,
@@ -39,10 +34,10 @@ def _repository(tmp_path: Path) -> tuple[Path, Path]:
     subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
     repository = tmp_path / "source"
     repository.mkdir()
-    _git(repository, "init", "-b", "main")
+    git(repository, "init", "-b", "main")
     (repository / "README.md").write_text("before\n", encoding="utf-8")
-    _git(repository, "add", "README.md")
-    _git(
+    git(repository, "add", "README.md")
+    git(
         repository,
         "-c",
         "user.name=Test",
@@ -52,8 +47,8 @@ def _repository(tmp_path: Path) -> tuple[Path, Path]:
         "-m",
         "Initial",
     )
-    _git(repository, "remote", "add", "origin", str(remote))
-    _git(repository, "push", "-u", "origin", "main")
+    git(repository, "remote", "add", "origin", str(remote))
+    git(repository, "push", "-u", "origin", "main")
     return repository, remote
 
 
@@ -73,7 +68,7 @@ def test_coding_executor_isolates_changes_pushes_branch_and_opens_draft(tmp_path
 
         def create_pull_request(self, **kwargs) -> GitHubPullRequest:
             self.calls.append(kwargs)
-            sha = _git(repository, "rev-parse", f"origin/{kwargs['head']}")
+            sha = git(repository, "rev-parse", f"origin/{kwargs['head']}")
             return GitHubPullRequest(
                 repository="acme/widget",
                 number=9,
@@ -102,7 +97,7 @@ def test_coding_executor_isolates_changes_pushes_branch_and_opens_draft(tmp_path
     )
 
     branch = "assistant/task-123456781234"
-    remote_sha = _git(remote, "rev-parse", f"refs/heads/{branch}")
+    remote_sha = git(remote, "rev-parse", f"refs/heads/{branch}")
     assert remote_sha == result.output["approval_request"]["expected_head_sha"]
     assert result.output["agent_provider"] == "test-agent"
     assert result.output["artifacts"][0]["draft"] is True
@@ -131,7 +126,7 @@ def test_coding_executor_recovers_push_without_duplicate_agent_or_pr(
             calls["create"] += 1
             if calls["create"] == 1:
                 raise RuntimeError("simulated crash after push")
-            sha = _git(repository, "rev-parse", f"origin/{kwargs['head']}")
+            sha = git(repository, "rev-parse", f"origin/{kwargs['head']}")
             return GitHubPullRequest(
                 repository="acme/widget",
                 number=9,
@@ -274,7 +269,7 @@ def test_failed_validation_gets_one_repair_pass_with_the_output(
                 number=9,
                 url="https://github.com/acme/widget/pull/9",
                 head_branch=str(kwargs["head"]),
-                head_sha=_git(repository, "rev-parse", f"origin/{kwargs['head']}"),
+                head_sha=git(repository, "rev-parse", f"origin/{kwargs['head']}"),
                 base_branch="main",
                 state="open",
                 draft=True,
@@ -336,8 +331,8 @@ def test_work_that_still_fails_is_saved_on_a_branch_and_explained(
     saved = f"assistant/task-{task.id.replace('-', '')[:12]}-validation-failed"
     assert runs["agent"] == 2
     assert raised.value.details["saved_branch"] == saved
-    assert _git(remote, "show", f"refs/heads/{saved}:feature.txt") == "broken 2"
-    assert not _git(remote, "branch", "--list", saved.removesuffix("-validation-failed"))
+    assert git(remote, "show", f"refs/heads/{saved}:feature.txt") == "broken 2"
+    assert not git(remote, "branch", "--list", saved.removesuffix("-validation-failed"))
     reply = raised.value.user_message
     assert "tests check still failed" in reply
     assert "FAILED tests/test_feature.py::test_feature" in reply
@@ -443,7 +438,7 @@ def test_kimi_runner_configures_its_model_through_the_environment(
         calls.append(kwargs)
         return "Updated the toggle icon."
 
-    monkeypatch.setattr("app.execution.coding._run_code_agent_process", fake_process)
+    monkeypatch.setattr("app.coding.runners.run_code_agent_process", fake_process)
     runner = KimiCodeCliRunner(
         api_key="kimi-secret",
         base_url="https://api.kimi.com/coding/v1/",
@@ -475,7 +470,7 @@ def test_kimi_runner_requires_an_api_key() -> None:
 
 
 def test_text_report_normalizes_kimi_fenced_json() -> None:
-    report = _text_report(
+    report = text_report(
         """• ```json
   {
     "status": "success",

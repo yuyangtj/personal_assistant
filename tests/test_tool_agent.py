@@ -6,10 +6,10 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app.chat.triage import Triager
 from app.execution.tool_agent import ToolAgentExecutor
 from app.repositories import RepositoryRegistry
 from app.tools.search import BraveSearch, SearchError, SearchResult, TavilySearch
-from app.triage import Triager
 from tests.test_triage import ScriptedChat, suggestion
 
 

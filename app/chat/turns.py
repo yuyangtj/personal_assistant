@@ -5,11 +5,11 @@ from __future__ import annotations
 from fastapi import Request
 
 from app.api.schemas import AppendChatMessageRequest, TriageDecisionResponse
-from app.coding_flow import start_coding_run
-from app.direct_actions import run_direct_action
-from app.offers import match_choice, offer_for, pending_choices, settle
+from app.chat.direct_actions import run_direct_action
+from app.chat.offers import match_choice, offer_for, pending_choices, settle
+from app.chat.triage import TriageIntent
+from app.coding.flow import start_coding_run
 from app.schedules import zone
-from app.triage import TriageIntent
 
 
 def propose_coding_run(

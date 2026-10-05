@@ -11,7 +11,7 @@ from app.capabilities import CapabilityRegistry
 from app.domain.proposals import propose_task
 from app.execution import ConversationExecutor
 from app.manager import DeterministicManager
-from app.service import TaskService
+from app.services import TaskService
 from app.worker import TaskWorker
 from tests.test_conversation import RecordingChatClient
 

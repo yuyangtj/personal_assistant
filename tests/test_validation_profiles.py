@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from app.execution.coding import CodingAgentError, CodingPullRequestExecutor
+from app.coding.base import CodingAgentError
+from app.coding.executor import CodingPullRequestExecutor
 from app.validation import ValidationProfile, ValidationProfileRegistry, ValidationStep
 
 

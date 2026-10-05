@@ -27,7 +27,7 @@ from app.api.schemas import (
 from app.domain.work_items import WorkItemKind, WorkItemStatus
 from app.persistence.models import WorkItemModel
 from app.schedules import Recurrence, ScheduleKind, ScheduleNotFoundError
-from app.work_items import (
+from app.work.items import (
     SpaceNotFoundError,
     WorkItemConflictError,
     WorkItemNotFoundError,

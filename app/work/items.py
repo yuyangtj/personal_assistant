@@ -53,7 +53,7 @@ from app.persistence.models import (
     utc_now,
 )
 from app.persistence.repository import ChatMessageRepository, TaskRepository
-from app.spaces import SpaceRegistry
+from app.work.spaces import SpaceRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -939,7 +939,7 @@ class WorkItemService:
 def main(argv: Sequence[str] | None = None) -> None:
     from app.config import Settings
 
-    parser = argparse.ArgumentParser(prog="python -m app.work_items")
+    parser = argparse.ArgumentParser(prog="python -m app.work.items")
     parser.add_argument("command", choices=["backfill"])
     parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

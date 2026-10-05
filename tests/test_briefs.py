@@ -7,19 +7,19 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from app.briefs import BriefWritebackJob, BriefWriter, BriefWriterError
 from app.capabilities import CapabilityRegistry
+from app.coding.reports import with_work_item_context
 from app.domain.enums import TaskStatus
 from app.domain.work_items import Brief, render_work_item_context
 from app.execution.base import ExecutionResult
-from app.execution.coding import _with_work_item_context
 from app.execution.conversation import ConversationExecutor
 from app.integrations.chat import ChatCompletion, ChatMessage
 from app.manager import DeterministicManager
 from app.persistence.database import Database
 from app.persistence.models import TaskModel, WorkItemEventModel, utc_now
-from app.service import TaskService
-from app.work_items import WorkItemService
+from app.services import TaskService
+from app.work.briefs import BriefWritebackJob, BriefWriter, BriefWriterError
+from app.work.items import WorkItemService
 from app.worker import TaskWorker
 
 VALID_BRIEF = {
@@ -137,10 +137,10 @@ def test_work_item_context_reaches_the_conversation_model(
     messages = ConversationExecutor(ScriptedChat())._messages("What's next?", (), seen)
     assert any("Work items this conversation is about" in m.content for m in messages)
     assert "Next steps:\n- Draft the login screen" in rendered
-    background = _with_work_item_context("Implement it", seen["work_items"])
+    background = with_work_item_context("Implement it", seen["work_items"])
     assert background.startswith("Implement it\n\nBACKGROUND FROM THE WORK ITEM")
     assert "#voice-login — Voice login (goal, open)" in background
-    assert _with_work_item_context("Implement it", None) == "Implement it"
+    assert with_work_item_context("Implement it", None) == "Implement it"
 
 
 # --- brief writer -----------------------------------------------------------------

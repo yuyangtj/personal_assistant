@@ -30,13 +30,13 @@ from app.api.schemas import (
 )
 from app.domain.enums import TaskStatus
 from app.integrations.github import GitHubError
-from app.service import (
+from app.services import (
     ApprovalConflictError,
     ApprovalNotFoundError,
     ChatSessionNotFoundError,
     TaskNotFoundError,
 )
-from app.work_items import WorkItemNotFoundError
+from app.work.items import WorkItemNotFoundError
 
 router = APIRouter()
 

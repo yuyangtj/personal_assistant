@@ -22,7 +22,7 @@ from app.notify import Notifier, NullNotifier
 from app.persistence.database import Database
 from app.persistence.models import ScheduleModel, utc_now
 from app.persistence.repository import ChatMessageRepository
-from app.work_items import get_work_item
+from app.work.items import get_work_item
 
 logger = logging.getLogger(__name__)
 

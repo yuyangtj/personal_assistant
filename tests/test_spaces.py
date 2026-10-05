@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.chat.triage import Triager
 from app.repositories import RepositoryRegistry
-from app.spaces import SpaceRegistry
-from app.triage import Triager
+from app.work.spaces import SpaceRegistry
 from tests.test_triage import ScriptedChat, suggestion
 
 

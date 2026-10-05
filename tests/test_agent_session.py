@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.execution.coding import CodingAgentError, KimiAcpRunner, worktree_summary
+from app.coding.base import CodingAgentError
+from app.coding.process import worktree_summary
+from app.coding.runners import KimiAcpRunner
 from app.execution.fake import ExecutionCancelled
 from app.worker import ProgressReporter
 
@@ -22,7 +24,7 @@ def _runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> KimiA
     monkeypatch.setenv("FAKE_ACP_MODE", mode)
     # The runner passes only allow-listed variables to the agent; let the mode through.
     monkeypatch.setattr(
-        "app.execution.coding._safe_agent_environment",
+        "app.coding.runners.safe_agent_environment",
         lambda: {"PATH": "/usr/bin:/bin", "FAKE_ACP_MODE": mode},
     )
     return KimiAcpRunner(
@@ -207,7 +209,7 @@ def test_new_instructions_continue_the_same_acp_session(
 
 
 def test_a_one_shot_agent_restarts_with_new_instructions(tmp_path: Path) -> None:
-    from app.execution.coding import _run_code_agent_process
+    from app.coding.process import run_code_agent_process
 
     agent = tmp_path / "agent.py"
     agent.write_text(
@@ -224,7 +226,7 @@ def test_a_one_shot_agent_restarts_with_new_instructions(tmp_path: Path) -> None
     def command(notes=()) -> list[str]:
         return [sys.executable, str(agent), "\n".join(["Change the icon", *notes])]
 
-    output = _run_code_agent_process(
+    output = run_code_agent_process(
         command=command(),
         worktree=tmp_path,
         timeout_seconds=20,
@@ -262,10 +264,10 @@ def test_git_commands_on_a_shared_checkout_take_turns(
     import threading
     import time
 
-    from app.execution import coding
+    from app.coding import git as coding_git
 
     shared, worktree = tmp_path / "shared", tmp_path / "worktree"
-    coding._share_repository(shared)
+    coding_git.share_repository(shared)
     active: dict[str, int] = {"shared": 0, "most": 0}
     overlap_in_worktree = threading.Event()
     both_in_worktrees = threading.Barrier(2, timeout=2)
@@ -281,9 +283,9 @@ def test_git_commands_on_a_shared_checkout_take_turns(
             overlap_in_worktree.set()
         return subprocess.CompletedProcess(arguments, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(coding, "_run_git", fake_run_git)
+    monkeypatch.setattr(coding_git, "_run_git", fake_run_git)
     threads = [
-        threading.Thread(target=coding._git, args=(directory, "fetch"))
+        threading.Thread(target=coding_git.git, args=(directory, "fetch"))
         for directory in (shared, shared, shared, worktree, worktree)
     ]
     for thread in threads:

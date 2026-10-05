@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from time import monotonic
 from typing import Any
 
-from app.blocks import model_blocks
+from app.chat.blocks import model_blocks
 from app.domain.task_context import render_task_context
 from app.domain.work_items import render_work_item_context
 from app.execution.actions import alarm_matches_next_occurrence, validate_action
