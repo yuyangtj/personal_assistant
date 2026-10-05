@@ -112,6 +112,16 @@ def web_icon(name: str) -> FileResponse:
     )
 
 
+@router.get("/.well-known/assetlinks.json", include_in_schema=False)
+def android_app_links() -> FileResponse:
+    """Lets the Android app open this site's links (push notifications) directly.
+
+    Android verifies it when the app is installed: the app with this package name and
+    signing key may handle https links to this domain.
+    """
+    return FileResponse(WEB_DIRECTORY / "assetlinks.json", media_type="application/json")
+
+
 @router.get("/", include_in_schema=False)
 def web_console_root(request: Request) -> RedirectResponse:
     # Keep the query: push notifications link to /?task=<id>.

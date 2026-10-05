@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.personalassistant.shell",
+      "sha256_cert_fingerprints": [
+        "55:05:BD:DE:53:77:44:CA:69:6D:F0:07:57:FB:0F:58:34:96:81:4B:E0:70:15:99:AA:78:E1:C2:43:30:9E:48"
+      ]
+    }
+  }
+]
