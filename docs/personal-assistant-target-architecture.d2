@@ -14,9 +14,9 @@ classes: {
 clients: "1 · Clients" {
   class: layer
   grid-columns: 5
-  web: "Web console\nchats · work items · timeline · approvals" {class: built}
-  android: "Android app\nchats · approvals (items: PR 4b)" {class: partial}
-  voice: "Voice + avatar" {class: built}
+  web: "Web console (installable PWA)\nchats with choices · work items · live progress · approvals" {class: built}
+  android: "Android app\nconsole shell · voice · phone actions · Gemini Nano" {class: built}
+  voice: "3D avatar\npaused, returns later" {class: later}
   push: "Push notifications\nntfy" {class: built}
   gateway: "Caddy\nHTTPS · login" {class: built}
 }
@@ -27,12 +27,13 @@ conversation: "2 · Conversation layer (FastAPI)" {
   sessions: "Chat sessions" {class: built}
   focus: "Focus resolver\n#mentions · focus chips" {class: built}
   context: "Context builder\nbrief + checklist + recent events + memory" {class: built}
-  triage: "Intake & triage\nfast model + rules · keyword fallback" {class: built}
+  triage: "Intake & triage\nfast model + rules · offers as chat choices" {class: built}
 }
 
 orchestrator: "3 · Orchestrator" {
   class: layer
   grid-columns: 3
+  supervisor: "Supervisor\nsees every run · starts · steers · stops agents" {class: built}
   planner: "Run planner\ncapability routing + coding-runner ranking\n(tiers · agent profiles next)" {class: partial}
   queue: "Durable queue + workers\nleases · recovery" {class: built}
   policy: "Policy & approvals\nmerge · deploy (buy · device later)" {class: built}
@@ -47,7 +48,7 @@ tiers: "4 · Execution tiers — cheapest that can do the job" {
   t0: "T0 direct action\nchecklists · remember · reminders" {class: built}
   t1: "T1 chat agent\nKimi · MiniMax" {class: built}
   t2: "T2 research agent\nweb search (MCP tools next)" {class: partial}
-  t3: "T3 coding workflow (isolated worker)\nKimi Code → MiniMax · repair pass\nsaved branch · PR → approve → merge" {class: built}
+  t3: "T3 coding agents (isolated worker, 2 at once)\nKimi Code ACP session → MiniMax · live progress\nsteering · repair pass · PR → approve → merge" {class: built}
 }
 
 external: "5 · External" {

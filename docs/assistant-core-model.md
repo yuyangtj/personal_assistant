@@ -82,7 +82,7 @@ effect (merge, deploy, purchase, device action) and push approval requests to th
 ## Migration path
 
 The detailed, phased plan (including deploying directly on the Hetzner server) is in
-[`implementation-plan.md`](implementation-plan.md).
+[`implementation-plan.md`](archive/implementation-plan.md).
 
 1. Add `spaces`, `work_items` (kind, brief, checklist, links), `chat_work_items`, and
    `tasks.work_item_id`. Backfill one work item per root task lineage.
