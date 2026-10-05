@@ -174,5 +174,13 @@ fi
 printf '%s\n' "${release_tag}" > "${CURRENT_TAG_FILE}"
 prune_release_images
 
+# `up -d` leaves Caddy running for a config-only change, and its single-file mount keeps
+# the old Caddyfile after a checkout replaces it: recreate it when the two differ.
+if ! "${compose[@]}" exec -T caddy cat /etc/caddy/Caddyfile 2>/dev/null \
+    | cmp -s - "${REPOSITORY_ROOT}/deploy/Caddyfile"; then
+    echo "The Caddyfile changed; restarting the web proxy..."
+    "${compose[@]}" up -d --no-deps --force-recreate caddy
+fi
+
 "${compose[@]}" ps
 echo "Deployment complete: https://$(sed -n 's/^ASSISTANT_DOMAIN=//p' "${ENV_FILE}" | tail -n 1)"

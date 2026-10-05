@@ -1,7 +1,11 @@
 {$ASSISTANT_DOMAIN} {
 	encode zstd gzip
 
-	basic_auth {
+	# The app manifest, icons and service worker are public: phones fetch them before
+	# signing in, and Android builds the installed app from Google's servers. They hold
+	# nothing private; everything else needs the console login.
+	@private not path /manifest.webmanifest /sw.js /icons/*
+	basic_auth @private {
 		{$ASSISTANT_WEB_USER} {$ASSISTANT_WEB_PASSWORD_HASH}
 	}
 
