@@ -23,6 +23,29 @@ def web_console() -> FileResponse:
 
 
 WEB_DIRECTORY = WEB_INDEX.parent
+#: The console's stylesheet and scripts, loaded by the page in this order.
+WEB_STATIC = {
+    "console.css": "text/css",
+    "state.js": "text/javascript",
+    "transcript.js": "text/javascript",
+    "drawer.js": "text/javascript",
+    "items.js": "text/javascript",
+    "phone.js": "text/javascript",
+    "events.js": "text/javascript",
+    "main.js": "text/javascript",
+}
+
+
+@router.get("/ui/static/{name}", include_in_schema=False)
+def web_static(name: str) -> FileResponse:
+    """The console's code, behind the same login as the page and revalidated on every load."""
+    if name not in WEB_STATIC:
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(
+        WEB_DIRECTORY / "static" / name,
+        media_type=WEB_STATIC[name],
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 #: Served without the console login: the installed app needs them before signing in, and
