@@ -2,8 +2,18 @@
 
 from fastapi import APIRouter
 
-from app.api import catalog, chat, memories, passkeys, speech, tasks, web, workflows
+from app.api import (
+    catalog,
+    chat,
+    memories,
+    passkeys,
+    purchases,
+    speech,
+    tasks,
+    web,
+    workflows,
+)
 
 router = APIRouter()
-for module in (chat, tasks, workflows, catalog, memories, passkeys, speech, web):
+for module in (chat, tasks, workflows, catalog, memories, passkeys, purchases, speech, web):
     router.include_router(module.router)

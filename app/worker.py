@@ -46,12 +46,14 @@ from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.schedules import Scheduler
 from app.services import TaskService
+from app.tools.klarna import KlarnaTools, ToolGateway
 from app.tools.mcp import McpGateway, Toolset
 from app.tools.search import build_search
 from app.validation import ValidationProfileRegistry
 from app.work.briefs import BriefWritebackJob, BriefWriter
 from app.work.items import configure_spaces
 from app.work.memory import MemoryService
+from app.work.purchases import PurchaseService
 from app.work.spaces import SpaceRegistry
 from app.workflows import WorkflowRegistry, WorkflowService
 
@@ -785,13 +787,22 @@ def main() -> None:
     if search is not None and conversation_executor is not None:
         executors[ToolAgentExecutor.id] = ToolAgentExecutor(conversation_executor.client, search)
         logger.info("Web research agent enabled with %s search", search.name)
-    if settings.mcp_gateway_url and conversation_executor is not None:
+    if conversation_executor is not None:
+        # Klarna purchases come from the database; the stores need the MCP gateway.
+        stores = (
+            McpGateway(settings.mcp_gateway_url, settings.mcp_gateway_token)
+            if settings.mcp_gateway_url
+            else None
+        )
         executors[GroceryAgentExecutor.id] = GroceryAgentExecutor(
             conversation_executor.client,
-            McpGateway(settings.mcp_gateway_url, settings.mcp_gateway_token),
+            ToolGateway(KlarnaTools(PurchaseService(database)), stores),
             Toolset.load(settings.toolsets_directory / "groceries.yaml"),
         )
-        logger.info("Grocery agent enabled through %s", settings.mcp_gateway_url)
+        logger.info(
+            "Shopping agent enabled: Klarna%s",
+            f", stores through {settings.mcp_gateway_url}" if stores else " only",
+        )
     provider_state_store = DatabaseProviderStateStore(database)
     coding_executor = build_coding_executor(
         settings,

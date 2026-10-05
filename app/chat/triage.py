@@ -124,7 +124,8 @@ Decide what the message needs:
   the list is not named.
 For propose_task, set "space" to the best-fitting slug from spaces (or null).
 Set "needs_grocery_tools": true when the message is about grocery offers, prices, receipts,
-purchases or grocery spending at the user's stores (Willys, Lidl); otherwise false.
+purchases or grocery spending at the user's stores (Willys, Lidl), or about the user's
+Klarna purchases or what they spent with Klarna; otherwise false.
 Set "about_work": true when the message asks for a code change, or asks about, changes,
 redirects or stops coding work that is under way ("how's the icon change going?", "make it
 a rocket instead", "stop that run", "is the PR ready?"); otherwise false.
@@ -139,7 +140,8 @@ direct_action)."""
 
 #: Keyword fallback for questions about the user's grocery stores.
 _GROCERY = re.compile(
-    r"\b(willys|lidl|grocer(y|ies)|matbutik\w*|erbjudande\w*|kvitto|kvitton|veckans erbjudanden)\b",
+    r"\b(willys|lidl|klarna|grocer(y|ies)|matbutik\w*|erbjudande\w*|kvitto|kvitton|"
+    r"veckans erbjudanden)\b",
     re.IGNORECASE,
 )
 
