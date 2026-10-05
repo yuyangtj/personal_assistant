@@ -3,93 +3,84 @@
 For the target model (work items, disposable chats, tiered agents) see
 [`assistant-core-model.md`](assistant-core-model.md).
 
-## Previous foundation
-
-```mermaid
-flowchart LR
-    client[HTTP client] --> api[FastAPI]
-    api --> service[Task service]
-    api -->|POST /speech, dedicated key| gemini[Gemini TTS only]
-    service --> db[(PostgreSQL)]
-    worker[Task worker] -->|claim queued task| db
-    worker --> fake[Hard-coded fake executor]
-    fake --> validation[Output validation]
-    validation --> service
-    service -->|ordered events| db
-
-    classDef boundary fill:#edf2f7,stroke:#64748b,color:#0f172a
-    classDef runtime fill:#dbeafe,stroke:#2563eb,color:#172554
-    classDef persistence fill:#dcfce7,stroke:#16a34a,color:#14532d
-    class client boundary
-    class api,service,worker,fake,validation runtime
-    class db persistence
-```
-
-The task lifecycle is reliable, but executor selection is embedded directly in
-the worker. Adding Kimi, a model, or a tool would require editing worker logic.
-
-## Current architecture
+## How a message is handled
 
 The full picture, with what is built, partial, and next, is
 [`personal-assistant-target-architecture.svg`](personal-assistant-target-architecture.svg).
-This diagram is the request path in the code today.
+This is the request path in the code today.
 
 ```mermaid
 flowchart LR
-    client[Web console / Android] --> caddy[Caddy HTTPS + login]
-    caddy --> api[FastAPI]
-    api --> service[Task service]
-    api --> items[Work item service]
-    service --> db[(PostgreSQL: tasks, events, chats, work items)]
-    items --> db
+    client[Web console · Android app] --> caddy[Caddy HTTPS + login]
+    caddy --> api[FastAPI · app/api]
+    api --> turns[app/chat/turns: what the message needs]
+    turns -->|open choices| choice[Resolve the picked option]
+    turns -->|quick action| t0[T0 direct action]
+    turns -->|about coding work| sup[Supervisor task]
+    turns -->|needs a decision| offer[Offer with choices]
+    turns -->|everything else| chat[Chat reply task]
 
-    manifests[YAML manifests] --> registry[Capability registry]
-    registry --> manager[Deterministic manager]
+    worker[General worker] -->|claims| sup
+    worker -->|claims| chat
+    sup --> tools[Supervisor tools: overview · start · steer · stop]
+    tools --> runs[(Coding runs)]
+    chat --> llm{Kimi · MiniMax}
 
-    worker[Task worker] -->|claim task| db
-    worker --> manager
-    manager -->|typed delegate decision| worker
-    worker --> conversation[Conversation executor]
-    conversation --> chat{Chat provider}
-    chat -->|primary| kimichat[Kimi]
-    chat -->|provider failure| minimaxchat[MiniMax]
-    worker -.->|idle thread| writeback[Brief write-back]
-    writeback --> chat
-
-    api --> workflows[Coding workflow: propose → approve → start]
-    workflows --> codingworker[Coding worker container]
-    codingworker --> worktree[Isolated Git worktree]
-    worktree --> runners[Kimi Code → Claude Code + MiniMax]
-    runners --> repair[Validate · one repair pass]
-    repair --> pr[Draft GitHub pull request]
-    pr --> approval[Exact-SHA human approval]
-    approval --> merge[GitHub merge API]
-    merge --> deploy[Approved deployment]
-    deploy --> deployer[Host deployer → redeploy + rollback]
+    coding[Coding worker, 2 at once] -->|claims| runs
+    coding --> session[Kimi Code ACP session · Claude Code fallback]
+    session -->|plan + steps| progress[Live progress events]
+    session --> pr[Draft PR → exact-SHA approval → merge → deploy]
 
     classDef current fill:#dbeafe,stroke:#2563eb,color:#172554
-    classDef persistence fill:#dcfce7,stroke:#16a34a,color:#14532d
-    class client,caddy,api,service,items,manifests,registry,manager,worker,conversation,chat,kimichat,minimaxchat,writeback,workflows,codingworker,worktree,runners,repair,pr,approval,merge,deploy,deployer current
-    class db persistence
+    class client,caddy,api,turns,choice,t0,sup,offer,chat,worker,tools,llm,coding,session,progress,pr current
 ```
 
-This capability-driven layer is now implemented. The manager returns only
-schema-validated actions. Application code still owns state transitions,
-adapter availability, cancellation, and validation. The conversation executor uses
-Kimi and MiniMax through one provider-neutral, preference-ordered fallback contract.
-The manager-model boundary uses the same failure-only provider-chain policy.
+- **Triage** decides per message, with a fast model checked by rules. Small talk gets a
+  chat reply, bookkeeping is done instantly (T0), and anything about coding work goes to
+  the **supervisor**.
+- **The supervisor** sees every run (state, the agent's plan and latest step, PR) and acts
+  through tools. It can start a coding agent, message a running one (a new turn in the
+  same session) or stop it. No tool can merge or deploy; those stay behind the approval
+  token in the console.
+- **Replies carry blocks.** These are choices, links, workflow and work-item cards,
+  rendered by pre-built console components. A choice is answered by clicking it or by
+  saying "yes" or "no".
+- **Coding agents** run as live sessions (Kimi Code over ACP), so their plan and steps
+  stream back as progress, and new instructions reach them while they work.
 
-Gemini is isolated from both model-selection paths. Only the API process receives
-`GEMINI_TTS_API_KEY`; `POST /speech` converts Gemini's raw 24 kHz PCM to WAV and keeps a
-bounded repeat-request cache. The Android client falls back to local TTS whenever this
-optional endpoint is unavailable.
+## Code map
 
-The coding workflow is a registered agent capability, while merge is deliberately
-outside manager routing. Coding tasks are only created by an approved coding workflow or
-a PR revision; the public task routes refuse coding capabilities. A code task publishes a
-draft PR and enters `waiting_for_approval`. The approval API binds consent to the recorded PR and its exact
-head SHA before invoking GitHub. GitHub branch protections remain an independent final
-gate.
+| Package | What lives there |
+|---|---|
+| `app/api` | One router per resource (chat, tasks, workflows, catalog, web, …) and shared helpers |
+| `app/chat` | Message handling: triage, offers, choices and other blocks, quick actions |
+| `app/assistant` | The supervisor and its overview of the work |
+| `app/coding` | Starting runs, the agents (runners, ACP sessions, one-shot processes), git, reports, the PR executor |
+| `app/services` | `TaskService`: chat, tasks, executions, approvals and progress over one database |
+| `app/work` | Work items, briefs, spaces, memory |
+| `app/execution` | The chat model and research agent executors |
+| `app/workflows`, `app/deployments` | Controlled workflows and deployment targets |
+| `app/web` | The console: `index.html` plus `static/` CSS and scripts, PWA files |
+| `android-assistant/shell` | The Android app: the console in a native shell |
+
+## Rules that hold everywhere
+
+The manager returns only schema-validated actions. Application code owns state
+transitions, adapter availability, cancellation and validation. Chat models are used
+through one provider-neutral fallback chain: Kimi and MiniMax.
+
+Gemini is used only for text-to-speech, and only the API process receives
+`GEMINI_TTS_API_KEY`.
+
+The coding workflow is a registered agent capability, while merging is deliberately
+outside routing.
+- **How coding starts:** coding tasks are created only by a coding run, which you start
+  in chat or the supervisor starts, or by a PR revision. The public task routes refuse
+  coding capabilities.
+- **What a coding task does:** it works on its own branch, publishes a draft PR, and
+  waits for approval.
+- **Merging:** the approval API binds consent to the recorded PR and its exact head SHA
+  before calling GitHub. GitHub branch protections remain an independent final gate.
 
 ## Manager-model boundary
 

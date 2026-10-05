@@ -1,409 +1,97 @@
-# Personal Assistant Core
+# Personal Assistant
 
-The working foundation of a persistent, capability-driven personal AI manager.
-It provides the task shell and capability-selection layer beneath future model,
-agent, tool, approval, and Slack integrations.
+A personal assistant you talk to: it answers, keeps track of ongoing work, and does work
+for you. Coding comes first: it starts coding agents on your repositories, reports their
+progress, lets you redirect them while they run, and opens pull requests for your review.
+Shopping, finance and home come later.
 
-## What works
+You use it through the web console (installable as an app) or the Android app, which is
+the same console plus voice, phone actions and on-device answers. It runs on one Hetzner
+server.
 
-- Create, inspect, list, annotate, and cancel tasks through HTTP.
-- Persist tasks and immutable, ordered task events in PostgreSQL.
-- Create, list, and resume durable chat sessions whose linked tasks provide model context.
-- Claim queued tasks safely with `FOR UPDATE SKIP LOCKED`.
-- Execute a deterministic fake capability in a separate worker.
-- Enforce task-state transitions in application code.
-- Validate executor output before completing a task.
-- Cooperatively cancel active executions.
-- Deduplicate externally sourced tasks with an idempotency key.
-- Load validated model, agent, and tool capability manifests from YAML.
-- Select the highest-priority enabled capability satisfying task requirements.
-- Record schema-validated manager decisions in the task event stream.
-- Route execution through configured adapters instead of hard-coded agents.
-- Inspect enabled and planned capabilities through the HTTP API.
-- Analyze tasks through a provider-neutral, strictly validated manager-model contract.
-- Retry malformed model output once without persisting raw responses.
-- Keep capability selection deterministic after model inference.
-- Run coding changes in isolated Git worktrees and publish dedicated draft pull requests.
-- Select coding targets from a trusted multi-repository registry rather than task-supplied paths.
-- Persist controlled workflow proposals and authenticated approval decisions with an audit log.
-- Persist coding-provider health and cooldown state across worker restarts.
-- Rank coding runners through an explainable task-profile and runtime-state decision engine.
-- Require an exact-head-SHA approval before the GitHub merge operation.
-- Deploy an approved merge on the server itself through a host deployer, with
-  automatic rollback to the previous release when the health check fails.
-- Track durable work items (goal, list, routine, watch) with a brief, checklist, and
-  links; chats focus on them, runs link to them, and a timeline merges their history.
+## How it works
 
-The fake executor remains as a credential-free fallback, and a scripted client
-exercises the manager inference boundary in tests. Kimi and MiniMax conversational
-execution and opt-in manager analysis are implemented. Coding runs only through an
-approved coding workflow, in an isolated coding worker: Kimi Code is the primary runner
-and Claude Code with MiniMax the fallback (Codex is supported but not installed on the
-server). A failed validation gets one repair pass, and work that still fails is saved to
-a `-validation-failed` branch.
+- **Chat first.** Each message is triaged:
+  - small talk gets a chat reply;
+  - bookkeeping ("add oat milk to #groceries", "remind me at 9") is done instantly;
+  - anything about coding work goes to the **supervisor**.
+- **The supervisor** sees every run. It can start a coding agent, look closer at one,
+  pass it new instructions while it works, or stop it. When something needs a decision,
+  the reply carries **choices** to click or answer with "yes".
+- **Coding agents** (Kimi Code, with Claude Code on MiniMax as fallback) work in isolated
+  worktrees, two at a time. Their plan and steps stream back live. Each opens a draft PR,
+  and only you can merge or deploy, with the approval token.
+- **Work items** (goals, lists, routines) hold a brief that later chats and runs build on.
+  Mention one with `#tag`.
 
-What is built, partial, and next is drawn in
+How a message flows through the code: [`docs/architecture.md`](docs/architecture.md).
+Chats, tasks and their API: [`docs/chats-and-tasks.md`](docs/chats-and-tasks.md).
+What is built and what is next:
 [`docs/personal-assistant-target-architecture.svg`](docs/personal-assistant-target-architecture.svg).
 
-The before-and-after architecture diagrams are in
-[`docs/architecture.md`](docs/architecture.md).
-The redesigned core model (spaces, work items, chats, runs, timeline) and tiered
-orchestration are in [`docs/assistant-core-model.md`](docs/assistant-core-model.md).
-The model-versus-authority boundary and workflow APIs are described in
-[`docs/controlled-workflows.md`](docs/controlled-workflows.md).
-Provider cooldown persistence and operational fields are described in
-[`docs/provider-runtime-state.md`](docs/provider-runtime-state.md).
-Coding task profiling and runner scoring are described in
-[`docs/coding-decision-engine.md`](docs/coding-decision-engine.md).
+## Repository map
 
-## Run with Docker
+| Path | What it is |
+|---|---|
+| `app/api` | HTTP routes, one module per resource |
+| `app/chat` | Message handling: triage, offers and choices, quick actions |
+| `app/assistant` | The supervisor and its overview of the work |
+| `app/coding` | Coding runs and agents: runners, live sessions, git, reports, PR executor |
+| `app/services` | The task service: chat, tasks, executions, approvals, progress |
+| `app/work` | Work items, briefs, spaces, memory |
+| `app/execution` | Chat model and research agent executors |
+| `app/web` | The console (`index.html`, `static/`) and its PWA files |
+| `app/worker.py`, `app/main.py` | Worker and API entry points |
+| `capabilities/`, `workflows/`, `repositories/`, `spaces/` | YAML configuration |
+| `migrations/` | Ordered SQL migrations (re-run on every deploy, so idempotent) |
+| `scripts/`, `deploy/` | Server deployment: host deployer, redeploy with rollback, Caddy |
+| `android-assistant/` | The Android app (`shell/`) and the paused 3D avatar (`avatar/`) |
+| `docs/` | Architecture, configuration, hosting, workflows |
 
-```bash
-docker compose up --build
-```
-
-This starts PostgreSQL, applies the ordered SQL files in `migrations/`, and runs the API
-and worker. The API is available at <http://localhost:8000>; interactive documentation
-is at <http://localhost:8000/docs>.
-
-The built-in browser console is available at <http://localhost:8000/>. To publish that
-console on a remote server with automatic HTTPS, login protection, and private backend
-containers, use the Phase 1 deployment in
-[`docs/remote-hosting.md`](docs/remote-hosting.md). Remote Android connectivity is kept
-as a separate Phase 2.
-
-Create a task:
+## Run it locally
 
 ```bash
-curl -X POST http://localhost:8000/tasks \
-  -H 'content-type: application/json' \
-  -d '{"request":"Research PostgreSQL hosting"}'
+docker compose up --build          # PostgreSQL, migrations, API and worker
+open http://localhost:8000         # the console; API docs at /docs
 ```
 
-Create a persistent conversation and attach tasks to it:
-
-```bash
-CHAT_ID=$(curl -s -X POST http://localhost:8000/chat-sessions \
-  -H 'content-type: application/json' -d '{}' | jq -r .id)
-curl -X POST http://localhost:8000/tasks \
-  -H 'content-type: application/json' \
-  -d "{\"request\":\"Remember that my project is Milo\",\"chat_session_id\":\"$CHAT_ID\"}"
-curl http://localhost:8000/chat-sessions
-curl http://localhost:8000/chat-sessions/$CHAT_ID/tasks
-```
-
-## Chats and tasks
-
-Chats are where you think and communicate; tasks are work launched from them. The two are
-linked by id, never by copying content, so task status is never duplicated or stale and
-the task event stream stays authoritative.
-
-Talking in a chat launches nothing. Posting a message stores the turn and, when it reads
-as a request for work, returns a `proposal` the client offers as "create a task?":
-
-```bash
-MESSAGE=$(curl -s -X POST http://localhost:8000/chat-sessions/$CHAT_ID/messages \
-  -H 'content-type: application/json' \
-  -d '{"content":"Add authentication to the API"}')
-echo "$MESSAGE" | jq .proposal
-```
-
-A proposal is advisory. Work starts only when the message is confirmed, which links the
-task to the message it came from (`origin_message_id`):
-
-```bash
-MESSAGE_ID=$(echo "$MESSAGE" | jq -r .message.id)
-curl -X POST http://localhost:8000/chat-sessions/$CHAT_ID/messages/$MESSAGE_ID/task \
-  -H 'content-type: application/json' -d '{}'
-```
-
-Confirming the same message twice returns the original task rather than starting the work
-again. A proposal marked `consequential` — anything touching a repository or a deployment
-— is the case clients must confirm before a conversation launches costly work.
-
-Going the other way, `POST /tasks/TASK_ID/chat-session` opens a task's conversation
-(backfilling one for older tasks) and posts a reference to the task: its status, result
-and artifacts. A follow-up continues the work as a new task that records its
-`parent_task_id`:
-
-```bash
-curl http://localhost:8000/tasks/TASK_ID/context
-curl -X POST http://localhost:8000/tasks/TASK_ID/follow-up \
-  -H 'content-type: application/json' \
-  -d '{"request":"Finish the Android part"}'
-```
-
-`GET /tasks/TASK_ID/context` is the curated view that follow-up prompts and chat
-references are built from: the original request, goal, status, final answer, validation
-verdict, artifact and pull-request references, and the failure message. Polling events,
-raw tool responses, diffs, execution inputs and token usage stay in the event stream and
-never reach a model prompt. Attach anything more by hand.
-
-Inspect it using the returned ID:
-
-```bash
-curl http://localhost:8000/tasks/TASK_ID
-curl http://localhost:8000/tasks/TASK_ID/events
-curl http://localhost:8000/tasks/TASK_ID/pending-approval
-```
-
-The pending-approval endpoint returns the latest approval request while the task is
-waiting for approval, or `404` when no approval is pending.
-
-Inspect the capability registry:
-
-```bash
-curl http://localhost:8000/capabilities
-curl 'http://localhost:8000/capabilities?include_disabled=false'
-```
-
-Inspect the repository registry:
-
-```bash
-curl http://localhost:8000/repositories
-```
-
-The built-in UI presents these repositories when creating a task. API callers select one
-by its stable ID (or registered alias):
-
-```bash
-curl -X POST http://localhost:8000/tasks \
-  -H 'content-type: application/json' \
-  -d '{
-    "request":"Add a cohort-retention example and tests",
-    "repository_id":"analytics-agent-playground",
-    "required_capabilities":["coding","pull_request_creation"]
-  }'
-```
-
-A caller may request capabilities without naming an executor:
-
-```bash
-curl -X POST http://localhost:8000/tasks \
-  -H 'content-type: application/json' \
-  -d '{
-    "request":"Inspect this repository",
-    "required_capabilities":["repository_analysis"]
-  }'
-```
-
-That example routes to the coding PR adapter only when its operator configuration is
-enabled. Otherwise it fails safely; no fallback executor silently receives work it
-cannot perform.
-
-## Run locally
-
-Start PostgreSQL and apply the migration, then:
+Or without Docker, with PostgreSQL running and the migrations applied:
 
 ```bash
 cp .env.example .env
 uv sync
 uv run uvicorn app.main:app --reload
+uv run python -m app.worker        # in another terminal
 ```
 
-In another terminal:
-
-```bash
-uv run python -m app.worker
-```
-
-Environment variables are read directly by the service; load `.env` with your
-preferred shell or process manager.
+Coding agents run in a separate, opt-in coding worker:
+`docker compose --profile coding up -d --build coding-worker`.
+Providers, models and other settings are described in
+[`docs/configuration.md`](docs/configuration.md).
 
 ## Tests
 
 ```bash
 uv run pytest
-uv run ruff check .
+uv run ruff check . && uv run ruff format --check .
 ```
 
-Tests use a temporary SQLite database. PostgreSQL remains the production and
-Docker Compose backend.
+Tests use a temporary SQLite database; PostgreSQL is used in Docker and production. CI
+runs the same checks on every pull request.
 
-## Current boundaries
+## Deploy
 
-There is no Slack or general tool integration yet. Kimi or MiniMax can independently
-provide conversational execution and manager analysis. Manager analysis is opt-in; the
-production worker keeps deterministic routing by default. The coding adapter is opt-in,
-targets only operator-registered repositories, and can try Kimi Code, Claude Code backed
-by MiniMax, and Codex in a configured order.
-
-## Coding agent and GitHub review workflow
-
-The `coding-pull-request` capability implements the first real agent workflow. It fetches
-the configured base branch, creates an isolated worktree and `assistant/task-...` branch,
-runs the first available configured coding runner, validates and commits the result, pushes the
-branch, and opens a draft pull request. The task then pauses in `waiting_for_approval`.
-Quota and rate-limit failures fall back to the next runner after restoring the disposable
-worktree to its clean starting commit. Durable phase checkpoints and worker leases let an
-interrupted run reconcile its branch and PR without repeating completed publication steps.
-
-Local Compose keeps coding execution opt-in. The normal `docker compose up` starts only
-chat and non-coding work. To test an approved coding workflow locally, export the Kimi,
-MiniMax, and GitHub credentials, then start the isolated coding profile:
-
-```bash
-docker compose --profile coding up -d --build coding-worker
-```
-
-By default it mounts this checkout as the registered `personal-assistant` repository and
-uses `.coding-worktrees/` for disposable task worktrees. Override
-`ASSISTANT_HOST_REPOSITORY_PERSONAL_ASSISTANT_PATH` when the trusted checkout lives
-elsewhere. Coding tasks remain queued when this profile is not running.
-
-Merge is intentionally not a manager capability. After human review,
-`GET /tasks/{task_id}/pull-request-status` reports live checks for the exact head. Both
-ready-for-review and `POST /tasks/{task_id}/pull-request-approval` require every
-manifest-declared check to pass. Merge approval also requires the exact reviewed head SHA
-and a separate `X-Assistant-Approval-Token`. A changed SHA, draft or closed PR, merge
-conflict, failed/missing check, or missing credential leaves the task unmerged. Explicit
-revisions supersede the old approval task, reuse the PR branch, and require a fresh
-exact-SHA approval. Configuration and examples are in
-[`docs/coding-pull-request-workflow.md`](docs/coding-pull-request-workflow.md).
-
-## Optional manager-model analysis
-
-Set `ASSISTANT_MANAGER_MODEL_ENABLED=true` to let Kimi or MiniMax infer a task's
-required capabilities before deterministic routing. Explicit `required_capabilities`
-still bypass the model. Responses are validated against the existing `TaskAnalysis`
-schema, invented capabilities are rejected, and one repair attempt is allowed.
-
-| Variable | Default |
-| --- | --- |
-| `ASSISTANT_MANAGER_MODEL_ENABLED` | `false` |
-| `ASSISTANT_MANAGER_MODEL_PROVIDER` | `kimi` (`kimi` or `minimax`) |
-| `ASSISTANT_MANAGER_MODEL_FALLBACK_PROVIDER` | `auto` (the other routine provider) |
-| `ASSISTANT_MANAGER_MODEL_BASE_URL` | unset; use the selected provider's URL |
-| `ASSISTANT_MANAGER_MODEL` | unset; use the selected provider's model |
-| `ASSISTANT_MANAGER_MODEL_TIMEOUT_SECONDS` | `30` |
-| `ASSISTANT_MANAGER_MODEL_MINIMUM_CONFIDENCE` | `0.5` |
-
-| Provider | Key | Provider URL | Default manager model |
-| --- | --- | --- | --- |
-| Kimi | `KIMI_API_KEY` / `ASSISTANT_KIMI_API_KEY` | `https://api.kimi.com/coding/v1` | `kimi-for-coding-highspeed` |
-| MiniMax | `MINIMAX_API_KEY` / `ASSISTANT_MINIMAX_API_KEY` | `https://api.minimax.chat/v1` | `MiniMax-M2.7-highspeed` |
-
-When manager analysis is enabled, an ordinary request can make two model calls:
-one to infer capabilities and one to execute the selected capability. Those calls
-may use different providers. Provider, model, latency, attempts, and token usage are
-recorded with the task analysis.
-
-For example, to analyze with Kimi while keeping the default MiniMax conversation
-provider:
-
-```bash
-ASSISTANT_MANAGER_MODEL_ENABLED=true \
-ASSISTANT_MANAGER_MODEL_PROVIDER=kimi \
-ASSISTANT_MANAGER_MODEL=kimi-for-coding-highspeed \
-docker compose up --build
-```
-
-## Conversational replies with Kimi or MiniMax
-
-The worker installs the provider-neutral `model-conversation` capability (priority 20)
-when at least one configured provider key is available. It answers everyday requests with short,
-speakable replies through an OpenAI-compatible API. Without that key, routing falls
-back to the fake executor, because only capabilities whose adapter is installed can be
-selected (`CapabilityRegistry.restricted_to_adapters`).
-
-| Variable | Default |
-| --- | --- |
-| `ASSISTANT_CONVERSATION_MODEL_PROVIDER` | `minimax` (`kimi` or `minimax`) |
-| `ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER` | `auto` (the other routine provider) |
-| `ASSISTANT_CONVERSATION_MODEL_BASE_URL` | unset; use the selected provider's URL |
-| `ASSISTANT_CONVERSATION_MODEL` | unset; use the selected provider's model |
-| `ASSISTANT_CONVERSATION_MODEL_TIMEOUT_SECONDS` | unset; use the provider timeout |
-| `KIMI_API_KEY` / `ASSISTANT_KIMI_API_KEY` | unset |
-| `ASSISTANT_KIMI_BASE_URL` | `https://api.kimi.com/coding/v1` |
-| `ASSISTANT_KIMI_MODEL` | `kimi-for-coding-highspeed` (about 1.5–2 s per reply) |
-| `ASSISTANT_KIMI_TIMEOUT_SECONDS` | `30` |
-| `MINIMAX_API_KEY` / `ASSISTANT_MINIMAX_API_KEY` | unset |
-| `ASSISTANT_MINIMAX_BASE_URL` | `https://api.minimax.chat/v1` |
-| `ASSISTANT_MINIMAX_MODEL` | `MiniMax-M2.7-highspeed` |
-| `ASSISTANT_MINIMAX_TIMEOUT_SECONDS` | `30` |
-
-- Replies are one to three spoken sentences with an emotion (`Warm`, `Curious`,
-  `Excited`, `Concerned`, `Neutral`).
-- The model can propose confirmation-gated timers, alarms, and calendar events, but it
-  cannot read accounts or claim that an action has already happened.
-- Tasks with the same `source_context.conversation_id` share context: the last six
-  completed turns are sent along with the request.
-- A reply may carry one validated phone `action` (`set_timer`, `set_alarm`,
-  `create_event`) that clients run only after user confirmation. Unsupported or malformed
-  actions are dropped, and a reply that promised one is replaced with an honest failure
-  message. Clients send `local_time` and `timezone` in `source_context` so relative dates
-  resolve correctly.
-- One-time alarms carry a local date and are accepted only when that date is the next
-  occurrence of the requested clock time. Arbitrary future dates are rejected rather
-  than silently scheduling the wrong day.
-- Model, latency and token usage are recorded in `EXECUTION_OUTPUT_RECEIVED`. The API key
-  is only read from the environment and never logged.
-
-When both keys are configured, routine calls try the selected provider first and retry
-the other provider only after a sanitized timeout or provider failure. `auto` chooses
-MiniMax after Kimi, or Kimi after MiniMax. Set either fallback variable to `off` to use
-only the primary provider. Events record the provider and model that actually succeeded.
-
-For example, use MiniMax M3 for replies while leaving manager analysis disabled:
-
-```bash
-ASSISTANT_CONVERSATION_MODEL_PROVIDER=minimax \
-ASSISTANT_CONVERSATION_MODEL=MiniMax-M3 \
-docker compose up --build
-```
-
-Docker Compose passes both provider keys through from the host shell:
-
-```bash
-ASSISTANT_API_PORT=8010 ASSISTANT_POSTGRES_PORT=55433 docker compose up --build -d
-```
-
-## Gemini speech only
-
-Set `GEMINI_TTS_API_KEY` to enable `POST /speech`. This is a deliberately narrow,
-audio-only integration: the key is passed to the API service but not the worker, so
-Gemini cannot be selected for conversation or manager analysis. The endpoint accepts up
-to 600 characters and returns a 24 kHz mono WAV using
-`gemini-3.1-flash-tts-preview` and the friendly `Achird` voice by default.
-
-Identical text and emotion pairs are cached in memory (128 entries by default) to avoid
-repeat billable requests. The Android client downloads the WAV into app-private cache;
-if Gemini is unavailable, slow, or the reply exceeds the cloud limit, it automatically
-uses Android's on-device English TTS instead.
-
-## Assistant replies
-
-Every finished task gets an `ASSISTANT_REPLY` event just before its terminal event:
-`{"text", "emotion", "intensity", "outcome"}`. The text is safe to show or speak to the
-user. Completed tasks use the executor's `reply` output (falling back to its `summary`);
-failures and cancellations use fixed messages without internal error details.
-
-Other local services may already use ports 8000 and 5432. The Compose host ports are
-configurable:
-
-```bash
-ASSISTANT_API_PORT=8010 ASSISTANT_POSTGRES_PORT=55433 docker compose up --build -d
-```
-
-## Android assistant
-
-[`android-assistant/`](android-assistant/README.md) contains the Android client
-prototype: a Unity avatar with pronunciation-accurate English lip-sync, a native
-Kotlin shell, and two characters.
+Merged changes are deployed from the console through an approved deployment workflow. The
+server's host deployer builds tagged images, checks health, and rolls back automatically.
+Setup and operations are covered in [`docs/remote-hosting.md`](docs/remote-hosting.md).
 
 ## Credits
 
-- **"Cool Man" 3D character** by [ardhanaputra](https://sketchfab.com/ardhanaputra),
-  from [Sketchfab](https://sketchfab.com/3d-models/cool-man-ad14b71697dd4ea7836c1f06c75e5f72),
-  licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/).
-  Modified for this project (rig clean-up, merged meshes, generated facial
-  blendshapes, mouth interior, status light). Full details are in
-  [`android-assistant/docs/credits.md`](android-assistant/docs/credits.md).
-- English pronunciations derive from the CMU Pronouncing Dictionary
-  (Carnegie Mellon University, BSD-style licence).
-Trusted validation, SHA-guarded PR revision, registered deployment targets, explicit memory, and
-bounded provider outcome learning are described in
-[`docs/trusted-execution-and-learning.md`](docs/trusted-execution-and-learning.md).
-The explicit post-merge deployment gate and required GitHub environment secrets are in
-[`docs/controlled-workflows.md`](docs/controlled-workflows.md) and
-[`docs/remote-hosting.md`](docs/remote-hosting.md).
+- **"Cool Man" 3D character** (paused avatar client) by
+  [ardhanaputra](https://sketchfab.com/ardhanaputra), from
+  [Sketchfab](https://sketchfab.com/3d-models/cool-man-ad14b71697dd4ea7836c1f06c75e5f72),
+  licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) and modified for
+  this project. Details:
+  [`android-assistant/avatar/docs/credits.md`](android-assistant/avatar/docs/credits.md).
+- English pronunciations derive from the CMU Pronouncing Dictionary (Carnegie Mellon
+  University, BSD-style licence).
