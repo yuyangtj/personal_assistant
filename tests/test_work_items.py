@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 from app.domain.enums import TaskStatus
 from app.persistence.database import Database
 from app.persistence.models import CodingRunModel, TaskModel
-from app.service import TaskService
-from app.work_items import WorkItemService
+from app.services import TaskService
+from app.work.items import WorkItemService
 
 
 def _chat(client: TestClient) -> str:

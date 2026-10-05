@@ -1,4 +1,4 @@
-from app.decision.coding import (
+from app.coding.decision.coding import (
     CodingDecision,
     CodingDecisionEngine,
     CodingRunnerManifest,

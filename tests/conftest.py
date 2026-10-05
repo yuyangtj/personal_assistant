@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
 from app.persistence.database import Database
-from app.service import TaskService
+from app.services import TaskService
 
 
 @pytest.fixture

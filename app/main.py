@@ -5,23 +5,23 @@ from fastapi import FastAPI
 from app.api.routes import router
 from app.api.work_items import router as work_items_router
 from app.capabilities import CapabilityRegistry
+from app.chat.triage import Triager
+from app.coding.decision import CodingRunnerRegistry
 from app.config import Settings
-from app.decision import CodingRunnerRegistry
 from app.deployments import DeploymentRegistry, HostDeployerSpool
 from app.integrations.factory import triage_client
 from app.integrations.gemini_tts import GeminiTtsClient
 from app.integrations.github import GitHubClient
 from app.integrations.speech import CachedSpeechSynthesizer
-from app.memory import MemoryService
 from app.persistence.database import Database
 from app.providers import DatabaseProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.schedules import ScheduleService
-from app.service import TaskService
-from app.spaces import SpaceRegistry
-from app.triage import Triager
+from app.services import TaskService
 from app.validation import ValidationProfileRegistry
-from app.work_items import WorkItemService, configure_spaces
+from app.work.items import WorkItemService, configure_spaces
+from app.work.memory import MemoryService
+from app.work.spaces import SpaceRegistry
 from app.workflows import WorkflowRegistry, WorkflowService
 
 

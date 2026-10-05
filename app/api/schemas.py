@@ -6,15 +6,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.capabilities.models import CapabilityManifest
-from app.decision import CodingRunnerManifest
+from app.coding.decision import CodingRunnerManifest
 from app.deployments import DeploymentTarget
 from app.domain.enums import EventType, TaskStatus
-from app.domain.work_items import (
-    Brief,
-    WorkItemKind,
-    WorkItemLink,
-    WorkItemStatus,
-)
+from app.domain.work_items import Brief, WorkItemKind, WorkItemLink, WorkItemStatus
 from app.persistence.models import (
     ChatMessageModel,
     SpaceModel,
@@ -98,7 +93,7 @@ class ChatMessageResponse(BaseModel):
     role: Literal["user", "assistant", "system"]
     content: str
     linked_task_id: str | None
-    #: Choices, links and cards to render under the text (see app.blocks).
+    #: Choices, links and cards to render under the text (see app.chat.blocks).
     blocks: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
 

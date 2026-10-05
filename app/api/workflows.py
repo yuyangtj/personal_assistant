@@ -16,11 +16,11 @@ from app.api.schemas import (
     WorkflowRunListResponse,
     WorkflowRunResponse,
 )
-from app.coding_flow import start_coding_task
+from app.coding.flow import start_coding_task
 from app.deployments import HostDeployerSpoolError
 from app.domain.enums import TaskStatus
 from app.integrations.github import GitHubError
-from app.service import TaskNotFoundError
+from app.services import TaskNotFoundError
 from app.workflows import (
     WorkflowIntegrationUnavailableError,
     WorkflowRunConflictError,

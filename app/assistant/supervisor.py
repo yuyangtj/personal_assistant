@@ -21,19 +21,19 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 
-from app.blocks import model_blocks
-from app.coding_flow import revise_pull_request, start_coding_run
+from app.assistant.overview import RunView, coding_runs, render_overview
+from app.chat.blocks import model_blocks
+from app.coding.flow import revise_pull_request, start_coding_run
 from app.domain.enums import EventType, TaskStatus
 from app.domain.work_items import render_work_item_context
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.integrations.chat import ChatClient, ChatMessage
 from app.integrations.model_json import extract_json_object
-from app.overview import RunView, coding_runs, render_overview
 from app.persistence.database import Database
 from app.persistence.models import TaskEventModel
 from app.repositories import RepositoryRegistry
-from app.service import TaskService
+from app.services import TaskService
 from app.workflows import WorkflowService
 
 logger = logging.getLogger(__name__)

@@ -5,10 +5,10 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app.blocks import model_blocks, validate_blocks
+from app.chat.blocks import model_blocks, validate_blocks
+from app.chat.offers import match_choice
+from app.chat.triage import Triager
 from app.execution.conversation import reply_blocks
-from app.offers import match_choice
-from app.triage import Triager
 from tests.test_triage import ScriptedChat, suggestion
 
 CODING = suggestion(

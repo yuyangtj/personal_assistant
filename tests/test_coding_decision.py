@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 
-from app.decision import CodingDecisionEngine, CodingRunnerRegistry, TaskComplexity
-from app.execution.coding import CodeAgentReport, FallbackCodeAgentRunner
+from app.coding.base import CodeAgentReport
+from app.coding.decision import CodingDecisionEngine, CodingRunnerRegistry, TaskComplexity
+from app.coding.runners import FallbackCodeAgentRunner
 from app.providers import InMemoryProviderStateStore
 
 

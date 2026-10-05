@@ -11,23 +11,22 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from time import monotonic
 
-from app.briefs import BriefWritebackJob, BriefWriter
+from app.assistant.supervisor import SupervisorExecutor, SupervisorTools
 from app.capabilities import CapabilityRegistry
-from app.coding_runs import CodingRunStore
-from app.config import Settings
-from app.decision import CodingDecisionEngine, CodingRunnerRegistry
-from app.deployments import DeploymentRegistry, HostDeployerSpool
-from app.execution import ConversationExecutor, Executor, FakeExecutor
-from app.execution.coding import (
+from app.coding.base import CodeAgentRunner
+from app.coding.decision import CodingDecisionEngine, CodingRunnerRegistry
+from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
+from app.coding.runners import (
     ClaudeCodeMiniMaxRunner,
-    CodeAgentRunner,
     CodexCliRunner,
-    CodingPullRequestExecutor,
     FallbackCodeAgentRunner,
     KimiAcpRunner,
     KimiCodeCliRunner,
-    RepositoryCodingExecutor,
 )
+from app.coding.runs import CodingRunStore
+from app.config import Settings
+from app.deployments import DeploymentRegistry, HostDeployerSpool
+from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.fake import ExecutionCancelled
 from app.execution.tool_agent import ToolAgentExecutor
 from app.integrations.factory import chat_client_chain
@@ -39,18 +38,18 @@ from app.integrations.minimax import MiniMaxManagerModelClient
 from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
 from app.manager.decisions import DelegateDecision, FailDecision
 from app.manager.model import ManagerModelClient, ValidatedManagerModelAdapter
-from app.memory import MemoryService
 from app.notify import Notifier, NullNotifier, build_notifier
 from app.persistence.database import Database
 from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.schedules import Scheduler
-from app.service import TaskService
-from app.spaces import SpaceRegistry
-from app.supervisor import SupervisorExecutor, SupervisorTools
+from app.services import TaskService
 from app.tools.search import build_search
 from app.validation import ValidationProfileRegistry
-from app.work_items import configure_spaces
+from app.work.briefs import BriefWritebackJob, BriefWriter
+from app.work.items import configure_spaces
+from app.work.memory import MemoryService
+from app.work.spaces import SpaceRegistry
 from app.workflows import WorkflowRegistry, WorkflowService
 
 logger = logging.getLogger(__name__)

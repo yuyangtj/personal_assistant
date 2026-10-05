@@ -5,11 +5,11 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from fastapi.testclient import TestClient
 
+from app.chat.triage import Triager
 from app.notify import NtfyNotifier
 from app.persistence.database import Database
 from app.schedules import Recurrence, ScheduleKind, Scheduler, ScheduleService, next_occurrence
-from app.service import TaskService
-from app.triage import Triager
+from app.services import TaskService
 from tests.test_triage import ScriptedChat, suggestion
 
 

@@ -19,7 +19,7 @@ from app.manager import DeterministicManager
 from app.persistence.database import Database
 from app.persistence.models import CodingRunModel, TaskModel
 from app.repositories import RepositoryRegistry
-from app.service import TaskService
+from app.services import TaskService
 from app.worker import TaskWorker
 from app.workflows import (
     WorkflowIntegrationUnavailableError,

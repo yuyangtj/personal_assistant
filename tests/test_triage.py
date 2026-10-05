@@ -5,10 +5,10 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from app.chat.triage import TriageIntent, Triager
 from app.execution.conversation import SYSTEM_PROMPT as CONVERSATION_PROMPT
 from app.integrations.chat import ChatCompletion, ChatMessage
 from app.repositories import RepositoryRegistry
-from app.triage import TriageIntent, Triager
 
 
 class ScriptedChat:

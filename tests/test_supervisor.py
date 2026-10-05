@@ -4,8 +4,8 @@ import json
 
 from fastapi.testclient import TestClient
 
+from app.assistant.supervisor import SupervisorExecutor, SupervisorTools
 from app.execution.base import ConversationTurn
-from app.supervisor import SupervisorExecutor, SupervisorTools
 from tests.test_triage import ScriptedChat
 
 
@@ -309,8 +309,8 @@ def test_a_repair_prompt_restates_the_users_question(client: TestClient) -> None
 
 
 def test_only_links_the_supervisor_was_given_survive(client: TestClient) -> None:
-    from app.coding_flow import start_coding_run
-    from app.coding_runs import CodingRunPhase, CodingRunStore
+    from app.coding.flow import start_coding_run
+    from app.coding.runs import CodingRunPhase, CodingRunStore
 
     state = client.app.state
     chat, message = _chat_with_message(client, "fix the toggle")
@@ -374,7 +374,7 @@ def test_a_reply_that_stops_at_a_heading_is_asked_to_finish(client: TestClient) 
 
 
 def test_urls_in_the_reply_become_buttons_or_are_dropped(client: TestClient) -> None:
-    from app.supervisor import _without_urls
+    from app.assistant.supervisor import _without_urls
 
     text, found = _without_urls(
         "PR #35 is waiting your review at https://github.com/acme/w/pull/35. "

@@ -28,13 +28,13 @@ from app.api.schemas import (
     WorkflowRunResponse,
 )
 from app.chat.turns import propose_coding_run, triage_message
-from app.service import (
+from app.services import (
     ChatMessageNotFoundError,
     ChatSessionNotFoundError,
     MessageHasWorkflowError,
     TaskNotFoundError,
 )
-from app.work_items import WorkItemNotFoundError
+from app.work.items import WorkItemNotFoundError
 
 router = APIRouter()
 
