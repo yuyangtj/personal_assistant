@@ -13,6 +13,7 @@ from app.domain.work_items import render_work_item_context
 from app.execution.actions import alarm_matches_next_occurrence, validate_action
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
+from app.execution.routine_context import notable, routine_prompt
 from app.integrations.chat import ChatClient, ChatMessage
 
 ALLOWED_EMOTIONS = ("Warm", "Curious", "Excited", "Concerned", "Neutral")
@@ -106,6 +107,7 @@ class ConversationExecutor:
                 "emotion": emotion,
                 "action": action,
                 "blocks": reply_blocks(completion.text),
+                "notable": notable(completion.text),
                 "executor": self.id,
                 "provider": completion.provider or self.client.provider,
                 "model": completion.model,
@@ -158,6 +160,9 @@ class ConversationExecutor:
                         "unprompted:\n- " + "\n- ".join(lines),
                     )
                 )
+        routine = routine_prompt(context)
+        if routine:
+            messages.append(ChatMessage("system", routine))
         for turn in history:
             messages.append(ChatMessage("user", turn.request))
             messages.append(ChatMessage("assistant", json.dumps({"reply": turn.reply})))

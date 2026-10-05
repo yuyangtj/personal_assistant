@@ -92,6 +92,8 @@ class ScheduleService:
         timezone: str = "UTC",
         work_item_id: str | None = None,
         chat_session_id: str | None = None,
+        capabilities: list[str] | None = None,
+        quiet: bool = False,
     ) -> ScheduleModel:
         normalized = " ".join(message.split())
         if not normalized or len(normalized) > 500:
@@ -110,6 +112,8 @@ class ScheduleService:
                 next_run_at=run_at.astimezone(UTC),
                 recurrence=Recurrence(recurrence).value,
                 timezone=timezone,
+                capabilities=capabilities,
+                quiet=quiet,
                 active=True,
             )
             session.add(schedule)
@@ -126,6 +130,13 @@ class ScheduleService:
             statement = statement.where(ScheduleModel.active.is_(True))
         with self.database.session() as session:
             return list(session.scalars(statement.order_by(ScheduleModel.next_run_at)))
+
+    def get(self, schedule_id: str) -> ScheduleModel:
+        with self.database.session() as session:
+            schedule = session.get(ScheduleModel, schedule_id)
+            if schedule is None:
+                raise ScheduleNotFoundError(schedule_id)
+            return schedule
 
     def cancel(self, schedule_id: str) -> ScheduleModel:
         with self.database.session() as session, session.begin():
@@ -206,9 +217,5 @@ class Scheduler:
                     )
             self.notifier.send("Reminder", text, priority=4)
             return
-        task_id = self.start_run(schedule)
-        self.notifier.send(
-            "Routine started",
-            f"{schedule.message}{tag}",
-            path=f"/?task={task_id}" if task_id else "",
-        )
+        # The run itself pushes its result when it finishes (see the worker).
+        self.start_run(schedule)

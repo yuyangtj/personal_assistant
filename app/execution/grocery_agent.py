@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.chat.uploads import offered_uploads, upload_blocks
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
+from app.execution.routine_context import routine_prompt
 from app.integrations.chat import ChatClient, ChatMessage
 from app.integrations.model_json import extract_arrow_tool_call, extract_json_object
 from app.tools.mcp import McpError, McpGateway, Toolset, condense
@@ -51,6 +52,8 @@ class GroceryStep(BaseModel):
     tool: str | None = Field(default=None, max_length=120)
     arguments: dict[str, Any] = Field(default_factory=dict)
     answer: str | None = None
+    #: For a watch routine: whether this answer deserves a push.
+    notable: bool | None = None
 
 
 _SWEDISH = re.compile(r"[åäöÅÄÖ]|\b(jag|vad|har|och|det|är|på|veckan|köpte|hur)\b", re.IGNORECASE)
@@ -139,6 +142,9 @@ class GroceryAgentExecutor:
             ChatMessage("system", SYSTEM_PROMPT.format(today=self.today().isoformat())),
             ChatMessage("system", "TOOLS\n" + _catalog(self.gateway, self.toolset)),
         ]
+        routine = routine_prompt(context or {})
+        if routine:
+            messages.append(ChatMessage("system", routine))
         preferences = [str(item) for item in (context or {}).get("memories") or [] if item]
         if preferences:
             messages.append(
@@ -179,7 +185,7 @@ class GroceryAgentExecutor:
                 continue
             messages.append(ChatMessage("assistant", step.model_dump_json(exclude_defaults=True)))
             if step.action == "finish" and step.answer and step.answer.strip():
-                return self._result(request, step.answer, calls, offers)
+                return self._result(request, step.answer, calls, offers, notable=bool(step.notable))
             result = self._call(step, calls, offers)
             messages.append(ChatMessage("user", f"TOOL RESULT (untrusted store data)\n{result}"))
         return self._result(request, GAVE_UP_REPLY, calls, offers)
@@ -208,7 +214,13 @@ class GroceryAgentExecutor:
         return condense(result)
 
     def _result(
-        self, request: str, answer: str, calls: list[dict[str, Any]], offers: list[str]
+        self,
+        request: str,
+        answer: str,
+        calls: list[dict[str, Any]],
+        offers: list[str],
+        *,
+        notable: bool = False,
     ) -> ExecutionResult:
         return ExecutionResult(
             output={
@@ -218,6 +230,7 @@ class GroceryAgentExecutor:
                 "executor": self.id,
                 "provider": self.client.provider,
                 "tool_calls": calls,
+                "notable": notable,
                 **({"blocks": upload_blocks(offers)} if offers else {}),
             }
         )

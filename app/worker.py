@@ -13,6 +13,8 @@ from time import monotonic
 
 from app.assistant.supervisor import SupervisorExecutor, SupervisorTools
 from app.capabilities import CapabilityRegistry
+from app.chat.routines import start_routine as run_routine
+from app.chat.triage import Triager
 from app.coding.base import CodeAgentRunner
 from app.coding.decision import CodingDecisionEngine, CodingRunnerRegistry
 from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
@@ -42,6 +44,7 @@ from app.manager.decisions import DelegateDecision, FailDecision
 from app.manager.model import ManagerModelClient, ValidatedManagerModelAdapter
 from app.notify import Notifier, NullNotifier, build_notifier
 from app.persistence.database import Database
+from app.persistence.models import ScheduleModel
 from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.schedules import Scheduler
@@ -528,6 +531,14 @@ class TaskWorker:
                 return True
 
             execution_context = dict(task.source_context or {})
+            routine = self._routine(task)
+            if routine is not None:
+                # A routine compares with what its earlier runs found; a watch says whether
+                # this result is worth a push.
+                execution_context["routine"] = {
+                    "watch": routine.quiet,
+                    "previous_runs": self.service.routine_results(task),
+                }
             if executor.id == "coding-pull-request":
                 execution_context["progress"] = ProgressReporter(self.service, task.id)
                 execution_context["guidance"] = GuidanceInbox(self.service, task.id)
@@ -597,6 +608,12 @@ class TaskWorker:
                 action=result.output.get("action"),
                 blocks=result.output.get("blocks"),
             )
+            if routine is not None and (not routine.quiet or result.output.get("notable")):
+                self.notifier.send(
+                    f"Routine: {routine.message[:60]}",
+                    str(reply)[:300],
+                    path=f"/?task={task.id}",
+                )
         except ExecutionCancelled:
             if execution_id is not None:
                 self.service.finish_cancelled_execution(execution_id)
@@ -621,6 +638,13 @@ class TaskWorker:
             heartbeat.stop()
             self._sync_workflow(task.id)
         return True
+
+    def _routine(self, task) -> ScheduleModel | None:
+        schedule_id = (task.source_context or {}).get("schedule_id")
+        if not schedule_id:
+            return None
+        with self.service.database.session() as session:
+            return session.get(ScheduleModel, schedule_id)
 
     def _sync_workflow(self, task_id: str) -> None:
         if self.workflow_service is None:
@@ -831,14 +855,11 @@ def main() -> None:
         settings.ntfy_topic_url, token=settings.ntfy_token, public_url=settings.public_url
     )
 
+    # Routines saved before they were routed at creation fall back to keyword rules.
+    routine_fallback = Triager(repositories, groceries_available=True)
+
     def start_routine(schedule) -> str | None:
-        task = task_service.create_task(
-            request=schedule.message,
-            chat_session_id=schedule.chat_session_id,
-            work_item_id=schedule.work_item_id,
-            source_context={"schedule_id": schedule.id, "timezone": schedule.timezone},
-        )
-        return task.id
+        return run_routine(task_service, schedule, fallback=routine_fallback)
 
     if not settings.worker_coding_only:
         logger.info(

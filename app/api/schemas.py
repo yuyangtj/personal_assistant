@@ -598,6 +598,8 @@ class ScheduleResponse(BaseModel):
     next_run_at: datetime
     recurrence: str
     timezone: str
+    capabilities: list[str] | None = None
+    quiet: bool = False
     active: bool
     last_run_at: datetime | None
 

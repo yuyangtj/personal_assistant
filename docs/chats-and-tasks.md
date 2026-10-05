@@ -96,3 +96,25 @@ curl -X POST http://localhost:8000/tasks \
 That example routes to the coding PR adapter only when its operator configuration is
 enabled. Otherwise it fails safely; no fallback executor silently receives work it
 cannot perform.
+
+## Routines: repeatable jobs
+
+A routine is a saved instruction the assistant carries out on a schedule, or on demand:
+"every month on the 1st at 9, analyze my Klarna spending", or "every Monday at 8, tell
+me when Zoégas coffee is under 50 kr at Willys". It is the assistant's equivalent of a
+skill; there is no separate workflow engine (`app/chat/routines.py`).
+
+- **Routed once.** When a routine is saved, its instruction is triaged like a chat
+  message. The route is stored on the schedule (`capabilities`): Klarna and the stores go to
+  the shopping agent, web questions to research, coding work to the supervisor. Every run
+  goes there. Routines saved before this use the keyword rules when they fire.
+- **Compares with itself.** Each run gets the last three results of the same routine
+  (`routine_results`), so it can say "up 18% on last month" or "down from 54 to 45 kr".
+- **Delivers.** The result posts in the routine's chat and is pushed to the phone. A
+  **watch** (the instruction says "tell me when/if …" or "only if …") still posts every
+  result, but only pushes when the agent marks it `"notable": true`.
+- **From chat:** "what routines do I have?" lists them with Run and Stop choices; "run my
+  Klarna review now" runs one in the current chat; "stop the coffee watch" cancels one,
+  asking which when several match.
+- **Prices outside the grocery stores** need the research agent, so a Tavily or Brave
+  search key has to be configured.

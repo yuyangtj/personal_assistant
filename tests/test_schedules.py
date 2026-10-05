@@ -104,7 +104,8 @@ def test_routines_start_a_run(database: Database, service: TaskService) -> None:
     Scheduler(database, start_run=start_run, notifier=notifier, clock=lambda: now).run_due()
 
     assert started == ["Summarize my open work"]
-    assert notifier.sent[0][0] == "Routine started"
+    # The run pushes its result when it finishes (worker), not that it started.
+    assert notifier.sent == []
 
 
 # --- ntfy -----------------------------------------------------------------------------
