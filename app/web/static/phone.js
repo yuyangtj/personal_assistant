@@ -5,7 +5,7 @@
 // replies, timers and alarms, and simple answers that stay on the phone. In a browser
 // none of this exists and the console works as before.
 const phone = { bridge: window.AndroidAssistant || null, caps: null, routes: new Map(), next: 0,
-                turns: {}, speakFor: null, listening: false, dictated: false };
+                turns: {}, speakFor: null, listening: false, dictated: false, dictationBase: "" };
 
 function phoneSend(message) { phone.bridge.postMessage(JSON.stringify(message)); }
 
@@ -78,6 +78,9 @@ function speakReplyIfWaiting() {
   phoneSend({ type: "speak", text: reply.content });
 }
 
+const withDictation = (text) =>
+  [phone.dictationBase, (text || "").trim()].filter(Boolean).join(" ");
+
 function showListening(listening) {
   phone.listening = listening;
   $("mic").classList.toggle("listening", listening);
@@ -105,13 +108,16 @@ function onPhoneMessage(message) {
     if (message.type === "capabilities") $("mic").hidden = !message.voice;
     renderDeviceAi(phone.caps);
   } else if (message.type === "voice") {
-    if (message.state === "listening") showListening(true);
-    else if (message.state === "partial") $("input").value = message.text || "";
+    if (message.state === "listening") {
+      // Dictation adds to what is already in the box instead of replacing it.
+      phone.dictationBase = $("input").value.trimEnd();
+      showListening(true);
+    } else if (message.state === "partial") $("input").value = withDictation(message.text);
     else if (message.state === "final") {
       showListening(false);
       // Into the box to check or edit first; the reply is still spoken when it's sent.
-      $("input").value = message.text || "";
-      phone.dictated = Boolean(message.text);
+      $("input").value = withDictation(message.text);
+      phone.dictated = phone.dictated || Boolean(message.text);
       $("input").focus();
     } else if (message.state === "error") {
       showListening(false);

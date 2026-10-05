@@ -120,6 +120,7 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
 
     private fun listen(created: SpeechRecognizer, onDevice: Boolean, language: String) {
         this.language = language
+        lastPartial = ""
         usingOnDevice = onDevice
         Log.i(TAG, "Listening ${if (onDevice) "on the phone" else "online"} in $language")
         recognizer = created
@@ -143,6 +144,9 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
         recognizer = null
     }
 
+    /** What was heard so far; the on-device recognizer's final result is sometimes empty. */
+    private var lastPartial = ""
+
     /** A language checker kept alive while its model download request is handed over. */
     private var spare: SpeechRecognizer? = null
 
@@ -158,11 +162,14 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
-            firstResult(partialResults)?.let(listener::onPartialTranscript)
+            firstResult(partialResults)?.takeIf { it.isNotBlank() }?.let {
+                lastPartial = it
+                listener.onPartialTranscript(it)
+            }
         }
 
         override fun onResults(results: Bundle?) {
-            val text = firstResult(results).orEmpty()
+            val text = firstResult(results)?.takeIf { it.isNotBlank() } ?: lastPartial
             release()
             if (text.isBlank()) listener.onError("I didn’t catch that. Tap the circle to try again.")
             else listener.onFinalTranscript(text)
@@ -170,6 +177,13 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
 
         override fun onError(error: Int) {
             Log.i(TAG, "Recognition error $error (${if (usingOnDevice) "on the phone" else "online"})")
+            if (lastPartial.isNotBlank()) {
+                // Something was heard before the error: keep it rather than lose it.
+                val heard = lastPartial
+                release()
+                listener.onFinalTranscript(heard)
+                return
+            }
             val missingModel = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
                     error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) ||
