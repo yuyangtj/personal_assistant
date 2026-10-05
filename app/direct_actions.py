@@ -30,9 +30,7 @@ def _target_item(action: DirectAction, chat_session_id: str, items: WorkItemServ
     """The named item, else the chat's only open focus, else the only open list."""
     if action.work_item:
         return items.get(action.work_item.lstrip("#"))
-    focused = [
-        item for item in items.focused(chat_session_id) if item.status in RESUMABLE_STATUSES
-    ]
+    focused = [item for item in items.focused(chat_session_id) if item.status in RESUMABLE_STATUSES]
     if len(focused) == 1:
         return focused[0]
     lists = [
@@ -130,9 +128,7 @@ def run_direct_action(
     ]
     if len(matches) != 1:
         problem = "isn't an open entry" if not matches else "matches more than one entry"
-        return DirectActionResult(
-            False, f"“{action.text}” {problem} on #{item.slug}.", item.slug
-        )
+        return DirectActionResult(False, f"“{action.text}” {problem} on #{item.slug}.", item.slug)
     items.set_checklist_entry(item.id, matches[0]["id"], done=True)
     return DirectActionResult(
         True, f"Checked off “{matches[0]['text']}” on #{item.slug}.", item.slug

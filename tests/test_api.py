@@ -261,9 +261,7 @@ def test_public_task_routes_refuse_coding_work(client: TestClient) -> None:
     parent = client.post("/tasks", json={"request": "Say hello"}).json()
 
     attempts = [
-        client.post(
-            "/tasks", json={"request": "Fix it", "required_capabilities": ["coding"]}
-        ),
+        client.post("/tasks", json={"request": "Fix it", "required_capabilities": ["coding"]}),
         client.post(
             "/tasks",
             json={"request": "Fix it", "source_context": {"repository_id": "analytics"}},
@@ -297,9 +295,12 @@ def test_follow_up_on_a_coding_task_is_a_conversation(
 
     assert "repository_id" not in follow_up["source_context"]
     assert follow_up["source_context"]["parent_task"]["task_id"] == coding.id
-    assert service.claim_next_task(
-        worker_id="conversation-worker", lease_seconds=30, supports_coding=False
-    ).id == follow_up["id"]
+    assert (
+        service.claim_next_task(
+            worker_id="conversation-worker", lease_seconds=30, supports_coding=False
+        ).id
+        == follow_up["id"]
+    )
 
 
 def test_message_with_coding_workflow_cannot_become_chat_only_task(
@@ -395,9 +396,7 @@ def test_workflow_runs_can_be_listed_for_one_chat(client: TestClient) -> None:
             ).json()["id"]
         )
 
-    listed = client.get(
-        "/workflow-runs", params={"chat_session_id": chats[0]["id"]}
-    ).json()["runs"]
+    listed = client.get("/workflow-runs", params={"chat_session_id": chats[0]["id"]}).json()["runs"]
 
     assert [run["id"] for run in listed] == [run_ids[0]]
     assert len(client.get("/workflow-runs").json()["runs"]) == 2
@@ -799,9 +798,7 @@ def test_merged_task_can_submit_and_sync_approved_host_deployment(
     started = client.post(f"/workflow-runs/{deployment_id}/start")
     assert started.status_code == 200
     assert started.json()["status"] == "running"
-    request_document = json.loads(
-        (spool.requests_directory / f"{deployment_id}.json").read_text()
-    )
+    request_document = json.loads((spool.requests_directory / f"{deployment_id}.json").read_text())
     assert request_document["commit_sha"] == "b" * 40
     assert request_document["deployment_target_id"] == "personal-assistant-production"
 

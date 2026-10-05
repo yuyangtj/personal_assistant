@@ -106,9 +106,7 @@ class BriefWritebackJob:
                 .limit(scan)
             )
             for item in items:
-                material = brief_material(
-                    session, item, now=now, idle_seconds=self.idle_seconds
-                )
+                material = brief_material(session, item, now=now, idle_seconds=self.idle_seconds)
                 if material is not None:
                     due.append(
                         (item.id, item.version, item.title, item.kind, item.brief or {}, material)

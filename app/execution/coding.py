@@ -1279,8 +1279,7 @@ def _with_redirects(request: str, notes: Sequence[str]) -> str:
     if not notes:
         return request
     return (
-        request
-        + "\n\nWHILE AN EARLIER ATTEMPT WAS WORKING, THE USER ADDED THESE INSTRUCTIONS "
+        request + "\n\nWHILE AN EARLIER ATTEMPT WAS WORKING, THE USER ADDED THESE INSTRUCTIONS "
         "(the worktree already has its partial changes; continue from them):\n"
         + "\n".join(f"- {note}" for note in notes)
     )

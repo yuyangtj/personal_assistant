@@ -330,9 +330,7 @@ class GitHubClient:
                     url=str(raw["html_url"]),
                     status=str(raw["status"]),
                     conclusion=(
-                        raw.get("conclusion")
-                        if isinstance(raw.get("conclusion"), str)
-                        else None
+                        raw.get("conclusion") if isinstance(raw.get("conclusion"), str) else None
                     ),
                     head_sha=str(raw["head_sha"]),
                     display_title=str(raw["display_title"]),

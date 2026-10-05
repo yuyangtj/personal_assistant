@@ -188,9 +188,7 @@ class TaskService:
                         return existing_task
             if parent_task_id is not None and TaskRepository.get(session, parent_task_id) is None:
                 raise TaskNotFoundError(parent_task_id)
-            work_item = (
-                get_work_item(session, work_item_id) if work_item_id is not None else None
-            )
+            work_item = get_work_item(session, work_item_id) if work_item_id is not None else None
             if work_item is None and work_item_space is not None:
                 repository_id = normalized_context.get("repository_id")
                 work_item = resolve_for_run(

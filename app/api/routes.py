@@ -181,9 +181,7 @@ def _resolve_choice(
                 item = request.app.state.work_item_service.get(task.work_item_id)
                 blocks = [{"type": "item", "slug": item.slug}]
         else:  # answer: the original message gets an ordinary chat reply
-            service.create_task_from_message(
-                chat_session_id, origin, source_context=source_context
-            )
+            service.create_task_from_message(chat_session_id, origin, source_context=source_context)
     except (LookupError, ValueError) as error:
         reply, blocks = f"I couldn't set that up: {error}", []
     if reply:
@@ -322,8 +320,7 @@ def active_status(task) -> bool:
 
 
 CODING_WORKFLOW_REQUIRED = (
-    "Coding work starts from a coding workflow (propose → approve → start), "
-    "not from a plain task"
+    "Coding work starts from a coding workflow (propose → approve → start), not from a plain task"
 )
 
 
@@ -1314,8 +1311,7 @@ def create_deployment_workflow_for_task(
             (
                 artifact
                 for artifact in reversed(context.get("artifacts") or [])
-                if artifact.get("type") == "github_pull_request_merge"
-                and artifact.get("merge_sha")
+                if artifact.get("type") == "github_pull_request_merge" and artifact.get("merge_sha")
             ),
             None,
         )
