@@ -11,7 +11,7 @@ const state = { chats: [], repositories: [], deploymentTargets: [], repositoryId
 // Every view has its own address: #/chats/<id>, #/items/<slug>; ?task=<id> or
 // ?workflow=<id> opens a drawer over either, so back/forward, reload and push links work.
 // Each section has a view (#<section>-view, chats: #chat-view) and a nav link (#nav-<section>).
-const SECTIONS = ["chats", "items", "memories", "purchases"];
+const SECTIONS = ["chats", "items", "memories"];
 const sectionView = (section) => $(section === "chats" ? "chat-view" : `${section}-view`);
 
 function parseRoute() {
@@ -50,8 +50,6 @@ async function render() {
   }
   if (route.section === "memories") {
     loadMemories();
-  } else if (route.section === "purchases") {
-    loadPurchases();
   } else if (items) {
     if (route.id !== state.itemRef || returning) {
       state.itemRef = route.id;

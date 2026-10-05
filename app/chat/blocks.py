@@ -72,7 +72,25 @@ class ItemBlock(BaseModel):
     slug: str = Field(min_length=1, max_length=80)
 
 
-Block = Annotated[ChoicesBlock | LinkBlock | WorkflowBlock | ItemBlock, Field(discriminator="type")]
+class UploadBlock(BaseModel):
+    """A button to hand over a file for a registered purpose (see app/chat/uploads.py)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["upload"] = "upload"
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    target: str = Field(pattern=r"^[a-z][a-z0-9-]{1,40}$")
+    label: str = Field(min_length=1, max_length=60)
+    accept: str = Field(default="", max_length=100)
+    state: Literal["open", "done"] = "open"
+    #: What the upload led to, once done (e.g. "1051 purchases imported").
+    result: str | None = Field(default=None, max_length=300)
+
+
+Block = Annotated[
+    ChoicesBlock | LinkBlock | WorkflowBlock | ItemBlock | UploadBlock,
+    Field(discriminator="type"),
+]
 _BLOCKS = TypeAdapter(list[Block])
 MAX_BLOCKS = 4
 

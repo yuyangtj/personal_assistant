@@ -1,5 +1,24 @@
 // Clicks, forms and buttons wired to the functions above, plus the theme toggle.
 
+// A file picked with an upload button in a reply.
+const MAX_UPLOAD_BYTES = 5_000_000;
+document.addEventListener("change", async (e) => {
+  const input = e.target.closest && e.target.closest("[data-upload]");
+  if (!input || !input.files.length || !state.chatId) return;
+  const file = input.files[0];
+  const button = input.closest(".upload-button");
+  if (file.size > MAX_UPLOAD_BYTES) { fail(new Error("That file is too large (5 MB at most).")); return; }
+  button.classList.add("busy");
+  button.lastChild.textContent = "Uploading…";
+  try {
+    await api(`/chat-sessions/${state.chatId}/messages/${input.dataset.message}/uploads/${input.dataset.upload}`, {
+      method: "POST", body: JSON.stringify({ filename: file.name, content: await file.text() }),
+    });
+    clearError();
+  } catch (error) { fail(error); }
+  await refreshTranscript();
+});
+
 document.addEventListener("click", (e) => {
   const chat = e.target.closest("[data-chat]");
   if (chat) return goChat(chat.dataset.chat);

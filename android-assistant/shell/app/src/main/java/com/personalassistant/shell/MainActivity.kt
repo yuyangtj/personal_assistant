@@ -8,10 +8,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
 import android.view.ViewGroup
 import android.webkit.HttpAuthHandler
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -43,6 +46,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var server: String
     private var authAttempts = 0
 
+    /** The page's pending <input type="file">, answered when the picker returns. */
+    private var fileChooser: ValueCallback<Array<Uri>>? = null
+    private val pickFile = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        fileChooser?.onReceiveValue(uri?.let { arrayOf(it) } ?: emptyArray())
+        fileChooser = null
+    }
+
     private val microphonePermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -64,6 +74,24 @@ class MainActivity : ComponentActivity() {
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             webViewClient = ConsoleClient()
+            // Upload buttons in replies use the system file picker; the server checks the file.
+            webChromeClient = object : WebChromeClient() {
+                override fun onShowFileChooser(
+                    view: WebView,
+                    callback: ValueCallback<Array<Uri>>,
+                    params: FileChooserParams,
+                ): Boolean {
+                    fileChooser?.onReceiveValue(null)
+                    fileChooser = callback
+                    return try {
+                        pickFile.launch("*/*")
+                        true
+                    } catch (_: ActivityNotFoundException) {
+                        fileChooser = null
+                        false
+                    }
+                }
+            }
         }
         // Passkeys in the console (approve with a fingerprint), for the sites this app is
         // linked to through /.well-known/assetlinks.json.

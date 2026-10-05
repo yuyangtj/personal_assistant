@@ -134,6 +134,37 @@ class ChatOperations(ServiceBase):
             proposal = propose_task(normalized_content) if role == "user" else None
             return PostedMessage(message=message, proposal=proposal, focused_work_items=focused)
 
+    def open_upload(self, chat_session_id: str, message_id: str, block_id: str) -> dict[str, Any]:
+        """The still-open upload block an assistant message in this chat offered."""
+        with self.database.session() as session:
+            message = session.get(ChatMessageModel, message_id)
+            if (
+                message is None
+                or message.chat_session_id != chat_session_id
+                or message.role != "assistant"
+            ):
+                raise ChatMessageNotFoundError(message_id)
+            for block in message.blocks or []:
+                if block.get("type") == "upload" and block.get("id") == block_id:
+                    if block.get("state") != "open":
+                        raise ValueError("This upload was already used; ask for a new one")
+                    return dict(block)
+            raise ChatMessageNotFoundError(block_id)
+
+    def complete_upload(self, message_id: str, block_id: str, result: str) -> None:
+        with self.database.session() as session, session.begin():
+            message = session.get(ChatMessageModel, message_id, with_for_update=True)
+            if message is None:
+                raise ChatMessageNotFoundError(message_id)
+            message.blocks = validate_blocks(
+                [
+                    {**block, "state": "done", "result": result[:300]}
+                    if block.get("id") == block_id
+                    else block
+                    for block in message.blocks or []
+                ]
+            )
+
     def set_message_blocks(self, message_id: str, blocks: list[dict[str, Any]]) -> None:
         """Replace a message's blocks, e.g. to mark its choices answered."""
         with self.database.session() as session, session.begin():

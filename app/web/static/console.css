@@ -246,14 +246,11 @@
 .memory-text { white-space: pre-wrap; }
 .memory-meta .sub { margin: 0; }
 @media (max-width: 720px) { .view.single > main { display: block; } }
-table.purchases { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
-table.purchases td { padding: 7px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
-table.purchases td.num { text-align: right; white-space: nowrap; }
-#purchase-search { width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 9px 10px; font: inherit; }
-table.purchases td:first-child { white-space: nowrap; }
 .topbar nav a { white-space: nowrap; }
 @media (max-width: 720px) {
   .topbar nav { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
   .topbar nav a { padding: 6px 8px; }
-  table.purchases td.pay { display: none; }
 }
+.upload-button { display: inline-block; margin-top: 8px; background: var(--button-bg); color: #fff; padding: 7px 12px; border-radius: 8px; cursor: pointer; }
+.upload-button.busy { opacity: .6; pointer-events: none; }
+.upload-done { margin-top: 8px; color: var(--muted); font-size: 12.5px; }
