@@ -26,6 +26,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 
@@ -63,6 +64,13 @@ class MainActivity : ComponentActivity() {
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             webViewClient = ConsoleClient()
+        }
+        // Passkeys in the console (approve with a fingerprint), for the sites this app is
+        // linked to through /.well-known/assetlinks.json.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_AUTHENTICATION)) {
+            WebSettingsCompat.setWebAuthenticationSupport(
+                web.settings, WebSettingsCompat.WEB_AUTHENTICATION_SUPPORT_FOR_APP,
+            )
         }
         // A WebView ignores its own padding, so a frame around it keeps the console clear
         // of the status and navigation bars and the keyboard (edge-to-edge on 35+).

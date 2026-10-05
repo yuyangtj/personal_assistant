@@ -218,6 +218,23 @@ persisted.
 time and is never sent to GitHub or the coding agent. Without it, approval operations are
 disabled.
 
+### Approving with a passkey
+
+Instead of typing the token, a device can approve with a passkey (Touch ID on a Mac, the
+fingerprint or face unlock on the phone). Open **Passkeys** in the console's top bar,
+enter the approval token once and choose **Add this device**. From then on the approve
+dialog asks for the passkey; **Use the approval token instead** is always available.
+
+- Each approval signs a one-time challenge that the server issued for that exact request
+  (for example `POST /tasks/<id>/pull-request-approval`) and that expires after five
+  minutes, so a captured approval can't be replayed or used for a different action.
+- User verification (biometric or device PIN) is required; a passkey only tapped is refused.
+- Adding or removing a passkey needs the approval token (removing also accepts a passkey),
+  so getting past the site login alone can't enrol a device.
+- Passkeys are bound to `ASSISTANT_PUBLIC_URL` (its host is the WebAuthn site) and are
+  off when it isn't set. The Android app uses them through its WebView, which needs the
+  `get_login_creds` relation in `/.well-known/assetlinks.json`.
+
 ## Recommended repository rules
 
 Protect the configured base branch and require:

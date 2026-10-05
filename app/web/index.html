@@ -14,6 +14,7 @@
   <nav aria-label="Sections"><a href="#/chats" id="nav-chats">Chats</a><a href="#/items" id="nav-items">Work items</a></nav>
   <span id="error" class="err grow" role="alert"></span>
   <span id="status" class="sub" style="margin:0"></span>
+  <button class="ghost" id="passkeys-open" type="button" hidden title="Approve with Touch ID or your fingerprint">Passkeys</button>
     <button class="ghost icon-btn" id="theme-toggle" type="button" aria-label="Toggle theme"
       title="Toggle bright/dark theme" aria-pressed="false">
       <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
@@ -85,11 +86,28 @@
     <div id="action-summary" class="sub"></div>
     <label id="revision-label" for="revision-instructions">Revision instructions</label>
     <textarea id="revision-instructions" rows="5" placeholder="Describe exactly what should change…"></textarea>
-    <label for="approval-token">Assistant approval token</label>
+    <label for="approval-token" id="approval-token-label">Assistant approval token</label>
     <input id="approval-token" type="password" autocomplete="off" required>
+    <button type="button" class="link-btn" id="approval-mode" hidden></button>
     <div id="action-error" class="err" role="alert"></div>
     <div class="actions"><button type="button" class="quiet" id="cancel-action">Cancel</button>
       <button type="submit" id="confirm-action">Confirm</button></div>
+  </form>
+</dialog>
+
+<dialog id="passkey-dialog" aria-labelledby="passkey-title">
+  <form id="passkey-form">
+    <h2 id="passkey-title">Passkeys</h2>
+    <div class="sub">Approve merges, deployments and workflows with Touch ID or your fingerprint
+      instead of the approval token.</div>
+    <div id="passkey-list"></div>
+    <label for="passkey-name">Name for this device</label>
+    <input id="passkey-name" maxlength="80" required>
+    <label for="passkey-token">Assistant approval token (needed once to add a device)</label>
+    <input id="passkey-token" type="password" autocomplete="off" required>
+    <div id="passkey-error" class="err" role="alert"></div>
+    <div class="actions"><button type="button" class="quiet" id="passkey-close">Close</button>
+      <button type="submit" id="passkey-add">Add this device</button></div>
   </form>
 </dialog>
 
@@ -98,5 +116,6 @@
 <script src="/ui/static/drawer.js"></script>
 <script src="/ui/static/items.js"></script>
 <script src="/ui/static/phone.js"></script>
+<script src="/ui/static/passkeys.js"></script>
 <script src="/ui/static/events.js"></script>
 <script src="/ui/static/main.js"></script>

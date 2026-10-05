@@ -231,3 +231,5 @@
     .msg { max-width: 94%; }
     .summary-grid { grid-template-columns: 1fr 1fr; }
   }
+.link-btn { background: none; border: 0; padding: 0; margin-top: 10px; color: var(--accent, #0d8a7e); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
+#passkey-list .row { margin-top: 10px; align-items: center; }

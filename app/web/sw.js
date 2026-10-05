@@ -1,7 +1,7 @@
 // Keeps the console openable when the server or network is briefly unreachable.
 // Only the page shell and icons are cached; API calls always go to the server.
-const CACHE = "assistant-shell-v2";
-const CODE = ["console.css", "state.js", "transcript.js", "drawer.js", "items.js", "phone.js",
+const CACHE = "assistant-shell-v3";
+const CODE = ["console.css", "state.js", "transcript.js", "drawer.js", "items.js", "phone.js", "passkeys.js",
   "events.js", "main.js"].map((name) => `/ui/static/${name}`);
 const SHELL = ["/ui", ...CODE, "/icons/icon-192.png", "/icons/favicon-48.png"];
 

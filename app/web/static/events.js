@@ -85,54 +85,48 @@ $("close-task").onclick = closeDrawer;
 $("detail-scrim").onclick = closeDrawer;
 $("cancel-action").onclick = closeActionDialog;
 $("action-dialog").addEventListener("close", () => { state.pendingAction = null; });
+// The one request each approval makes; it alone carries the token or passkey signature.
+function approvalRequest(pending, instructions) {
+  const sha = pending.approval.expected_head_sha;
+  switch (pending.mode) {
+    case "workflow":
+      return { path: `/workflow-runs/${pending.taskId}/decision`, body: { decision: "approve" } };
+    case "deployment":
+      return { path: `/workflow-runs/${pending.approval.id}/decision`, body: { decision: "approve" } };
+    case "ready":
+      return { path: `/tasks/${pending.taskId}/pull-request-ready`, body: { expected_head_sha: sha } };
+    case "revision":
+      return { path: `/tasks/${pending.taskId}/pull-request-revision`, body: { instructions, expected_head_sha: sha } };
+    default:
+      return { path: `/tasks/${pending.taskId}/pull-request-approval`,
+        body: { decision: "approve", expected_head_sha: sha, merge_method: "squash" } };
+  }
+}
 $("action-form").onsubmit = async (event) => {
   event.preventDefault();
   const pending = state.pendingAction;
   if (!pending) return;
-  const token = $("approval-token").value;
   const instructions = $("revision-instructions").value.trim();
   const button = $("confirm-action");
   button.disabled = true;
   $("action-error").textContent = "";
   try {
-    const headers = { "content-type": "application/json", "X-Assistant-Approval-Token": token };
+    const request = approvalRequest(pending, instructions);
+    const headers = { "content-type": "application/json", ...(await approvalAuth("POST", request.path)) };
+    const result = await api(request.path, { method: "POST", headers, body: JSON.stringify(request.body) });
+    if (pending.mode === "deployment") {
+      await api(`/workflow-runs/${pending.approval.id}/start`, { method: "POST", body: "{}" });
+    }
+    closeActionDialog();
     if (pending.mode === "workflow") {
-      await api(`/workflow-runs/${pending.taskId}/decision`, {
-        method: "POST", headers, body: JSON.stringify({ decision: "approve" }),
-      });
-      closeActionDialog();
       await startCodingWorkflow(pending.taskId);
     } else if (pending.mode === "deployment") {
-      await api(`/workflow-runs/${pending.approval.id}/decision`, {
-        method: "POST", headers, body: JSON.stringify({ decision: "approve" }),
-      });
-      await api(`/workflow-runs/${pending.approval.id}/start`, {
-        method: "POST", body: "{}",
-      });
-      closeActionDialog();
-      await renderTask(pending.taskId);
-    } else if (pending.mode === "ready") {
-      await api(`/tasks/${pending.taskId}/pull-request-ready`, {
-        method: "POST", headers,
-        body: JSON.stringify({ expected_head_sha: pending.approval.expected_head_sha }),
-      });
-      closeActionDialog();
       await renderTask(pending.taskId);
     } else if (pending.mode === "revision") {
-      const task = await api(`/tasks/${pending.taskId}/pull-request-revision`, {
-        method: "POST", headers,
-        body: JSON.stringify({ instructions, expected_head_sha: pending.approval.expected_head_sha }),
-      });
-      closeActionDialog();
       await refreshTranscript();
-      goTask(task.id);
+      goTask(result.id);
     } else {
-      await api(`/tasks/${pending.taskId}/pull-request-approval`, {
-        method: "POST", headers,
-        body: JSON.stringify({ decision: "approve", expected_head_sha: pending.approval.expected_head_sha, merge_method: "squash" }),
-      });
-      closeActionDialog();
-      await refreshTranscript();
+      if (pending.mode === "merge") await refreshTranscript();
       await renderTask(pending.taskId);
     }
   } catch (error) {

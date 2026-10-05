@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -31,6 +32,7 @@ WEB_STATIC = {
     "drawer.js": "text/javascript",
     "items.js": "text/javascript",
     "phone.js": "text/javascript",
+    "passkeys.js": "text/javascript",
     "events.js": "text/javascript",
     "main.js": "text/javascript",
 }
@@ -127,3 +129,13 @@ def web_console_root(request: Request) -> RedirectResponse:
     # Keep the query: push notifications link to /?task=<id>.
     query = f"?{request.url.query}" if request.url.query else ""
     return RedirectResponse(url=f"/ui{query}", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+
+def app_signing_fingerprints() -> list[str]:
+    """The Android app's signing certificates, as published for App Links."""
+    statements = json.loads((WEB_DIRECTORY / "assetlinks.json").read_text())
+    return [
+        fingerprint
+        for statement in statements
+        for fingerprint in statement["target"].get("sha256_cert_fingerprints", [])
+    ]

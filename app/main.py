@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from app.api.routes import router
+from app.api.web import app_signing_fingerprints
 from app.api.work_items import router as work_items_router
 from app.capabilities import CapabilityRegistry
 from app.chat.triage import Triager
@@ -13,6 +14,7 @@ from app.integrations.factory import triage_client
 from app.integrations.gemini_tts import GeminiTtsClient
 from app.integrations.github import GitHubClient
 from app.integrations.speech import CachedSpeechSynthesizer
+from app.passkeys import PasskeyService, android_origins
 from app.persistence.database import Database
 from app.providers import DatabaseProviderStateStore
 from app.repositories import RepositoryRegistry
@@ -115,6 +117,11 @@ def create_app(
         else None
     )
     application.state.approval_token = resolved_settings.approval_token
+    application.state.passkeys = PasskeyService(
+        database,
+        public_url=resolved_settings.public_url,
+        extra_origins=android_origins(app_signing_fingerprints()),
+    )
     application.include_router(router)
     application.include_router(work_items_router)
     return application
