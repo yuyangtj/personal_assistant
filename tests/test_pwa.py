@@ -40,6 +40,10 @@ def test_the_android_app_may_open_this_sites_links(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json"
     (statement,) = response.json()
-    assert statement["relation"] == ["delegate_permission/common.handle_all_urls"]
+    # Open its links in the app, and use its passkeys there.
+    assert statement["relation"] == [
+        "delegate_permission/common.handle_all_urls",
+        "delegate_permission/common.get_login_creds",
+    ]
     assert statement["target"]["package_name"] == "com.personalassistant.shell"
     assert len(statement["target"]["sha256_cert_fingerprints"][0].split(":")) == 32

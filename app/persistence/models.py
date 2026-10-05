@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -359,3 +360,28 @@ class ScheduleModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+
+
+class PasskeyModel(Base):
+    """A device's passkey, registered to approve actions with biometrics."""
+
+    __tablename__ = "passkeys"
+
+    id: Mapped[str] = mapped_column(String(512), primary_key=True)  # base64url credential id
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    public_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    sign_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PasskeyChallengeModel(Base):
+    """A one-time challenge: for registering a passkey, or for approving one exact request."""
+
+    __tablename__ = "passkey_challenges"
+
+    challenge: Mapped[str] = mapped_column(String(128), primary_key=True)  # base64url
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    action: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

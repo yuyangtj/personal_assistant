@@ -193,10 +193,13 @@ function openActionDialog(mode, taskId, approval) {
   $("revision-instructions").required = revision;
   $("revision-instructions").value = "";
   $("approval-token").value = "";
+  setApprovalMode(true);
   $("action-error").textContent = "";
   $("confirm-action").textContent = mode === "workflow" ? "Approve and start" : mode === "deployment" ? "Approve deployment" : mode === "merge" ? "Approve and merge" : mode === "revision" ? "Request revision" : "Mark ready";
   $("action-dialog").showModal();
-  (revision ? $("revision-instructions") : $("approval-token")).focus();
+  if (revision) $("revision-instructions").focus();
+  else if (usePasskey) $("confirm-action").focus();
+  else $("approval-token").focus();
 }
 
 function closeActionDialog() {

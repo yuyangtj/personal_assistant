@@ -9,6 +9,7 @@ from fastapi import HTTPException, Request
 from app.api.schemas import TaskListResponse, TaskResponse
 from app.domain.enums import CODING_CAPABILITIES, TaskStatus
 from app.domain.transitions import TERMINAL_STATUSES
+from app.passkeys import PasskeyError
 from app.services import TaskService
 
 
@@ -17,12 +18,26 @@ def task_service(request: Request) -> TaskService:
 
 
 def require_approval_token(request: Request) -> None:
+    """Approval by the long token, or by a passkey signed for exactly this request."""
+    assertion = request.headers.get("X-Assistant-Passkey")
+    if assertion:
+        try:
+            request.app.state.passkeys.verify_approval(
+                assertion, approval_action(request.method, request.url.path)
+            )
+        except PasskeyError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+        return
     configured_token = request.app.state.approval_token
     supplied_token = request.headers.get("X-Assistant-Approval-Token")
     if not configured_token:
         raise HTTPException(status_code=503, detail="Approval authorization is not configured")
     if not supplied_token or not hmac.compare_digest(supplied_token, configured_token):
         raise HTTPException(status_code=401, detail="Invalid approval authorization")
+
+
+def approval_action(method: str, path: str) -> str:
+    return f"{method.upper()} {path}"
 
 
 def task_list_with_progress(request: Request, tasks: list) -> TaskListResponse:

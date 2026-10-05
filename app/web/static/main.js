@@ -7,5 +7,5 @@ else if (!location.hash) history.replaceState(null, "", location.pathname + "#/c
 window.addEventListener("hashchange", render);
 // Installable as an app; the service worker only keeps the page openable offline.
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
-Promise.all([loadChats(), loadRepositories(), loadDeploymentTargets(), loadItems(), loadSpaces()]);
+Promise.all([loadChats(), loadRepositories(), loadDeploymentTargets(), loadItems(), loadSpaces(), loadPasskeys()]);
 render();

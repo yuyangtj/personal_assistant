@@ -63,6 +63,8 @@ services:
       ASSISTANT_MCP_GATEWAY_TOKEN: ${ASSISTANT_MCP_GATEWAY_TOKEN:-}
       ASSISTANT_GITHUB_API_BASE_URL: ${ASSISTANT_GITHUB_API_BASE_URL:-https://api.github.com}
       ASSISTANT_APPROVAL_TOKEN: ${ASSISTANT_APPROVAL_TOKEN:?set ASSISTANT_APPROVAL_TOKEN}
+      # The passkey (WebAuthn) site: approvals can be signed with Touch ID or a fingerprint.
+      ASSISTANT_PUBLIC_URL: https://${ASSISTANT_DOMAIN}
       ASSISTANT_DEPLOY_SPOOL_DIRECTORY: /deploy
       # Triage: a fast model call per chat message decides what it needs.
       ASSISTANT_TRIAGE_MODEL_ENABLED: ${ASSISTANT_TRIAGE_MODEL_ENABLED:-true}
