@@ -67,7 +67,7 @@ schema, invented capabilities are rejected, and one repair attempt is allowed.
 | Provider | Key | Provider URL | Default manager model |
 | --- | --- | --- | --- |
 | Kimi | `KIMI_API_KEY` / `ASSISTANT_KIMI_API_KEY` | `https://api.kimi.com/coding/v1` | `kimi-for-coding-highspeed` |
-| MiniMax | `MINIMAX_API_KEY` / `ASSISTANT_MINIMAX_API_KEY` | `https://api.minimax.chat/v1` | `MiniMax-M2.7-highspeed` |
+| MiniMax | `MINIMAX_API_KEY` / `ASSISTANT_MINIMAX_API_KEY` | `https://api.minimax.chat/v1` | `MiniMax-M3` |
 
 When manager analysis is enabled, an ordinary request can make two model calls:
 one to infer capabilities and one to execute the selected capability. Those calls
@@ -105,7 +105,7 @@ selected (`CapabilityRegistry.restricted_to_adapters`).
 | `ASSISTANT_KIMI_TIMEOUT_SECONDS` | `30` |
 | `MINIMAX_API_KEY` / `ASSISTANT_MINIMAX_API_KEY` | unset |
 | `ASSISTANT_MINIMAX_BASE_URL` | `https://api.minimax.chat/v1` |
-| `ASSISTANT_MINIMAX_MODEL` | `MiniMax-M2.7-highspeed` |
+| `ASSISTANT_MINIMAX_MODEL` | `MiniMax-M3` |
 | `ASSISTANT_MINIMAX_TIMEOUT_SECONDS` | `30` |
 
 - Replies are one to three spoken sentences with an emotion (`Warm`, `Curious`,

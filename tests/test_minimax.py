@@ -143,7 +143,7 @@ def test_minimax_manager_client_normalizes_thinking_and_fenced_json() -> None:
     result = ValidatedManagerModelAdapter(client).analyze(_task(), registry.list())
 
     assert result.provider == "minimax"
-    assert result.model == "MiniMax-M2.7-highspeed"
+    assert result.model == "MiniMax-M3"
     assert result.analysis.required_capabilities == ("conversation",)
     assert result.usage.input_tokens == 42
     assert result.usage.output_tokens == 18
