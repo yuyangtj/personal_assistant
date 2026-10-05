@@ -17,6 +17,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.chat.uploads import offered_uploads, upload_blocks
+from app.execution.attachments import attachments_prompt
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.execution.routine_context import routine_prompt
@@ -145,6 +146,9 @@ class GroceryAgentExecutor:
         routine = routine_prompt(context or {})
         if routine:
             messages.append(ChatMessage("system", routine))
+        attached = attachments_prompt(context or {})
+        if attached:
+            messages.append(ChatMessage("system", attached))
         preferences = [str(item) for item in (context or {}).get("memories") or [] if item]
         if preferences:
             messages.append(

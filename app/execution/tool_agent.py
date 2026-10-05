@@ -14,6 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.domain.work_items import render_work_item_context
+from app.execution.attachments import attachments_prompt
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.integrations.chat import ChatClient, ChatMessage
@@ -69,6 +70,9 @@ class ToolAgentExecutor:
                     + render_work_item_context(work_items),
                 )
             )
+        attached = attachments_prompt(context or {})
+        if attached:
+            messages.append(ChatMessage("system", attached))
         messages.append(ChatMessage("user", request))
         searches: list[dict[str, Any]] = []
         # Room for every search, a refused extra one, a malformed reply, and the answer.

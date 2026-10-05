@@ -92,6 +92,9 @@ const BLOCKS = {
       + `<span>Review ›</span></button>`;
   },
   item: (block) => `<button type="button" class="chip link-button" data-item="${esc(block.slug)}">#${esc(block.slug)}</button>`,
+  // Context attached on the phone (the screen the user was on); the text itself stays folded.
+  attachment: (block) => `<div class="attachment-chip">📱 Screen${block.app ? " from " + esc(block.app) : ""}`
+    + ` · ${esc(block.text.length.toLocaleString())} characters</div>`,
   // A file handed over right here; the server sends it to the upload's handler.
   upload: (block, m) => block.state === "done"
     ? `<div class="upload-done">✓ ${esc(block.result || "Uploaded")}</div>`
@@ -128,7 +131,8 @@ function renderTranscript() {
 async function send(text, { local = true, voice = false } = {}) {
   state.busy = true; $("send").disabled = true;
   try {
-    if (local && phone.bridge && !awaitingChoice()) {
+    const attachments = phone.screen ? [{ kind: "screen", ...phone.screen }] : [];
+    if (local && phone.bridge && !awaitingChoice() && !attachments.length) {
       // Simple things (the time, a timer) can be answered on the phone itself.
       const route = await phoneRoute(text);
       if (route && route.route !== "cloud") return answerOnPhone(text, route, voice);
@@ -140,8 +144,10 @@ async function send(text, { local = true, voice = false } = {}) {
     }
     const posted = await api(`/chat-sessions/${state.chatId}/messages`, {
       method: "POST", body: JSON.stringify({ content: text, repository_id: state.repositoryId,
-        local_time: localIsoTime(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+        local_time: localIsoTime(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        attachments }),
     });
+    if (attachments.length) setScreen(null);
     // A spoken question gets its answer spoken too, whenever it arrives.
     if (voice) phone.speakFor = posted.message.id;
     // The server decides what the message needs; the repository picker is only an override.

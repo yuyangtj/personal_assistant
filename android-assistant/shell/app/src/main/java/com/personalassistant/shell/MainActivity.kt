@@ -3,13 +3,17 @@ package com.personalassistant.shell
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.app.role.RoleManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
+import android.provider.Settings
 import android.text.InputType
 import android.view.ViewGroup
 import android.webkit.HttpAuthHandler
@@ -23,15 +27,22 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.IntentCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The phone app: the assistant's web console, plus what only the phone can do (voice,
@@ -123,6 +134,8 @@ class MainActivity : ComponentActivity() {
             voiceAvailable = { voice.isAvailable },
             startListening = ::startListening,
             stopListening = { voice.stop() },
+            isAssistant = ::isPhoneAssistant,
+            openAssistantSettings = ::openAssistantSettings,
         )
         voice = VoiceInput(this, bridge)
         val origin = ConsoleUrls.origin(server)
@@ -139,13 +152,89 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null || web.restoreState(savedInstanceState) == null) {
             web.loadUrl(ConsoleUrls.startUrl(server, intent?.dataString))
         }
+        receive(intent)
     }
 
     /** A push notification or link into the console opens it here. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        receive(intent)
         val link = intent.dataString ?: return
         if (ConsoleUrls.sameOrigin(server, link)) web.loadUrl(link)
+    }
+
+    /**
+     * Context from other apps, each time started by the user: Share, "Ask Assistant" on
+     * selected text, or the assistant gesture with the screen they were on. It goes to the
+     * page, which puts it in the chat box (or uploads a file); nothing is sent by itself.
+     */
+    private fun receive(intent: Intent?) {
+        when (intent?.action) {
+            Intent.ACTION_SEND -> {
+                val stream = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                if (stream != null) {
+                    lifecycleScope.launch { shareFile(stream) }
+                } else {
+                    val text = listOfNotNull(
+                        intent.getStringExtra(Intent.EXTRA_SUBJECT),
+                        intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
+                    ).filter { it.isNotBlank() }.distinct().joinToString("\n")
+                    if (text.isNotBlank()) bridge.deliver(BridgeProtocol.shared(text))
+                }
+            }
+            Intent.ACTION_PROCESS_TEXT -> intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
+                ?.toString()?.takeIf { it.isNotBlank() }
+                ?.let { bridge.deliver(BridgeProtocol.shared(it)) }
+            ACTION_ASSIST -> bridge.deliver(
+                BridgeProtocol.screen(
+                    intent.getStringExtra(EXTRA_SCREEN_APP).orEmpty(),
+                    intent.getStringExtra(EXTRA_SCREEN_TEXT).orEmpty(),
+                ),
+            )
+        }
+    }
+
+    private suspend fun shareFile(uri: Uri) {
+        val shared = withContext(Dispatchers.IO) {
+            runCatching {
+                val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "shared file"
+                val bytes = contentResolver.openInputStream(uri)?.use {
+                    it.readNBytesCompat(BridgeProtocol.MAX_SHARED_TEXT + 1)
+                } ?: ByteArray(0)
+                Triple(name, bytes, bytes.size > BridgeProtocol.MAX_SHARED_TEXT)
+            }.getOrNull()
+        }
+        val problem = when {
+            shared == null -> "I couldn't open that file."
+            shared.third -> "That file is too large (5 MB at most)."
+            shared.second.take(4096).any { it == 0.toByte() } -> "I can only read text files for now."
+            else -> null
+        }
+        if (problem != null || shared == null) {
+            Toast.makeText(this, problem, Toast.LENGTH_LONG).show()
+            return
+        }
+        bridge.deliver(BridgeProtocol.sharedFile(shared.first, shared.second.toString(Charsets.UTF_8)))
+    }
+
+    private fun isPhoneAssistant(): Boolean? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+        } else {
+            null
+        }
+
+    /** Android has no prompt for the assistant role; its settings page is where it is set. */
+    private fun openAssistantSettings() {
+        for (action in listOf(Settings.ACTION_VOICE_INPUT_SETTINGS, Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) {
+            try {
+                startActivity(Intent(action))
+                return
+            } catch (_: ActivityNotFoundException) {
+                continue
+            }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -273,10 +362,26 @@ class MainActivity : ComponentActivity() {
             .show()
     }
 
-    private companion object {
-        const val BRIDGE_NAME = "AndroidAssistant"
-        const val KEY_SERVER = "server"
-        const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
-        const val PADDING = 48
+    companion object {
+        /** Started by [AssistantSession] with the screen the user was on. */
+        const val ACTION_ASSIST = "com.personalassistant.shell.ASSIST"
+        const val EXTRA_SCREEN_APP = "screen_app"
+        const val EXTRA_SCREEN_TEXT = "screen_text"
+        private const val BRIDGE_NAME = "AndroidAssistant"
+        private const val KEY_SERVER = "server"
+        private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+        private const val PADDING = 48
     }
+}
+
+/** At most [limit] bytes of the stream (InputStream.readNBytes needs API 33). */
+private fun InputStream.readNBytesCompat(limit: Int): ByteArray {
+    val out = ByteArrayOutputStream()
+    val buffer = ByteArray(64 * 1024)
+    while (out.size() < limit) {
+        val read = read(buffer, 0, minOf(buffer.size, limit - out.size()))
+        if (read < 0) break
+        out.write(buffer, 0, read)
+    }
+    return out.toByteArray()
 }

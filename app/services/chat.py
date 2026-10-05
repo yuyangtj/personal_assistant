@@ -33,6 +33,15 @@ from app.services.common import (
     _focus_mentions,
 )
 
+#: Agents that never get context the user attached from other apps (it is untrusted).
+UNTRUSTED_CONTEXT_EXCLUDED = {
+    "supervision",
+    "coding",
+    "pull_request_creation",
+    "repository_analysis",
+    "shell_execution",
+}
+
 
 class ChatOperations(ServiceBase):
     """Chat sessions and their messages, and the tasks they launch."""
@@ -211,7 +220,16 @@ class ChatOperations(ServiceBase):
                     "approve or start that workflow instead"
                 )
             content = message.content
+            attachments = [
+                {key: block.get(key) for key in ("kind", "app", "text")}
+                for block in message.blocks or []
+                if block.get("type") == "attachment"
+            ]
 
+        if attachments and not UNTRUSTED_CONTEXT_EXCLUDED & set(required_capabilities or []):
+            # Screen text from another app: for agents that only answer, never for agents
+            # that change code or steer runs.
+            source_context = {**(source_context or {}), "attachments": attachments}
         repository_id = (source_context or {}).get("repository_id")
         return self.create_task(
             request=content,

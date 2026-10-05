@@ -254,3 +254,6 @@
 .upload-button { display: inline-block; margin-top: 8px; background: var(--button-bg); color: #fff; padding: 7px 12px; border-radius: 8px; cursor: pointer; }
 .upload-button.busy { opacity: .6; pointer-events: none; }
 .upload-done { margin-top: 8px; color: var(--muted); font-size: 12.5px; }
+.attachment-chip { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12px; color: var(--muted); background: var(--raised); }
+#screen-chip { align-self: flex-start; }
+#screen-chip[hidden] { display: none; }

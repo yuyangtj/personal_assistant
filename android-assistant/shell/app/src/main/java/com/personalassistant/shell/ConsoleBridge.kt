@@ -21,8 +21,12 @@ class ConsoleBridge(
     private val voiceAvailable: () -> Boolean,
     private val startListening: () -> Unit,
     private val stopListening: () -> Unit,
+    private val isAssistant: () -> Boolean? = { null },
+    private val openAssistantSettings: () -> Unit = {},
 ) : WebViewCompat.WebMessageListener, VoiceInput.Listener {
     private var page: JavaScriptReplyProxy? = null
+    /** Shared or screen context that arrived before the page said hello (cold start). */
+    private var pending: String? = null
     private val proposedActions = mutableMapOf<String, LocalAction>()
     private var deviceAi = DeviceAiState()
 
@@ -44,7 +48,12 @@ class ConsoleBridge(
         page = replyProxy
         val incoming = BridgeProtocol.parse(message.data ?: return) ?: return
         when (incoming.type) {
-            "hello" -> send(BridgeProtocol.capabilities(voiceAvailable(), deviceAi))
+            "hello" -> {
+                send(BridgeProtocol.capabilities(voiceAvailable(), deviceAi, isAssistant()))
+                pending?.let(::send)
+                pending = null
+            }
+            "open_assistant_settings" -> openAssistantSettings()
             "listen" -> startListening()
             "stop_listening" -> stopListening()
             "speak" -> incoming.text?.let { speech.speak(it) {} }
@@ -84,6 +93,12 @@ class ConsoleBridge(
 
     fun send(message: String) {
         page?.postMessage(message)
+    }
+
+    /** Context from another app: now if the page is listening, else once it says hello. */
+    fun deliver(message: String) {
+        val current = page
+        if (current == null) pending = message else current.postMessage(message)
     }
 
     override fun onListening() = send(BridgeProtocol.voice("listening"))

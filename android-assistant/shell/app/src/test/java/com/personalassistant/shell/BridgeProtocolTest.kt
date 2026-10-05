@@ -33,4 +33,20 @@ class BridgeProtocolTest {
         assertEquals("reply", JSONObject(BridgeProtocol.route("r", RequestRoute.Reply("Hi"))).getString("route"))
         assertEquals("cloud", JSONObject(BridgeProtocol.route("r", RequestRoute.Cloud("x"))).getString("route"))
     }
+
+    @Test
+    fun contextFromOtherAppsIsCappedAndTheSettingsRequestIsAccepted() {
+        val screen = org.json.JSONObject(BridgeProtocol.screen("Willys", "x".repeat(20_000)))
+        val shared = org.json.JSONObject(BridgeProtocol.shared("y".repeat(10_000)))
+        val file = org.json.JSONObject(BridgeProtocol.sharedFile("klarna.csv", "date,merchant"))
+
+        org.junit.Assert.assertEquals("screen", screen.getString("type"))
+        org.junit.Assert.assertEquals(BridgeProtocol.MAX_SCREEN_TEXT, screen.getString("text").length)
+        org.junit.Assert.assertEquals(BridgeProtocol.MAX_TEXT, shared.getString("text").length)
+        org.junit.Assert.assertEquals("klarna.csv", file.getString("name"))
+        org.junit.Assert.assertEquals(
+            "open_assistant_settings",
+            BridgeProtocol.parse("""{"type":"open_assistant_settings"}""")?.type,
+        )
+    }
 }

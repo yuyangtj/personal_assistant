@@ -30,7 +30,7 @@ from app.api.schemas import (
     WorkflowRunResponse,
 )
 from app.chat.turns import private_memory_text, propose_coding_run, triage_message
-from app.chat.uploads import MAX_UPLOAD_CHARACTERS, TARGETS, UploadError
+from app.chat.uploads import MAX_UPLOAD_CHARACTERS, TARGETS, UploadError, detect_target
 from app.services import (
     ChatMessageNotFoundError,
     ChatSessionNotFoundError,
@@ -129,6 +129,10 @@ def append_chat_message(
         posted = task_service(request).append_chat_message(
             chat_session_id,
             content=body.content,
+            blocks=[
+                {"type": "attachment", **attachment.model_dump()} for attachment in body.attachments
+            ]
+            or None,
         )
     except ChatSessionNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error
@@ -179,6 +183,33 @@ def upload_to_chat(
     service.append_chat_message(chat_session_id, content=f"📎 {body.filename}")
     service.append_chat_message(chat_session_id, content=reply, role="assistant")
     return {"reply": reply}
+
+
+class SharedFileRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=MAX_UPLOAD_CHARACTERS)
+
+
+@router.post("/chat-sessions/{chat_session_id}/files")
+def share_file_to_chat(chat_session_id: str, body: SharedFileRequest, request: Request) -> dict:
+    """A file shared from another app: the upload target that recognizes it handles it."""
+    service = task_service(request)
+    target = detect_target(body.content)
+    try:
+        service.append_chat_message(chat_session_id, content=f"📎 {body.filename}")
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+    if target is None:
+        reply = (
+            "I can't use this kind of file yet. Right now I can read Klarna purchase exports (CSV)."
+        )
+    else:
+        try:
+            reply = target.handle(request.app.state, body.content)
+        except UploadError as error:
+            reply = f"I couldn't read that file: {error}"
+    service.append_chat_message(chat_session_id, content=reply, role="assistant")
+    return {"reply": reply, "target": target.id if target else None}
 
 
 PRIVATE_PLACEHOLDER = "🔒 A private memory (kept out of the chat)"

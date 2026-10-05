@@ -30,6 +30,8 @@ class UploadTarget:
     accept: str
     #: (app state, file text) -> the reply to post; raises UploadError for a bad file.
     handle: Callable[[Any, str], str]
+    #: Whether a file handed over without a button (shared from another app) is this kind.
+    detect: Callable[[str], bool] = lambda text: False
 
 
 def _klarna(state: Any, text: str) -> str:
@@ -40,18 +42,39 @@ def _klarna(state: Any, text: str) -> str:
         raise UploadError(str(error)) from error
     overview = service.overview()
     return (
-        f"Imported your Klarna export: {result.added} new purchases, {result.updated} updated, "
-        f"{result.unchanged} already there. I now have {overview['count']} purchases from "
-        f"{overview['first']} to {overview['last']}. Ask me anything about them."
+        f"Imported your Klarna export: {_count(result.added, 'new purchase')}, "
+        f"{result.updated} updated, {result.unchanged} already there. I now have "
+        f"{_count(overview['count'], 'purchase')} from {overview['first']} to "
+        f"{overview['last']}. Ask me anything about them."
     )
+
+
+def _count(number: int, noun: str) -> str:
+    return f"{number} {noun}{'' if number == 1 else 's'}"
+
+
+def _looks_like_klarna(text: str) -> bool:
+    header = text.lstrip("\ufeff").split("\n", 1)[0].lower()
+    return all(column in header.split(",") for column in ("date", "merchant", "amount"))
 
 
 TARGETS = {
     target.id: target
     for target in (
-        UploadTarget("klarna-purchases", "Upload Klarna export (CSV)", ".csv,text/csv", _klarna),
+        UploadTarget(
+            "klarna-purchases",
+            "Upload Klarna export (CSV)",
+            ".csv,text/csv",
+            _klarna,
+            _looks_like_klarna,
+        ),
     )
 }
+
+
+def detect_target(text: str) -> UploadTarget | None:
+    """The target a file handed over without a button belongs to, if any knows it."""
+    return next((target for target in TARGETS.values() if target.detect(text)), None)
 
 
 def upload_block(target_id: str) -> dict[str, Any]:
