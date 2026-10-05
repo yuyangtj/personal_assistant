@@ -8,9 +8,12 @@ item page, and memories archived.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
+from app.chat.routines import describe, find_routines, is_watch, start_routine
 from app.chat.triage import DirectAction
 from app.domain.work_items import WorkItemKind
 from app.persistence.models import utc_now
@@ -24,6 +27,7 @@ class DirectActionResult:
     done: bool
     reply: str
     work_item_slug: str | None = None
+    blocks: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _target_item(action: DirectAction, chat_session_id: str, items: WorkItemService):
@@ -49,6 +53,7 @@ def _schedule(
     schedules: ScheduleService,
     timezone: str,
     now: datetime,
+    route: Callable[[str], list[str]] | None = None,
 ) -> DirectActionResult:
     if not action.at:
         return DirectActionResult(False, "When should that be? Give me a day and time.")
@@ -64,21 +69,71 @@ def _schedule(
             item = items.get(action.work_item.lstrip("#"))
         except WorkItemNotFoundError:
             item = None
+    routine = action.type == "routine"
+    watch = routine and is_watch(action.text)
     schedules.create(
-        kind=ScheduleKind.REMINDER if action.type == "remind" else ScheduleKind.ROUTINE,
+        kind=ScheduleKind.ROUTINE if routine else ScheduleKind.REMINDER,
         message=action.text,
         run_at=local,
         recurrence=Recurrence(action.recurrence),
         timezone=timezone,
         work_item_id=item.id if item else None,
         chat_session_id=chat_session_id,
+        # Where every run goes is decided once, now, like routing a chat message.
+        capabilities=route(action.text) if routine and route else None,
+        quiet=watch,
     )
     when = local.strftime("%a %d %b %H:%M")
     repeat = "" if action.recurrence == "none" else f", repeating {action.recurrence}"
     verb = "I'll remind you" if action.type == "remind" else "I'll do this"
+    note = " (I'll only notify you when it's worth knowing)" if watch else ""
     return DirectActionResult(
-        True, f"{verb} {when}{repeat}: {action.text}", item.slug if item else None
+        True, f"{verb} {when}{repeat}: {action.text}{note}", item.slug if item else None
     )
+
+
+def _routines(
+    action: DirectAction,
+    *,
+    chat_session_id: str,
+    schedules: ScheduleService,
+    tasks: Any,
+) -> DirectActionResult:
+    """List, run now, or stop saved routines."""
+    routines = [s for s in schedules.list() if s.kind == ScheduleKind.ROUTINE.value]
+    if action.type == "list_routines" or not routines:
+        if not routines:
+            return DirectActionResult(
+                True,
+                "You have no routines. Say, for example, “every month on the 1st at 9, analyze "
+                "my Klarna spending”.",
+            )
+        lines = "\n".join(f"- {describe(routine)}" for routine in routines)
+        options = []
+        for routine in routines[:2]:
+            short = routine.message if len(routine.message) <= 40 else routine.message[:39] + "…"
+            options += [{"label": f"Run “{short}” now"}, {"label": f"Stop “{short}”"}]
+        return DirectActionResult(
+            True,
+            f"Your routines:\n{lines}",
+            blocks=[{"type": "choices", "options": options}],
+        )
+    matches = find_routines(routines, action.text)
+    if not matches:
+        return DirectActionResult(
+            False, "I couldn't tell which routine you meant. Ask “what routines do I have?”."
+        )
+    if len(matches) > 1:
+        listed = "\n".join(f"- {describe(routine)}" for routine in matches[:5])
+        return DirectActionResult(False, f"More than one routine matches; which one?\n{listed}")
+    routine = matches[0]
+    if action.type == "cancel_routine":
+        schedules.cancel(routine.id)
+        return DirectActionResult(True, f"Stopped: {routine.message}")
+    if tasks is None:
+        return DirectActionResult(False, "Routines can't be run from here.")
+    start_routine(tasks, routine, chat_session_id=chat_session_id)
+    return DirectActionResult(True, f"Running now: {routine.message}")
 
 
 def _forget(text: str, memory: MemoryService) -> DirectActionResult:
@@ -106,7 +161,13 @@ def run_direct_action(
     schedules: ScheduleService | None = None,
     timezone: str = "UTC",
     now: datetime | None = None,
+    tasks: Any = None,
+    route: Callable[[str], list[str]] | None = None,
 ) -> DirectActionResult:
+    if action.type in ("list_routines", "run_routine", "cancel_routine"):
+        if schedules is None:
+            return DirectActionResult(False, "Routines aren't available here.")
+        return _routines(action, chat_session_id=chat_session_id, schedules=schedules, tasks=tasks)
     if action.type in ("remind", "routine"):
         if schedules is None:
             return DirectActionResult(False, "Reminders aren't available here.")
@@ -117,6 +178,7 @@ def run_direct_action(
             schedules=schedules,
             timezone=timezone,
             now=now or utc_now(),
+            route=route,
         )
     if action.type == "remember":
         memory.create(

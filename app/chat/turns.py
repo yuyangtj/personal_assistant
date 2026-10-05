@@ -9,6 +9,7 @@ from fastapi import Request
 from app.api.schemas import AppendChatMessageRequest, TriageDecisionResponse
 from app.chat.direct_actions import run_direct_action
 from app.chat.offers import match_choice, offer_for, pending_choices, settle
+from app.chat.routines import routine_capabilities
 from app.chat.triage import TriageIntent
 from app.coding.flow import start_coding_run
 from app.schedules import zone
@@ -184,8 +185,16 @@ def triage_message(
             memory=request.app.state.memory_service,
             schedules=request.app.state.schedule_service,
             timezone=timezone,
+            tasks=service,
+            route=lambda instruction: routine_capabilities(
+                request.app.state.triager,
+                instruction,
+                supervision=request.app.state.settings.supervisor_enabled,
+            ),
         )
-        service.append_chat_message(chat_session_id, content=result.reply, role="assistant")
+        service.append_chat_message(
+            chat_session_id, content=result.reply, role="assistant", blocks=result.blocks or None
+        )
         response.result = result.reply
         response.handled = True
         return response

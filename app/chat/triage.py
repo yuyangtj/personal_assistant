@@ -43,7 +43,17 @@ class DirectAction(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    type: Literal["checklist_add", "checklist_check", "remember", "forget", "remind", "routine"]
+    type: Literal[
+        "checklist_add",
+        "checklist_check",
+        "remember",
+        "forget",
+        "remind",
+        "routine",
+        "list_routines",
+        "run_routine",
+        "cancel_routine",
+    ]
     text: str = Field(min_length=1, max_length=300)
     #: For remind/routine: local wall-clock time "YYYY-MM-DDTHH:MM" in the user's zone.
     at: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
@@ -119,9 +129,14 @@ Decide what the message needs:
   what to remind, "at": "YYYY-MM-DDTHH:MM" local time, "recurrence": "none" | "daily" |
   "weekdays" | "weekly" | "monthly", "work_item": tag or null} for reminders ("remind me
   tomorrow at 9 to call mum"); {"type": "routine", ...same fields} when something should
-  be done for the user on a schedule ("every Monday at 8, summarize my open work").
-  Resolve relative dates from the user's local time. Use tags from work_items; null when
-  the list is not named.
+  be done for the user on a schedule ("every Monday at 8, summarize my open work",
+  "every month analyze my Klarna spending", "every Monday tell me when coffee is on
+  offer at Willys"); its "text" is the instruction to carry out each time, without the
+  schedule words. {"type": "list_routines", "text": "all"} when the user asks which
+  routines or watches they have; {"type": "run_routine", "text": which one} to run a
+  saved routine now; {"type": "cancel_routine", "text": which one} to stop a routine or
+  watch (not a coding agent). Resolve relative dates from the user's local time. Use
+  tags from work_items; null when the list is not named.
 For propose_task, set "space" to the best-fitting slug from spaces (or null).
 Set "needs_grocery_tools": true when the message is about grocery offers, prices, receipts,
 purchases or grocery spending at the user's stores (Willys, Lidl), or about the user's
@@ -161,6 +176,18 @@ _CHECK = re.compile(
     r"(?P<tag>[a-z0-9][a-z0-9-]*))?[.!]?$",
     re.IGNORECASE,
 )
+_LIST_ROUTINES = re.compile(
+    r"^(?:what|which|show|list)\b.*\b(?:routines?|watches|recurring)\b", re.IGNORECASE
+)
+_RUN_ROUTINE = re.compile(
+    r"^(?:please\s+)?run\s+(?:my\s+|the\s+)?[“\"]?(?P<text>.+?)[”\"]?(?:\s+routine)?\s+now[.!]?$",
+    re.IGNORECASE,
+)
+_CANCEL_ROUTINE = re.compile(
+    r"^(?:please\s+)?(?:stop|cancel|delete|remove)\s+(?:the\s+|my\s+)?"
+    r"(?:[“\"](?P<quoted>.+?)[”\"]|(?P<text>.+?)\s+(?:routine|watch))[.!]?$",
+    re.IGNORECASE,
+)
 _REMEMBER = re.compile(r"^(?:please\s+)?remember(?:\s+that)?\s+(?P<text>.+?)[.!]?$", re.IGNORECASE)
 _FORGET = re.compile(
     r"^(?:please\s+)?forget\s+(?:that\s+|about\s+|the\s+memory\s+(?:about\s+)?)?(?P<text>.+?)[.!]?$",
@@ -189,6 +216,14 @@ def _rule_action(text: str, work_items: Sequence[dict] = ()) -> DirectAction | N
     normalized = " ".join(text.split())
     if (match := _REMEMBER.match(normalized)) and len(match["text"]) <= 300:
         return DirectAction(type="remember", text=match["text"], kind="fact")
+    if _LIST_ROUTINES.match(normalized):
+        return DirectAction(type="list_routines", text="all")
+    if (match := _RUN_ROUTINE.match(normalized)) and len(match["text"]) <= 300:
+        return DirectAction(type="run_routine", text=match["text"])
+    if match := _CANCEL_ROUTINE.match(normalized):
+        wanted = match["quoted"] or match["text"]
+        if len(wanted) <= 300:
+            return DirectAction(type="cancel_routine", text=wanted)
     if (match := _FORGET.match(normalized)) and len(match["text"]) <= 300:
         return DirectAction(type="forget", text=match["text"])
     if (match := _ADD.match(normalized)) and len(match["text"]) <= 300:

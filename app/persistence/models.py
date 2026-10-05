@@ -360,6 +360,10 @@ class ScheduleModel(Base):
     next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     recurrence: Mapped[str] = mapped_column(String(16), nullable=False, default="none")
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+    #: Where a routine's runs go (["groceries"], ["web_research"], ...); None: route at run.
+    capabilities: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    #: A watch ("tell me when ..."): results go to its chat; a push only when notable.
+    quiet: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

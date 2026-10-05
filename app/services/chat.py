@@ -313,6 +313,38 @@ class ChatOperations(ServiceBase):
         )
         chat_session.updated_at = datetime.now(UTC)
 
+    def routine_results(self, task: TaskModel, *, limit: int = 3) -> list[dict[str, str]]:
+        """What earlier runs of this task's routine answered, newest first."""
+        schedule_id = (task.source_context or {}).get("schedule_id")
+        if not schedule_id:
+            return []
+        with self.database.session() as session:
+            earlier = session.scalars(
+                select(TaskModel)
+                .where(TaskModel.status == TaskStatus.COMPLETED.value)
+                .where(TaskModel.id != task.id)
+                .where(TaskModel.source_context["schedule_id"].as_string() == str(schedule_id))
+                .order_by(TaskModel.created_at.desc())
+                .limit(limit)
+            ).all()
+            results = []
+            for previous in earlier:
+                reply = session.scalar(
+                    select(TaskEventModel.payload)
+                    .where(TaskEventModel.task_id == previous.id)
+                    .where(TaskEventModel.event_type == EventType.ASSISTANT_REPLY.value)
+                    .order_by(TaskEventModel.sequence.desc())
+                    .limit(1)
+                )
+                if reply and reply.get("text"):
+                    results.append(
+                        {
+                            "date": previous.created_at.date().isoformat(),
+                            "result": str(reply["text"])[:1500],
+                        }
+                    )
+            return results
+
     def conversation_history(
         self,
         task: TaskModel,
