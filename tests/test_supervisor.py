@@ -383,3 +383,32 @@ def test_urls_in_the_reply_become_buttons_or_are_dropped(client: TestClient) -> 
 
     assert text == "PR #35 is waiting your review. Details are below."
     assert found == ["https://github.com/acme/w/pull/35", "https://made.up/x"]
+
+
+def test_a_revision_can_be_routed_to_the_coding_agent(client: TestClient) -> None:
+    from app.capabilities import CapabilityRegistry
+
+    chat, message, run = _started_run(client)
+    service = client.app.state.task_service
+    execution_id = _execution(client, run["task_id"])
+    service.start_validation(run["task_id"], execution_id, output={"summary": "Opened a PR"})
+    service.request_approval(
+        run["task_id"],
+        execution_id,
+        artifacts=[],
+        approval={"number": 41, "head_branch": "assistant/x", "expected_head_sha": "a" * 40},
+    )
+    executor, _ = _supervisor(
+        client,
+        _step(action="message_agent", run=run["id"][:8], text="Use a different icon."),
+        _step(action="reply", reply="Started a revision."),
+    )
+    _run(executor, chat, message, "use a different icon")
+
+    revision = service.get_task(service.get_task(run["task_id"]).superseded_by_task_id)
+    # The worker's manager picks the agent by what it provides; this used to fail with
+    # "No enabled capability provides: coding-pull-request".
+    chosen = CapabilityRegistry.from_directory("capabilities").select(
+        revision.required_capabilities
+    )
+    assert chosen.id == "coding-pull-request"

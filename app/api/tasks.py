@@ -419,7 +419,7 @@ def request_pull_request_revision(
         task = service.create_follow_up_task(
             task_id,
             request=body.instructions,
-            required_capabilities=["coding-pull-request"],
+            required_capabilities=["coding", "pull_request_creation"],
             source_context=revision_context,
         )
         # The child now owns the PR. Retire the old exact-SHA approval so two
