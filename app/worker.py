@@ -818,6 +818,11 @@ def main() -> None:
         )
         return task.id
 
+    if not settings.worker_coding_only:
+        logger.info(
+            "Pull request sync with GitHub: %s",
+            "on" if settings.github_token else "off (no ASSISTANT_GITHUB_TOKEN)",
+        )
     worker = TaskWorker(
         service=task_service,
         manager=manager,
