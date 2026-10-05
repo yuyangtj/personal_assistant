@@ -54,7 +54,7 @@ def revise_pull_request(tasks: TaskService, task_id: str, instructions: str):
     revision = tasks.create_follow_up_task(
         task_id,
         request=instructions,
-        required_capabilities=["coding-pull-request"],
+        required_capabilities=["coding", "pull_request_creation"],
         source_context={
             "repository_id": repository_id,
             "revision_pull_request": {
