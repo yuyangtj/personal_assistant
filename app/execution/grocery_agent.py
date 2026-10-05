@@ -8,6 +8,8 @@ results are untrusted data, condensed before the model sees them.
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from typing import Any, Literal
@@ -46,6 +48,24 @@ class GroceryStep(BaseModel):
     tool: str | None = Field(default=None, max_length=120)
     arguments: dict[str, Any] = Field(default_factory=dict)
     answer: str | None = None
+
+
+_SWEDISH = re.compile(r"[åäöÅÄÖ]|\b(jag|vad|har|och|det|är|på|veckan|köpte|hur)\b", re.IGNORECASE)
+
+
+def _language(text: str) -> str:
+    return "Swedish" if _SWEDISH.search(text) else "English"
+
+
+def _not_connected(result: dict[str, Any]) -> bool:
+    for part in result.get("content", []):
+        try:
+            payload = json.loads(part.get("text", ""))
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("configured") is False:
+            return True
+    return False
 
 
 def _step(text: str) -> GroceryStep:
@@ -114,7 +134,8 @@ class GroceryAgentExecutor:
                 ChatMessage("user", turn.request[:1000]),
                 ChatMessage("assistant", turn.reply[:1000]),
             ]
-        messages.append(ChatMessage("user", request))
+        # Store data is Swedish and pulls the model along; say which language to answer in.
+        messages.append(ChatMessage("user", f"{request}\n\n(Answer in {_language(request)}.)"))
         calls: list[dict[str, Any]] = []
         steps = self.max_tool_calls + 4
         for step_number in range(steps):
@@ -154,9 +175,16 @@ class GroceryAgentExecutor:
             return "You already have this result above; use it and answer."
         calls.append({"tool": step.tool, "arguments": step.arguments})
         try:
-            return condense(self.gateway.call(server, tool, step.arguments))
+            result = self.gateway.call(server, tool, step.arguments)
         except McpError as error:
             return f"ERROR: {error}"
+        if _not_connected(result):
+            # The servers' own message tells a Mac user to run a setup command; on the
+            # assistant's server that advice is wrong, so the model never sees it.
+            return (
+                f"NOT CONNECTED: the user's {server} account is not connected to the assistant yet."
+            )
+        return condense(result)
 
     def _result(self, request: str, answer: str, calls: list[dict[str, Any]]) -> ExecutionResult:
         return ExecutionResult(

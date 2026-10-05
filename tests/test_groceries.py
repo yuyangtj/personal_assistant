@@ -235,3 +235,33 @@ def test_an_agent_that_never_answers_gets_a_polite_reply_not_a_failure() -> None
     assert output["reply"].startswith("Sorry, I couldn't get a clear answer")
     assert len(gateway.calls) == 1  # repeats are answered from the earlier result
     assert "Last step" in model.requests[-1][-1].content
+
+
+def test_answers_follow_the_questions_language() -> None:
+    gateway = FakeGateway({})
+    finish = json.dumps({"action": "finish", "answer": "ok"})
+    english, english_model = _agent(gateway, finish)
+    swedish, swedish_model = _agent(gateway, finish)
+
+    _run(english, "What did I buy at Willys last week?")
+    _run(swedish, "Vad köpte jag på Willys förra veckan?")
+
+    assert english_model.requests[0][-1].content.endswith("(Answer in English.)")
+    assert swedish_model.requests[0][-1].content.endswith("(Answer in Swedish.)")
+
+
+def test_a_missing_store_login_never_reaches_the_model_as_setup_advice() -> None:
+    not_configured = _text(
+        {"configured": False, "message": "Run `npm run setup-login` to store your password"}
+    )
+    gateway = FakeGateway({"willys.get_purchase_history": not_configured})
+    agent, model = _agent(
+        gateway,
+        json.dumps({"action": "tool", "tool": "willys.get_purchase_history", "arguments": {}}),
+        json.dumps({"action": "finish", "answer": "Your Willys account isn't connected yet."}),
+    )
+
+    _run(agent, "what did I buy at willys?")
+
+    seen = model.requests[1][-1].content
+    assert "NOT CONNECTED" in seen and "npm" not in seen
