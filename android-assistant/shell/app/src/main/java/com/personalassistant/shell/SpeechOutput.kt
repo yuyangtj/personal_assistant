@@ -31,10 +31,11 @@ class SpeechOutput(context: Context) : TextToSpeech.OnInitListener {
 
     /** Returns false when TTS is not ready; the written response remains available. */
     fun speak(text: String, onDone: () -> Unit): Boolean {
-        if (!ready || text.isBlank()) return false
+        val spoken = SpeechText.speakable(text)
+        if (!ready || spoken.isBlank()) return false
         val id = UUID.randomUUID().toString()
         callbacks[id] = onDone
-        val result = engine.speak(text.take(2_000), TextToSpeech.QUEUE_FLUSH, Bundle(), id)
+        val result = engine.speak(spoken.take(2_000), TextToSpeech.QUEUE_FLUSH, Bundle(), id)
         if (result == TextToSpeech.ERROR) {
             callbacks.remove(id)
             return false

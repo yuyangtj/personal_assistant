@@ -62,8 +62,10 @@ Work in steps. Each reply is exactly one JSON object, one of:
 {"action": "reply", "reply": "<what you say>", "choices": ["<short label>", ...],
  "links": [{"label": "...", "href": "https://..."}]}
   Answer the user and end your turn. The reply holds your whole answer; choices (at most
-  4) and links only add to it. Link only to URLs given to you in ACTIVE WORK or tool
-  results, never to an address you made up.
+  4) and links only add to it. Never write a URL in reply, since it is read aloud: put it
+  in links. Link only to URLs and console routes given to you in ACTIVE WORK or tool
+  results, never to an address you made up. To let the user review, approve or merge a
+  run, link to its "review in the console" route.
 Answer questions about progress from ACTIVE WORK and tool results; never claim a run
 started, stopped or finished unless that is what you were told. Merging, marking a pull
 request ready and deploying are done by the user in the console, never by you.
@@ -76,6 +78,23 @@ def _plain(text: str) -> str:
     text = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), text)
     lines = [" ".join(line.split()) for line in text.splitlines()]
     return "\n".join(line for line in lines if line)
+
+
+_URL = re.compile(r"https?://[^\s)>\]]*[^\s)>\].,;:!?]")
+
+
+def _without_urls(text: str) -> tuple[str, list[str]]:
+    """The text with URLs taken out ("at <url>" and "(<url>)" go with them), and the URLs."""
+    found = _URL.findall(text)
+    text = re.sub(r"\s*\(?\s*(?:at|here:|see)?\s*https?://[^\s)>\]]*[^\s)>\].,;:!?]\s*\)?", "", text)
+    text = re.sub(r" +([.,;:!?])", r"\1", text)
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    return "\n".join(line for line in lines if line), found
+
+
+def _link_label(url: str) -> str:
+    number = re.search(r"/pull/(\d+)", url)
+    return f"PR #{number.group(1)} on GitHub" if number else "Open link"
 
 
 class SupervisorStep(BaseModel):
@@ -343,7 +362,15 @@ class SupervisorExecutor:
     def _result(
         self, request: str, step: SupervisorStep, started: list[str], known_urls: set[str]
     ) -> ExecutionResult:
-        reply = _plain(step.reply or "")[:MAX_REPLY_CHARACTERS]
+        # URLs in the text are read aloud on the phone: known ones become link buttons,
+        # unknown ones are dropped.
+        text, found = _without_urls(_plain(step.reply or ""))
+        reply = text[:MAX_REPLY_CHARACTERS]
+        step.links = step.links + [
+            {"label": _link_label(url), "href": url}
+            for url in found
+            if url in known_urls and all(link.get("href") != url for link in step.links)
+        ]
         blocks = [{"type": "workflow", "workflow_run_id": run_id} for run_id in started]
         # Models invent plausible URLs (a PR under the wrong owner); keep only console
         # routes and addresses the tools actually gave.
