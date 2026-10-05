@@ -1002,6 +1002,63 @@ def test_mark_pull_request_ready_verifies_head_and_refreshes_approval(
     ]
 
 
+def _github_reporting(*, state: str, merged: bool, draft: bool = False):
+    class GitHub:
+        def get_pull_request(self, **_kwargs) -> GitHubPullRequest:
+            return GitHubPullRequest(
+                repository="yuyangtj/personal_assistant",
+                number=17,
+                url="https://github.com/yuyangtj/personal_assistant/pull/17",
+                head_branch="assistant/task-123",
+                head_sha="a" * 40,
+                base_branch="main",
+                state=state,
+                draft=draft,
+                merged=merged,
+                mergeable=True,
+                merge_commit_sha="c" * 40 if merged else None,
+            )
+
+        def list_check_runs(self, **_kwargs):
+            return (GitHubCheckRun("backend", "completed", "success", None),)
+
+        def list_unresolved_review_comments(self, **_kwargs):
+            return ()
+
+    return GitHub()
+
+
+def test_a_pr_merged_on_github_closes_its_gate_when_the_console_looks(
+    client: TestClient,
+) -> None:
+    task_id, _ = _pending_pull_request_task(client, draft=True)
+    client.app.state.github_client = _github_reporting(state="closed", merged=True)
+
+    live = client.get(f"/tasks/{task_id}/pull-request-status")
+
+    assert live.status_code == 200
+    assert live.json()["merged"] is True
+    assert client.get(f"/tasks/{task_id}").json()["status"] == "completed"
+    assert client.get(f"/tasks/{task_id}/pending-approval").status_code == 404
+
+
+def test_a_pr_marked_ready_on_github_reports_ready_and_closed_cancels(
+    client: TestClient,
+) -> None:
+    task_id, _ = _pending_pull_request_task(client, draft=True)
+    client.app.state.github_client = _github_reporting(state="open", merged=False)
+
+    live = client.get(f"/tasks/{task_id}/pull-request-status").json()
+
+    assert live["draft"] is False and live["merged"] is False
+    assert client.get(f"/tasks/{task_id}").json()["status"] == "waiting_for_approval"
+
+    client.app.state.github_client = _github_reporting(state="closed", merged=False)
+    client.get(f"/tasks/{task_id}/pull-request-status")
+
+    assert client.get(f"/tasks/{task_id}").json()["status"] == "cancelled"
+
+
 def test_pull_request_status_and_revision_use_only_unresolved_feedback(
     client: TestClient,
 ) -> None:

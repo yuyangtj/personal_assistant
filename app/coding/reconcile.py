@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from app.integrations.github import GitHubClient, GitHubError
+from app.integrations.github import GitHubClient, GitHubError, GitHubPullRequest
 from app.services import TaskService
 
 logger = logging.getLogger(__name__)
@@ -39,19 +39,29 @@ class PullRequestReconciler:
             except GitHubError:
                 logger.warning("Could not read PR #%s from GitHub", gate["number"])
                 continue
-            if pull_request.merged:
-                self.service.record_merged_elsewhere(
-                    gate["task_id"], merge_sha=pull_request.merge_commit_sha
-                )
-            elif pull_request.state == "closed":
-                self.service.reject_approval(
-                    gate["task_id"],
-                    reply=f"Pull request #{gate['number']} was closed on GitHub without merging.",
-                )
-            else:
-                continue
-            changed += 1
-            logger.info("PR #%s changed on GitHub; its gate is closed", gate["number"])
-            if self.on_change is not None:
-                self.on_change(gate["task_id"])
+            changed += self.settle(gate, pull_request)
         return changed
+
+    def settle_task(self, task_id: str, pull_request: GitHubPullRequest) -> bool:
+        """Close one task's gate now if its PR, just read from GitHub, is merged or closed."""
+        gate = next(
+            (g for g in self.service.open_pull_request_gates() if g["task_id"] == task_id), None
+        )
+        return gate is not None and self.settle(gate, pull_request)
+
+    def settle(self, gate: dict, pull_request: GitHubPullRequest) -> bool:
+        if pull_request.merged:
+            self.service.record_merged_elsewhere(
+                gate["task_id"], merge_sha=pull_request.merge_commit_sha
+            )
+        elif pull_request.state == "closed":
+            self.service.reject_approval(
+                gate["task_id"],
+                reply=f"Pull request #{gate['number']} was closed on GitHub without merging.",
+            )
+        else:
+            return False
+        logger.info("PR #%s changed on GitHub; its gate is closed", gate["number"])
+        if self.on_change is not None:
+            self.on_change(gate["task_id"])
+        return True
