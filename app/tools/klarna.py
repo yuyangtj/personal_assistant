@@ -7,7 +7,8 @@ Willys and Lidl tools; nothing leaves the server except the rows a question need
 from __future__ import annotations
 
 import json
-from datetime import date
+from collections.abc import Callable
+from datetime import date, timedelta
 from typing import Any
 
 from app.tools.mcp import McpError, McpGateway
@@ -34,7 +35,11 @@ TOOLS = [
         "name": "purchases",
         "inputSchema": {"properties": {**_DATES, "limit": {"type": "integer"}}},
     },
+    {"name": "upload_export", "inputSchema": {"properties": {}}},
 ]
+UPLOAD = "klarna-purchases"
+#: Data whose newest purchase is older than this gets an offer to upload a newer export.
+STALE_AFTER = timedelta(days=14)
 
 
 def _date(value: Any, name: str) -> date | None:
@@ -51,17 +56,31 @@ def _text(payload: dict) -> dict:
 
 
 class KlarnaTools:
-    def __init__(self, purchases: PurchaseService):
+    def __init__(self, purchases: PurchaseService, *, today: Callable[[], date] = date.today):
         self.purchases = purchases
+        self.today = today
 
     def list_tools(self) -> list[dict[str, Any]]:
         return TOOLS
 
     def call(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        if tool == "upload_export":
+            return _text(
+                {
+                    "offer_upload": UPLOAD,
+                    "note": "An upload button is shown with your answer; ask the user to pick "
+                    "their Klarna export (CSV) with it.",
+                }
+            )
         overview = self.purchases.overview()
         if not overview["count"]:
             return _text(
-                {"configured": True, "purchases": 0, "note": "No Klarna export imported yet."}
+                {
+                    "purchases": 0,
+                    "offer_upload": UPLOAD,
+                    "note": "No Klarna export imported yet. An upload button is shown with your "
+                    "answer; ask the user to upload their Klarna export (CSV) with it.",
+                }
             )
         span = {
             "start": _date(arguments.get("from"), "from"),
@@ -69,7 +88,13 @@ class KlarnaTools:
             "merchant": (str(arguments.get("merchant") or "").strip() or None),
         }
         # The data is only as fresh as the last export; say so with every answer.
-        known = {"data_covers": f"{overview['first']} to {overview['last']}"}
+        known: dict[str, Any] = {"data_covers": f"{overview['first']} to {overview['last']}"}
+        if self.today() - overview["last"] > STALE_AFTER:
+            known["offer_upload"] = UPLOAD
+            known["note"] = (
+                f"The data ends {overview['last']}. An upload button for a newer export is "
+                "shown with your answer; mention it when the question needs newer purchases."
+            )
         if tool == "spending":
             group_by = arguments.get("group_by")
             if group_by not in (None, "", "merchant", "month"):

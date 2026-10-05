@@ -7,7 +7,6 @@ from app.api import (
     chat,
     memories,
     passkeys,
-    purchases,
     speech,
     tasks,
     web,
@@ -15,5 +14,5 @@ from app.api import (
 )
 
 router = APIRouter()
-for module in (chat, tasks, workflows, catalog, memories, passkeys, purchases, speech, web):
+for module in (chat, tasks, workflows, catalog, memories, passkeys, speech, web):
     router.include_router(module.router)

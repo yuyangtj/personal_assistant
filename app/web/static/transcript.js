@@ -92,8 +92,13 @@ const BLOCKS = {
       + `<span>Review ›</span></button>`;
   },
   item: (block) => `<button type="button" class="chip link-button" data-item="${esc(block.slug)}">#${esc(block.slug)}</button>`,
+  // A file handed over right here; the server sends it to the upload's handler.
+  upload: (block, m) => block.state === "done"
+    ? `<div class="upload-done">✓ ${esc(block.result || "Uploaded")}</div>`
+    : `<label class="upload-button"><input type="file" hidden data-upload="${esc(block.id)}"`
+      + ` data-message="${esc(m.id)}" accept="${esc(block.accept)}">${esc(block.label)}</label>`,
 };
-const renderBlocks = (m) => (m.blocks || []).map((block) => (BLOCKS[block.type] || (() => ""))(block)).join("");
+const renderBlocks = (m) => (m.blocks || []).map((block) => (BLOCKS[block.type] || (() => ""))(block, m)).join("");
 
 function renderTranscript() {
   const byId = Object.fromEntries(state.tasks.map((t) => [t.id, t]));

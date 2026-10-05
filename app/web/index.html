@@ -11,7 +11,7 @@
 
 <header class="topbar">
   <span class="brand">Assistant</span>
-  <nav aria-label="Sections"><a href="#/chats" id="nav-chats">Chats</a><a href="#/items" id="nav-items">Work items</a><a href="#/memories" id="nav-memories">Memories</a><a href="#/purchases" id="nav-purchases">Purchases</a></nav>
+  <nav aria-label="Sections"><a href="#/chats" id="nav-chats">Chats</a><a href="#/items" id="nav-items">Work items</a><a href="#/memories" id="nav-memories">Memories</a></nav>
   <span id="error" class="err grow" role="alert"></span>
   <span id="status" class="sub" style="margin:0"></span>
   <button class="ghost" id="passkeys-open" type="button" hidden title="Approve with Touch ID or your fingerprint">Passkeys</button>
@@ -100,26 +100,6 @@
   </main>
 </div>
 
-<div class="view single" id="purchases-view" hidden>
-  <main>
-    <div class="memories-page">
-      <h1>Purchases</h1>
-      <div class="sub">Your Klarna purchases, from the exports you upload. Ask in chat, for
-        example “what did I spend with Klarna last month?” or “how much at Uniqlo this year?”.
-        Uploading a newer export adds new purchases and updates changed ones; nothing is
-        duplicated. Stored on your server; a chat answer only uses the purchases it needs.</div>
-      <form id="purchase-import" class="memory-form">
-        <div class="row wrap"><input type="file" id="purchase-file" accept=".csv,text/csv" required
-          aria-label="Klarna export (CSV)"><span class="grow"></span><button type="submit">Import</button></div>
-      </form>
-      <div id="purchase-status" class="sub" role="status"></div>
-      <div id="purchase-error" class="err" role="alert"></div>
-      <input id="purchase-search" type="search" placeholder="Filter by merchant…" aria-label="Filter by merchant">
-      <div id="purchase-list"></div>
-    </div>
-  </main>
-</div>
-
 <div class="scrim" id="detail-scrim"></div>
 <section class="detail" id="task-panel" aria-label="Task details">
   <div class="row"><h1 class="grow" id="detail-title">Task</h1><button class="ghost" id="close-task">Close</button></div>
@@ -163,7 +143,6 @@
 <script src="/ui/static/items.js"></script>
 <script src="/ui/static/phone.js"></script>
 <script src="/ui/static/memories.js"></script>
-<script src="/ui/static/purchases.js"></script>
 <script src="/ui/static/passkeys.js"></script>
 <script src="/ui/static/events.js"></script>
 <script src="/ui/static/main.js"></script>

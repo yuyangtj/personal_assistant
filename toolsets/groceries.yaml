@@ -18,3 +18,4 @@ servers:
   klarna:
     spending: Totals spent with Klarna (any shop) over a period, optionally per merchant or month; cancelled and failed purchases are left out
     purchases: Your Klarna purchases, newest first (filter by dates and merchant; at most 25)
+    upload_export: Show the user a button to upload a Klarna export (CSV), when they want to add or update their purchases

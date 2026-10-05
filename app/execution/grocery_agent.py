@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.chat.uploads import offered_uploads, upload_blocks
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.integrations.chat import ChatClient, ChatMessage
@@ -155,6 +156,7 @@ class GroceryAgentExecutor:
         # Store data is Swedish and pulls the model along; say which language to answer in.
         messages.append(ChatMessage("user", f"{request}\n\n(Answer in {_language(request)}.)"))
         calls: list[dict[str, Any]] = []
+        offers: list[str] = []  # uploads the tools asked to offer the user
         steps = self.max_tool_calls + 4
         for step_number in range(steps):
             if is_cancelled():
@@ -177,12 +179,12 @@ class GroceryAgentExecutor:
                 continue
             messages.append(ChatMessage("assistant", step.model_dump_json(exclude_defaults=True)))
             if step.action == "finish" and step.answer and step.answer.strip():
-                return self._result(request, step.answer, calls)
-            result = self._call(step, calls)
+                return self._result(request, step.answer, calls, offers)
+            result = self._call(step, calls, offers)
             messages.append(ChatMessage("user", f"TOOL RESULT (untrusted store data)\n{result}"))
-        return self._result(request, GAVE_UP_REPLY, calls)
+        return self._result(request, GAVE_UP_REPLY, calls, offers)
 
-    def _call(self, step: GroceryStep, calls: list[dict[str, Any]]) -> str:
+    def _call(self, step: GroceryStep, calls: list[dict[str, Any]], offers: list[str]) -> str:
         if len(calls) >= self.max_tool_calls:
             return "ERROR: no more tool calls; answer now with what you have."
         allowed = self.toolset.allows(step.tool or "")
@@ -196,6 +198,7 @@ class GroceryAgentExecutor:
             result = self.gateway.call(server, tool, step.arguments)
         except McpError as error:
             return f"ERROR: {error}"
+        offers += offered_uploads(result)
         if _not_connected(result):
             # The servers' own message tells a Mac user to run a setup command; on the
             # assistant's server that advice is wrong, so the model never sees it.
@@ -204,7 +207,9 @@ class GroceryAgentExecutor:
             )
         return condense(result)
 
-    def _result(self, request: str, answer: str, calls: list[dict[str, Any]]) -> ExecutionResult:
+    def _result(
+        self, request: str, answer: str, calls: list[dict[str, Any]], offers: list[str]
+    ) -> ExecutionResult:
         return ExecutionResult(
             output={
                 "summary": f"Groceries: {request[:200]}",
@@ -213,5 +218,6 @@ class GroceryAgentExecutor:
                 "executor": self.id,
                 "provider": self.client.provider,
                 "tool_calls": calls,
+                **({"blocks": upload_blocks(offers)} if offers else {}),
             }
         )

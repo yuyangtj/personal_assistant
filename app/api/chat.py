@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
+from pydantic import BaseModel, Field
 
 from app.api.common import (
     reject_direct_coding,
@@ -29,6 +30,7 @@ from app.api.schemas import (
     WorkflowRunResponse,
 )
 from app.chat.turns import private_memory_text, propose_coding_run, triage_message
+from app.chat.uploads import MAX_UPLOAD_CHARACTERS, TARGETS, UploadError
 from app.services import (
     ChatMessageNotFoundError,
     ChatSessionNotFoundError,
@@ -142,6 +144,41 @@ def append_chat_message(
         focused_work_items=posted.focused_work_items,
         decision=triage_message(request, chat_session_id, body, posted.message.id),
     )
+
+
+class ChatUploadRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=200)
+    #: The file's text (CSV and the like); a few years of purchases is well under a megabyte.
+    content: str = Field(min_length=1, max_length=MAX_UPLOAD_CHARACTERS)
+
+
+@router.post("/chat-sessions/{chat_session_id}/messages/{message_id}/uploads/{block_id}")
+def upload_to_chat(
+    chat_session_id: str,
+    message_id: str,
+    block_id: str,
+    body: ChatUploadRequest,
+    request: Request,
+) -> dict:
+    """A file handed over with an upload button: its target's handler replies in the chat."""
+    service = task_service(request)
+    try:
+        block = service.open_upload(chat_session_id, message_id, block_id)
+    except ChatMessageNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Upload not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    target = TARGETS.get(block["target"])
+    if target is None:
+        raise HTTPException(status_code=409, detail="This kind of upload isn't supported")
+    try:
+        reply = target.handle(request.app.state, body.content)
+    except UploadError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    service.complete_upload(message_id, block_id, reply.split(".")[0])
+    service.append_chat_message(chat_session_id, content=f"📎 {body.filename}")
+    service.append_chat_message(chat_session_id, content=reply, role="assistant")
+    return {"reply": reply}
 
 
 PRIVATE_PLACEHOLDER = "🔒 A private memory (kept out of the chat)"

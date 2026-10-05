@@ -25,15 +25,23 @@ and an immutable lowercase Git SHA. It records approval and intended stages, but
 no remote-shell executor yet. Adding one requires a target-specific credential, health check, and
 rollback implementation rather than granting an LLM general server access.
 
-## Klarna purchases
+## Files handed over in the chat, and Klarna purchases
 
-Klarna has no API for customers, so purchases come from CSV exports uploaded on the console's
-**Purchases** page (`POST /purchases/import`). Imports merge: a purchase is identified by
-date, time, merchant and amount (identical ones by occurrence), and a later export updates
-its status, so overlapping exports never duplicate. The rows live in the `purchases` table
-(`018`). The shopping agent (the grocery agent, `toolsets/groceries.yaml`) answers from them
-with two read-only tools, `klarna.spending` and `klarna.purchases`. They are served from the
-database, not MCP, and work without the store gateway. Cancelled and failed purchases are
+A reply can carry an **upload button** (block type `upload`). Agents offer one through their
+tools: a tool result with `"offer_upload": "<target>"` makes the reply carry the button for
+that target. Targets are registered in `app/chat/uploads.py` with a label, the accepted
+file types and a handler. The file goes to
+`POST /chat-sessions/{chat}/messages/{message}/uploads/{block}`. The server only accepts it
+for an open upload block in that chat (a model can't create one), runs the handler, and
+posts the result as the next assistant message. A new kind of file is one more target, not
+a new screen.
+
+Klarna has no API for customers, so purchases come from its CSV exports. The shopping agent
+(`toolsets/groceries.yaml`) has read-only `klarna.spending` and `klarna.purchases` tools
+served from the `purchases` table (`018`), plus `klarna.upload_export`. It offers the upload
+when nothing is imported, when the newest purchase is over two weeks old, or when the user
+asks. Imports merge on date, time, merchant and amount (identical ones by occurrence) and
+update statuses, so overlapping exports never duplicate. Cancelled and failed purchases are
 not counted as spending. Only the rows or totals a question needs go to the chat model.
 
 ## Memory and historical learning
