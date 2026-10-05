@@ -33,8 +33,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Links into the console (push notifications) can open here. -->
-            <intent-filter>
+            <!-- Links into the console (push notifications) open here. Verified against the
+                 site's /.well-known/assetlinks.json, so Android opens them without asking. -->
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
