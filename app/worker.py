@@ -29,6 +29,7 @@ from app.config import Settings
 from app.deployments import DeploymentRegistry, HostDeployerSpool
 from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.fake import ExecutionCancelled
+from app.execution.grocery_agent import GroceryAgentExecutor
 from app.execution.tool_agent import ToolAgentExecutor
 from app.integrations.factory import chat_client_chain
 from app.integrations.factory import provider_order as _provider_order
@@ -45,6 +46,7 @@ from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.schedules import Scheduler
 from app.services import TaskService
+from app.tools.mcp import McpGateway, Toolset
 from app.tools.search import build_search
 from app.validation import ValidationProfileRegistry
 from app.work.briefs import BriefWritebackJob, BriefWriter
@@ -780,6 +782,13 @@ def main() -> None:
     )
     if search is not None and conversation_executor is not None:
         executors[ToolAgentExecutor.id] = ToolAgentExecutor(conversation_executor.client, search)
+    if settings.mcp_gateway_url and conversation_executor is not None:
+        executors[GroceryAgentExecutor.id] = GroceryAgentExecutor(
+            conversation_executor.client,
+            McpGateway(settings.mcp_gateway_url, settings.mcp_gateway_token),
+            Toolset.load(settings.toolsets_directory / "groceries.yaml"),
+        )
+        logger.info("Grocery agent enabled through %s", settings.mcp_gateway_url)
         logger.info("Web research agent enabled with %s search", search.name)
     provider_state_store = DatabaseProviderStateStore(database)
     coding_executor = build_coding_executor(

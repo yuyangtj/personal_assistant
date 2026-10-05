@@ -1,0 +1,16 @@
+# Tools the grocery agent may call through the MCP gateway. Only what is listed here is
+# offered to the model; every tool only reads (none can buy or change anything).
+id: groceries
+description: Your grocery stores in Sweden, Willys and Lidl
+servers:
+  willys:
+    get_promotions: This week's offers at your Willys store (search with query)
+    get_store_info: Your Willys store's address, opening hours and flyer
+    get_purchase_history: Your Willys purchases (in-store receipts and online orders) with totals
+    get_receipt: The line items of one Willys in-store receipt (reference and date from the purchase history)
+    get_order_details: The line items of one Willys online order
+    get_personal_offers: Your personal Willys Plus offers
+  lidl:
+    get_promotions: This week's Lidl campaigns and offers (results are large - pass query and a small limit)
+    get_leaflet_promotions: The products in the current Lidl leaflet (pass query to narrow it)
+    get_historical_receipts: Your Lidl Plus receipts

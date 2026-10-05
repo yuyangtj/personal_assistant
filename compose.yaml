@@ -53,6 +53,7 @@ services:
       ASSISTANT_GEMINI_TTS_CACHE_ENTRIES: ${ASSISTANT_GEMINI_TTS_CACHE_ENTRIES:-128}
       # GitHub is used here only for the explicit PR merge-approval endpoint.
       ASSISTANT_GITHUB_TOKEN: ${ASSISTANT_GITHUB_TOKEN:-}
+      ASSISTANT_MCP_GATEWAY_URL: ${ASSISTANT_MCP_GATEWAY_URL:-}
       ASSISTANT_GITHUB_API_BASE_URL: ${ASSISTANT_GITHUB_API_BASE_URL:-https://api.github.com}
       ASSISTANT_APPROVAL_TOKEN: ${ASSISTANT_APPROVAL_TOKEN:-}
     ports:
@@ -76,6 +77,8 @@ services:
       ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH: ${ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH:-}
       ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH: ${ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH:-}
       ASSISTANT_WORKER_ID: worker-compose
+      ASSISTANT_MCP_GATEWAY_URL: ${ASSISTANT_MCP_GATEWAY_URL:-}
+      ASSISTANT_MCP_GATEWAY_TOKEN: ${ASSISTANT_MCP_GATEWAY_TOKEN:-}
       # Read from the host environment; never commit keys to this file.
       KIMI_API_KEY: ${KIMI_API_KEY:-}
       ASSISTANT_KIMI_MODEL: ${ASSISTANT_KIMI_MODEL:-kimi-for-coding-highspeed}
@@ -171,5 +174,24 @@ services:
         source: ${ASSISTANT_HOST_CODE_WORKTREE_ROOT:-./.coding-worktrees}
         target: /workspace/worktrees
 
+  # The MCP servers (Willys, Lidl) and their gateway, from the private mcp-servers repo
+  # (checked out at ../mcps by default). Opt-in: docker compose --profile mcp up.
+  mcp-tools:
+    profiles: ["mcp"]
+    build:
+      context: ${ASSISTANT_MCP_SERVERS_DIR:-../mcps}
+    image: personal-assistant-mcp-tools:local
+    environment:
+      MCP_GATEWAY_TOKEN: ${ASSISTANT_MCP_GATEWAY_TOKEN:-}
+      WILLYS_PLUSNUMMER: ${WILLYS_PLUSNUMMER:-}
+      WILLYS_PASSWORD: ${WILLYS_PASSWORD:-}
+      LIDL_USERNAME: ${LIDL_USERNAME:-}
+      LIDL_PASSWORD: ${LIDL_PASSWORD:-}
+    volumes:
+      - mcp-sessions:/home/node
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
 volumes:
   assistant-postgres:
+  mcp-sessions:

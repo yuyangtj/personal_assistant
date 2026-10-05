@@ -174,6 +174,17 @@ def triage_message(
         response.result = result.reply
         response.handled = True
         return response
+    # Questions about the user's grocery stores run the grocery agent right away: it only
+    # reads offers, receipts and purchases, so there is nothing to confirm.
+    if "groceries" in decision.capabilities:
+        service.create_task_from_message(
+            chat_session_id,
+            message_id,
+            required_capabilities=["groceries"],
+            source_context={"client": "web-console"},
+        )
+        response.handled = True
+        return response
     # Work goes to the supervisor, which sees every run and can start, inspect or stop
     # them: a clear request for a code change, or any message about coding work.
     if request.app.state.settings.supervisor_enabled and (

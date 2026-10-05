@@ -34,6 +34,10 @@ class Settings:
     triage_model_enabled: bool = False
     ntfy_topic_url: str | None = None
     tavily_api_key: str | None = None
+    #: The mcp-tools gateway (Willys, Lidl); the grocery agent is installed when it is set.
+    mcp_gateway_url: str | None = None
+    mcp_gateway_token: str | None = None
+    toolsets_directory: Path = Path("toolsets")
     brave_search_api_key: str | None = None
     ntfy_token: str | None = None
     public_url: str | None = None
@@ -187,6 +191,11 @@ class Settings:
             ),
             ntfy_topic_url=os.getenv("ASSISTANT_NTFY_TOPIC_URL") or None,
             tavily_api_key=os.getenv("TAVILY_API_KEY") or None,
+            mcp_gateway_url=os.getenv("ASSISTANT_MCP_GATEWAY_URL") or None,
+            mcp_gateway_token=os.getenv("ASSISTANT_MCP_GATEWAY_TOKEN") or None,
+            toolsets_directory=Path(
+                os.getenv("ASSISTANT_TOOLSETS_DIRECTORY", str(defaults.toolsets_directory))
+            ),
             brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY") or None,
             ntfy_token=os.getenv("ASSISTANT_NTFY_TOKEN") or None,
             public_url=os.getenv("ASSISTANT_PUBLIC_URL") or None,

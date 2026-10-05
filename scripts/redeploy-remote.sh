@@ -39,7 +39,7 @@ prune_release_images() {
     # `docker image ls` lists newest first; keep the serving release plus the newest
     # older ones so a rollback never needs a rebuild.
     local repository tag
-    for repository in personal-assistant personal-assistant-coding; do
+    for repository in personal-assistant personal-assistant-coding personal-assistant-mcp-tools; do
         docker image ls "${repository}" --format '{{.Tag}}' \
             | grep -E '^[0-9a-f]{40}$' \
             | grep -vx "${release_tag}" \
@@ -96,6 +96,11 @@ fi
 
 echo "Pulling origin/${DEPLOY_BRANCH}..."
 git pull --ff-only origin "${DEPLOY_BRANCH}"
+# The private MCP servers live next to this checkout (built by the "mcp" profile).
+MCP_SERVERS_DIRECTORY="${REPOSITORY_ROOT}/../mcp-servers"
+if [[ -d "${MCP_SERVERS_DIRECTORY}/.git" ]]; then
+    git -C "${MCP_SERVERS_DIRECTORY}" pull --ff-only --quiet
+fi
 
 if [[ -n "${EXPECTED_SHA}" ]]; then
     if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
