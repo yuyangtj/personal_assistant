@@ -1058,7 +1058,8 @@ def web_console() -> FileResponse:
     """A local console for exercising the chat and task flow from a browser."""
     if not WEB_INDEX.is_file():
         raise HTTPException(status_code=404, detail="Web console is not installed")
-    return FileResponse(WEB_INDEX, media_type="text/html")
+    # Revalidated on every load, so browsers and the app never keep an old console.
+    return FileResponse(WEB_INDEX, media_type="text/html", headers={"Cache-Control": "no-cache"})
 
 
 WEB_DIRECTORY = WEB_INDEX.parent

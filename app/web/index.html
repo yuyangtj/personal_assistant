@@ -149,6 +149,10 @@
   .choices button.picked:disabled { opacity: 1; box-shadow: 0 0 0 2px var(--accent) inset; }
   .block-link { display: block; margin-top: 7px; }
   .plan { white-space: pre-wrap; font-size: 12.5px; margin-bottom: 8px; }
+  #mic svg { display: inline; }
+  #mic[hidden] { display: none; }  /* only inside the Android app */
+  #mic.listening { background: var(--danger-bg); color: var(--danger); animation: pulse 1.1s infinite; }
+  #phone-note button { margin-left: 6px; }
   .bubble .chip { margin-top: 7px; padding: 2px 9px; }
   .badge {
     display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 999px;
@@ -278,8 +282,15 @@
       <select id="repository"><option value="">Pick for me</option></select></div></div>
     <div id="focus-bar" class="focus-bar" aria-label="Work items this chat is about"></div>
     <div id="transcript"><div class="empty">Start or pick a conversation.</div></div>
+    <div id="phone-note" class="sub" hidden></div>
     <form id="composer">
       <textarea id="input" rows="2" placeholder="Say something — mention a work item with #tag. Nothing runs on its own…"></textarea>
+      <button type="button" class="quiet icon-btn" id="mic" hidden aria-label="Speak" title="Speak">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v1a7 7 0 0 0 14 0v-1"></path>
+          <path d="M12 18v4"></path></svg>
+      </button>
       <button id="send" type="submit">Send</button>
     </form>
   </main>
@@ -482,6 +493,7 @@ async function refreshTranscript() {
     renderFocusBar();
     state.messages = msgs.messages; state.tasks = tasks.tasks;
     state.workflowRuns = runs.runs.filter((run) => run.workflow_id === "coding-change");
+    speakReplyIfWaiting();
     const chat = state.chats.find((c) => c.id === state.chatId);
     $("chat-title").textContent = chat ? chat.title : "Conversation";
     renderTranscript();
@@ -565,13 +577,20 @@ function renderTranscript() {
         + `<span class="grow">${esc(taskCardLabel(task))}</span><span>View ›</span></button>` : "");
     return `<div class="msg ${m.role}"><div class="who">${who}</div>`
       + `<div class="bubble">${esc(m.content)}${extras}</div></div>`;
-  }).join("") || `<div class="empty">No messages yet.</div>`;
+  }).map((html, index) => html + phoneTurnsAfter(state.messages[index].id)).join("")
+    // Phone turns from before the first saved message (or a chat not saved yet).
+    .replace(/^/, phoneTurnsAfter(null)) || `<div class="empty">No messages yet.</div>`;
   if (atBottom) $("transcript").scrollTop = $("transcript").scrollHeight;
 }
 
-async function send(text) {
+async function send(text, { local = true, voice = false } = {}) {
   state.busy = true; $("send").disabled = true;
   try {
+    if (local && phone.bridge && !awaitingChoice()) {
+      // Simple things (the time, a timer) can be answered on the phone itself.
+      const route = await phoneRoute(text);
+      if (route && route.route !== "cloud") return answerOnPhone(text, route, voice);
+    }
     if (!state.chatId) {
       state.chatId = (await api("/chat-sessions", { method: "POST", body: "{}" })).id;
       goChat(state.chatId);
@@ -581,6 +600,8 @@ async function send(text) {
       method: "POST", body: JSON.stringify({ content: text, repository_id: state.repositoryId,
         local_time: localIsoTime(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
     });
+    // A spoken question gets its answer spoken too, whenever it arrives.
+    if (voice) phone.speakFor = posted.message.id;
     // The server decides what the message needs; the repository picker is only an override.
     // When it already took care of it (an action, an offer with choices, or a choice
     // picked), its reply is in the transcript; otherwise the message gets a chat reply.
@@ -1131,6 +1152,10 @@ document.addEventListener("click", (e) => {
     return api(`/schedules/${cancelSchedule.dataset.cancelSchedule}`, { method: "DELETE" })
       .then(() => renderWorkItem(state.itemId)).catch(fail);
   }
+  const phoneAction = e.target.closest("[data-phone-action]");
+  if (phoneAction) return runPhoneAction(phoneAction.dataset.phoneAction);
+  const phoneCancel = e.target.closest("[data-phone-cancel]");
+  if (phoneCancel) return cancelPhoneAction(phoneCancel.dataset.phoneCancel);
   const removeEntry = e.target.closest("[data-remove-entry]");
   if (removeEntry && state.itemId) {
     return api(`/work-items/${state.itemId}/checklist/${removeEntry.dataset.removeEntry}`, { method: "DELETE" })
@@ -1142,7 +1167,7 @@ document.addEventListener("click", (e) => {
   if (choice && !choice.disabled && !state.busy) {
     // Picking a choice is just saying it: the label goes in as your next message.
     clearError();
-    return send(choice.dataset.choice);
+    return send(choice.dataset.choice, { local: false });
   }
 
 });
@@ -1274,6 +1299,136 @@ const theme = {
 };
 theme.init();
 $("theme-toggle").onclick = () => theme.toggle();
+// Inside the Android app, a native bridge adds what only the phone can do: voice, spoken
+// replies, timers and alarms, and simple answers that stay on the phone. In a browser
+// none of this exists and the console works as before.
+const phone = { bridge: window.AndroidAssistant || null, caps: null, routes: new Map(), next: 0,
+                turns: {}, speakFor: null, listening: false };
+
+function phoneSend(message) { phone.bridge.postMessage(JSON.stringify(message)); }
+
+function phoneRoute(text) {
+  return new Promise((resolve) => {
+    const id = `r${++phone.next}`;
+    phone.routes.set(id, resolve);
+    phoneSend({ type: "route", id, text });
+    // On-device models can be slow to wake; the server answers instead after a while.
+    setTimeout(() => { if (phone.routes.delete(id)) resolve(null); }, 6000);
+  });
+}
+
+// "yes", "Start coding" and the like answer the assistant's open choices on the server.
+function awaitingChoice() {
+  const last = [...state.messages].reverse().find((m) => m.role !== "system");
+  return Boolean(last && last.role === "assistant"
+    && (last.blocks || []).some((block) => block.type === "choices" && block.state === "open"));
+}
+
+const phoneTurns = () => phone.turns[state.chatId || ""] || (phone.turns[state.chatId || ""] = []);
+
+function answerOnPhone(text, route, voice) {
+  addPhoneTurn({ role: "user", text });
+  const answer = route.route === "reply" ? route.text : `${route.label}?`;
+  addPhoneTurn({ role: "assistant", text: answer, action: route.route === "confirm" ? route.action : null });
+  if (voice) phoneSend({ type: "speak", text: answer });
+  renderTranscript();
+  $("transcript").scrollTop = $("transcript").scrollHeight;
+}
+
+// Answered on the phone, so not saved in the conversation; they last until the app closes.
+// Each sits right after the saved message that was last when it happened (the phone's
+// and the server's clocks can disagree, so time can't order them).
+function phoneTurnsAfter(messageId) {
+  return (phone.turns[state.chatId || ""] || []).filter((turn) => turn.after === messageId).map((turn) => {
+    const buttons = turn.action ? `<div class="choices">`
+      + `<button type="button" data-phone-action="${esc(turn.action)}" ${turn.settled ? "disabled" : ""}>Do it</button>`
+      + `<button type="button" class="quiet" data-phone-cancel="${esc(turn.action)}" ${turn.settled ? "disabled" : ""}>Cancel</button></div>` : "";
+    return `<div class="msg ${turn.role}"><div class="who">${turn.role === "user" ? "YOU" : "ON THIS PHONE"}</div>`
+      + `<div class="bubble">${esc(turn.text)}${buttons}</div></div>`;
+  }).join("");
+}
+
+function addPhoneTurn(turn) {
+  const last = state.messages[state.messages.length - 1];
+  phoneTurns().push({ ...turn, after: last ? last.id : null });
+}
+
+function settlePhoneAction(id) {
+  const turn = phoneTurns().find((candidate) => candidate.action === id);
+  if (turn) turn.settled = true;
+  return turn;
+}
+
+function runPhoneAction(id) {
+  if (settlePhoneAction(id)) { phoneSend({ type: "run_action", id }); renderTranscript(); }
+}
+
+function cancelPhoneAction(id) {
+  if (settlePhoneAction(id)) { addPhoneTurn({ role: "assistant", text: "OK, cancelled." }); renderTranscript(); }
+}
+
+function speakReplyIfWaiting() {
+  if (!phone.speakFor) return;
+  const index = state.messages.findIndex((m) => m.id === phone.speakFor);
+  const reply = index >= 0 && state.messages.slice(index + 1).find((m) => m.role === "assistant");
+  if (!reply) return;
+  phone.speakFor = null;
+  phoneSend({ type: "speak", text: reply.content });
+}
+
+function showListening(listening) {
+  phone.listening = listening;
+  $("mic").classList.toggle("listening", listening);
+  $("mic").setAttribute("aria-label", listening ? "Stop listening" : "Speak");
+  $("input").placeholder = listening ? "Listening…"
+    : "Say something — mention a work item with #tag. Nothing runs on its own…";
+}
+
+function renderDeviceAi(caps) {
+  const note = $("phone-note");
+  if (caps.onDevice === "downloadable") {
+    note.innerHTML = `Simple requests could stay on this phone.<button type="button" class="quiet" id="enable-on-device">Download on-device AI</button>`;
+    $("enable-on-device").onclick = () => phoneSend({ type: "enable_on_device" });
+  } else if (caps.onDevice === "downloading") {
+    note.textContent = caps.onDeviceDetail || "Downloading on-device AI…";
+  } else {
+    note.textContent = "";
+  }
+  note.hidden = !note.textContent;
+}
+
+function onPhoneMessage(message) {
+  if (message.type === "capabilities" || message.type === "device_ai") {
+    phone.caps = { ...(phone.caps || {}), ...message };
+    if (message.type === "capabilities") $("mic").hidden = !message.voice;
+    renderDeviceAi(phone.caps);
+  } else if (message.type === "voice") {
+    if (message.state === "listening") showListening(true);
+    else if (message.state === "partial") $("input").value = message.text || "";
+    else if (message.state === "final") {
+      showListening(false);
+      $("input").value = "";
+      if (message.text && !state.busy) send(message.text, { voice: true });
+    } else if (message.state === "error") {
+      showListening(false);
+      if (message.text) fail(new Error(message.text));
+    }
+  } else if (message.type === "route") {
+    const resolve = phone.routes.get(message.id);
+    phone.routes.delete(message.id);
+    if (resolve) resolve(message);
+  } else if (message.type === "action_result") {
+    addPhoneTurn({ role: "assistant", text: message.error || "Done." });
+    renderTranscript();
+  }
+}
+
+if (phone.bridge) {
+  phone.bridge.onmessage = (event) => onPhoneMessage(JSON.parse(event.data));
+  $("mic").onclick = () => phoneSend({ type: phone.listening ? "stop_listening" : "listen" });
+  phoneSend({ type: "hello" });
+}
+
 // Push notifications link to /?task=<id>; open that task over the chats view.
 const linkedTask = new URLSearchParams(location.search).get("task");
 if (linkedTask) history.replaceState(null, "", location.pathname + routeHash({ section: "chats", task: linkedTask }));

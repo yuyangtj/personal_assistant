@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The console this app opens; override with -PconsoleUrl=https://… when building.
+def consoleUrl = (project.findProperty('consoleUrl') ?: 'https://assistant.yangyu.se').toString()
+
+android {
+    namespace 'com.personalassistant.shell'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.personalassistant.shell'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+        buildConfigField 'String', 'CONSOLE_URL', "\"${consoleUrl}\""
+        manifestPlaceholders = [consoleHost: new URI(consoleUrl).host]
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    packaging {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.activity:activity-ktx:1.10.1'
+    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.9.2'
+    // Origin-restricted messaging between the console page and the app.
+    implementation 'androidx.webkit:webkit:1.14.0'
+    // Prompt beta4 is compiled against the coroutines 1.11 JVM-default ABI.
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
+    // Gemini Nano runs locally through Android's AICore system service.
+    implementation 'com.google.mlkit:genai-prompt:1.0.0-beta4'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20260814'
+}
