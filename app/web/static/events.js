@@ -48,8 +48,12 @@ $("composer").onsubmit = (e) => {
   e.preventDefault();
   const text = $("input").value.trim();
   if (!text || state.busy) return;
-  $("input").value = ""; clearError(); send(text);
+  const voice = phone.dictated;
+  phone.dictated = false;
+  $("input").value = ""; clearError(); send(text, { voice });
 };
+// Clearing the box drops dictation: a typed message gets a written reply only.
+$("input").addEventListener("input", () => { if (!$("input").value.trim()) phone.dictated = false; });
 $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); }
 });
