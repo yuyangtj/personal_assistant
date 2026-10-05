@@ -17,6 +17,7 @@ def test_the_console_is_installable_as_an_app(client: TestClient) -> None:
         served = client.get(icon["src"])
         assert served.status_code == 200
         assert served.headers["content-type"] == "image/png"
+    assert client.get("/ui").headers["cache-control"] == "no-cache"
     assert '<link rel="manifest" href="/manifest.webmanifest">' in page
     assert 'navigator.serviceWorker.register("/sw.js")' in page
 

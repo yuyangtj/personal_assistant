@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.PersonalAssistant.Shell" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/console_background</item>
+        <item name="android:statusBarColor">@color/console_background</item>
+        <item name="android:navigationBarColor">@color/console_background</item>
+        <item name="android:colorAccent">@color/console_accent</item>
+    </style>
+    <color name="console_background">#071116</color>
+    <color name="console_accent">#0d8a7e</color>
+</resources>
