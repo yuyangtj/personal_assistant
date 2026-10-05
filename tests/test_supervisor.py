@@ -340,7 +340,7 @@ def test_only_links_the_supervisor_was_given_survive(client: TestClient) -> None
         client,
         _step(
             action="reply",
-            reply="PR 35 is ready.",
+            reply=f"PR 35 is ready at {real}.",
             links=[
                 {"label": "PR 35", "href": real},
                 {"label": "Wrong owner", "href": "https://github.com/personal-assistant/x/pull/35"},
@@ -352,7 +352,10 @@ def test_only_links_the_supervisor_was_given_survive(client: TestClient) -> None
 
     output = _run(executor, chat, message, "is the PR ready?")
 
-    assert f"PR: {real}" in "\n".join(m.content for m in model.requests[0])
+    overview = "\n".join(m.content for m in model.requests[0])
+    assert f"PR: {real}" in overview
+    assert f"review in the console: #/chats/{chat}?task={run.task_id}" in overview
+    assert output["reply"] == "PR 35 is ready."
     assert [b["label"] for b in output["blocks"] if b["type"] == "link"] == ["PR 35", "Review"]
 
 
@@ -368,3 +371,15 @@ def test_a_reply_that_stops_at_a_heading_is_asked_to_finish(client: TestClient) 
 
     assert output["reply"] == "Recent coding work: PR 35 is ready for review."
     assert "whole answer" in model.requests[1][-1].content
+
+
+def test_urls_in_the_reply_become_buttons_or_are_dropped(client: TestClient) -> None:
+    from app.supervisor import _without_urls
+
+    text, found = _without_urls(
+        "PR #35 is waiting your review at https://github.com/acme/w/pull/35. "
+        "Details (https://made.up/x) are below."
+    )
+
+    assert text == "PR #35 is waiting your review. Details are below."
+    assert found == ["https://github.com/acme/w/pull/35", "https://made.up/x"]

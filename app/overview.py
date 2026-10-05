@@ -36,6 +36,8 @@ class RunView:
     plan: str | None = None
     pull_request_url: str | None = None
     in_this_chat: bool = False
+    #: The console page where the user reviews (and approves) this run.
+    review_href: str | None = None
 
     @property
     def ref(self) -> str:
@@ -138,6 +140,11 @@ def coding_runs(
                     plan=reported.get("plan") if active else None,
                     pull_request_url=checkpoint.pull_request_url if checkpoint else None,
                     in_this_chat=bool(chat_session_id) and run.chat_session_id == chat_session_id,
+                    review_href=(
+                        f"#/chats/{run.chat_session_id}?task={run.task_id}"
+                        if run.chat_session_id and run.task_id
+                        else None
+                    ),
                 )
             )
     views.sort(key=lambda view: not view.in_this_chat)  # stable: keeps recency within groups
@@ -154,6 +161,8 @@ def render_overview(views: list[RunView], *, now: datetime | None = None) -> str
             line += f"; latest step: {view.progress}"
         if view.pull_request_url:
             line += f"; PR: {view.pull_request_url}"
+        if view.review_href:
+            line += f"; review in the console: {view.review_href}"
         if view.in_this_chat:
             line += " (started from this chat)"
         lines.append(line)
