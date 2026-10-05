@@ -265,3 +265,17 @@ def test_a_missing_store_login_never_reaches_the_model_as_setup_advice() -> None
 
     seen = model.requests[1][-1].content
     assert "NOT CONNECTED" in seen and "npm" not in seen
+
+
+def test_food_preferences_reach_the_grocery_agent() -> None:
+    gateway = FakeGateway({})
+    agent, model = _agent(gateway, json.dumps({"action": "finish", "answer": "ok"}))
+
+    agent.execute(
+        task_id="t",
+        request="any good offers this week?",
+        is_cancelled=lambda: False,
+        context={"memories": ["I'm vegetarian"]},
+    )
+
+    assert any("I'm vegetarian" in message.content for message in model.requests[0])

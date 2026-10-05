@@ -129,6 +129,15 @@ class GroceryAgentExecutor:
             ChatMessage("system", SYSTEM_PROMPT.format(today=self.today().isoformat())),
             ChatMessage("system", "TOOLS\n" + _catalog(self.gateway, self.toolset)),
         ]
+        preferences = [str(item) for item in (context or {}).get("memories") or [] if item]
+        if preferences:
+            messages.append(
+                ChatMessage(
+                    "system",
+                    "The user's food preferences (take them into account when relevant):\n- "
+                    + "\n- ".join(preferences),
+                )
+            )
         for turn in list(history)[-4:]:
             messages += [
                 ChatMessage("user", turn.request[:1000]),

@@ -27,9 +27,20 @@ rollback implementation rather than granting an LLM general server access.
 
 ## Memory and historical learning
 
-Long-term memory is explicit and inspectable through `POST /memories`, `GET /memories`, and
-`DELETE /memories/{id}` (archive). Nothing is extracted automatically. Relevant active memories
-are selected lexically and supplied only to conversational tasks.
+Long-term memory is explicit and inspectable. Nothing is extracted automatically: a memory
+is saved by "remember that …" in chat or on the console's **Memories** page, and removed by
+"forget …" or on that page (`POST`, `GET`, `PATCH /memories/{id}`, `DELETE` archives).
+
+| | Given to |
+|---|---|
+| Shared memory | the conversation model, all of them newest first within about 6,000 characters, so the model judges relevance (synonyms, Swedish) |
+| Shared memory tagged `food` (tagged automatically when plainly about food, editable) | also the grocery agent |
+| Private memory | nothing: it stays on the server and is only shown on the Memories page |
+
+Coding agents, the supervisor and on-phone answers get no memories. "Remember privately …" in
+chat is handled before the message is stored or any model sees it: the memory is saved as
+private and the transcript only keeps a placeholder, so later turns can't pass it on.
+"Forget …" only matches shared memories, since its reply repeats what was forgotten.
 
 Provider runtime state now retains lifetime success and failure counts. After three observations,
 the coding decision engine applies a bounded score adjustment of at most ten points. Capability,

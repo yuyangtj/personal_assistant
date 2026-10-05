@@ -72,7 +72,7 @@ effect (merge, deploy, purchase, device action) and push approval requests to th
 | Event / timeline | `task_events` + `work_item_events` | Timeline merges item events with whitelisted run events | Done (#20) |
 | Chat | `chat_sessions`, `chat_messages`, `chat_work_items` | Chats focus on items, by #mention or chips | Done (#20, #21, #22) |
 | Brief | `work_items.brief`, `app/briefs.py` | In model prompts; rewritten after quiet chats and finished runs | Done (#21) |
-| Memory | `memories` (`009`), `app/memory.py` | Add Space scope | Next |
+| Memory | `memories` (`009`, `017` private), `app/work/memory.py`, Memories page | Add Space scope | Next |
 | Run planner | `app/manager/`, `app/decision/coding.py` | Add tier to the decision | Next |
 | Workflows (T3) | `workflows/*.yaml`, `app/workflows/` | Repair pass, saved branch, approved host deploys | Done (#9, #18) |
 | Catalog | `capabilities/`, `coding-runners/`, `repositories/`, `app/capabilities/registry.py` | Load per Space pack; add agent profiles, skills, MCP tools | Next |

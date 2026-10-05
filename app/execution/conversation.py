@@ -148,13 +148,14 @@ class ConversationExecutor:
             )
         memories = context.get("memories")
         if isinstance(memories, list) and memories:
-            lines = [str(item) for item in memories if str(item).strip()][:8]
+            lines = [str(item) for item in memories if str(item).strip()]
             if lines:
                 messages.append(
                     ChatMessage(
                         "system",
-                        "User-approved saved memories. Use only when relevant:\n- "
-                        + "\n- ".join(lines),
+                        "What the user asked you to remember (newest first). Use what is "
+                        "relevant to this message and ignore the rest; never list them "
+                        "unprompted:\n- " + "\n- ".join(lines),
                     )
                 )
         for turn in history:

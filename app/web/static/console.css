@@ -233,3 +233,16 @@
   }
 .link-btn { background: none; border: 0; padding: 0; margin-top: 10px; color: var(--accent, #0d8a7e); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
 #passkey-list .row { margin-top: 10px; align-items: center; }
+.view.single { grid-template-columns: minmax(0, 1fr); }
+.memories-page { max-width: 760px; margin: 0 auto; padding: 18px 16px 40px; }
+.memories-page h1 { margin: 0 0 6px; }
+.memory-form { display: block; margin: 16px 0 10px; }
+.memory-meta button { padding: 4px 10px; font-size: 12.5px; }
+.memory-form textarea, #memory-search, .memory textarea { width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 9px 10px; font: inherit; }
+.memory-form .row, .memory .row { margin-top: 8px; align-items: center; gap: 8px; }
+.check { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted); }
+#memory-list { margin-top: 12px; }
+.memory { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; margin-bottom: 8px; }
+.memory-text { white-space: pre-wrap; }
+.memory-meta .sub { margin: 0; }
+@media (max-width: 720px) { .view.single > main { display: block; } }

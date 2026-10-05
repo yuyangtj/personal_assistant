@@ -229,6 +229,8 @@ class MemoryModel(Base):
         String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
     )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    #: Kept on the server only: never given to a chat model or any other service.
+    private: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
