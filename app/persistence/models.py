@@ -290,9 +290,7 @@ class WorkItemModel(Base):
     brief: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     checklist: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     links: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
-    brief_synced_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    brief_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now

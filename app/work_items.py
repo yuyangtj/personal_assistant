@@ -126,9 +126,7 @@ def get_space(session: Session, slug: str) -> SpaceModel:
     return space
 
 
-def get_work_item(
-    session: Session, reference: str, *, for_update: bool = False
-) -> WorkItemModel:
+def get_work_item(session: Session, reference: str, *, for_update: bool = False) -> WorkItemModel:
     """Resolve a work item by id or slug."""
     statement = select(WorkItemModel).where(
         (WorkItemModel.id == reference) | (WorkItemModel.slug == reference)
@@ -444,9 +442,7 @@ def work_item_context(session: Session, task: TaskModel) -> list[dict[str, Any]]
                 ][:MAX_CONTEXT_CHECKLIST],
                 "recent_activity": [
                     entry["summary"]
-                    for entry in timeline(
-                        session, work_item_id=item.id, limit=MAX_CONTEXT_ACTIVITY
-                    )
+                    for entry in timeline(session, work_item_id=item.id, limit=MAX_CONTEXT_ACTIVITY)
                 ],
             }
         )
@@ -625,9 +621,7 @@ class WorkItemService:
             if status is not None:
                 statement = statement.where(WorkItemModel.status == WorkItemStatus(status).value)
             else:
-                statement = statement.where(
-                    WorkItemModel.status != WorkItemStatus.ARCHIVED.value
-                )
+                statement = statement.where(WorkItemModel.status != WorkItemStatus.ARCHIVED.value)
             if kind is not None:
                 statement = statement.where(WorkItemModel.kind == WorkItemKind(kind).value)
             return list(
@@ -718,9 +712,7 @@ class WorkItemService:
             if links is not None:
                 new_links = [link.model_dump(mode="json") for link in links]
                 if new_links != list(item.links or []):
-                    append_event(
-                        session, item, WorkItemEventType.LINKS_CHANGED, {"source": source}
-                    )
+                    append_event(session, item, WorkItemEventType.LINKS_CHANGED, {"source": source})
                     item.links = new_links
                     changed = True
             if changed:
@@ -764,9 +756,7 @@ class WorkItemService:
             return item
 
     @staticmethod
-    def _checklist_changed(
-        session: Session, item: WorkItemModel, action: str, text: str
-    ) -> None:
+    def _checklist_changed(session: Session, item: WorkItemModel, action: str, text: str) -> None:
         append_event(
             session,
             item,
@@ -934,8 +924,7 @@ class WorkItemService:
             brief=Brief(
                 goal=_clean(root.current_goal, limit=600) or "",
                 status_summary=(
-                    _clean(context.get("final_answer") or context.get("summary"), limit=600)
-                    or ""
+                    _clean(context.get("final_answer") or context.get("summary"), limit=600) or ""
                 ),
             ),
             links=links,

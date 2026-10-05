@@ -80,9 +80,7 @@ def test_checklist_entries_can_be_added_checked_and_removed(client: TestClient) 
 
     added = client.post(f"/work-items/{item['id']}/checklist", json={"text": "Oat milk"})
     entry = added.json()["checklist"][0]
-    checked = client.patch(
-        f"/work-items/{item['id']}/checklist/{entry['id']}", json={"done": True}
-    )
+    checked = client.patch(f"/work-items/{item['id']}/checklist/{entry['id']}", json={"done": True})
     removed = client.delete(f"/work-items/{item['id']}/checklist/{entry['id']}")
 
     assert added.status_code == 201
@@ -144,9 +142,9 @@ def test_explicit_work_item_links_tasks_and_follow_ups_inherit_it(client: TestCl
 
     assert task["work_item_id"] == item["id"]
     assert follow_up["work_item_id"] == item["id"]
-    assert client.post(
-        "/tasks", json={"request": "x", "work_item_id": "missing"}
-    ).status_code == 404
+    assert (
+        client.post("/tasks", json={"request": "x", "work_item_id": "missing"}).status_code == 404
+    )
 
 
 def test_started_coding_workflow_joins_the_focused_item_or_creates_one(
@@ -187,9 +185,9 @@ def test_started_coding_workflow_joins_the_focused_item_or_creates_one(
             "ref": "personal-assistant",
         }
     ]
-    assert [entry["id"] for entry in client.get(f"/chat-sessions/{new_chat}/focus").json()[
-        "work_items"
-    ]] == [item["id"]]
+    assert [
+        entry["id"] for entry in client.get(f"/chat-sessions/{new_chat}/focus").json()["work_items"]
+    ] == [item["id"]]
     assert joined["work_item_id"] == existing["id"]
 
 
@@ -219,17 +217,18 @@ def test_timeline_merges_item_history_with_whitelisted_run_events(
     assert "PLAN_CREATED" not in {entry["event_type"] for entry in everything}
     assert all(entry["work_item_id"] == item["id"] for entry in everything)
     oldest = entries[-1]["at"]
-    assert client.get(
-        f"/work-items/{item['id']}/timeline", params={"before": oldest}
-    ).json()["entries"] == []
+    assert (
+        client.get(f"/work-items/{item['id']}/timeline", params={"before": oldest}).json()[
+            "entries"
+        ]
+        == []
+    )
 
 
 def test_discuss_opens_a_focused_chat_with_a_reference(client: TestClient) -> None:
     item = client.post("/work-items", json={"title": "Voice login"}).json()
 
-    chat = client.post(
-        f"/work-items/{item['slug']}/discuss", json={"about": "Run failed"}
-    ).json()
+    chat = client.post(f"/work-items/{item['slug']}/discuss", json={"about": "Run failed"}).json()
 
     focus = client.get(f"/chat-sessions/{chat['id']}/focus").json()["work_items"]
     messages = client.get(f"/chat-sessions/{chat['id']}/messages").json()["messages"]

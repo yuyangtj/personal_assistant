@@ -48,9 +48,7 @@ def test_weekdays_skip_the_weekend_and_monthly_clamps() -> None:
 # --- scheduler ----------------------------------------------------------------------
 
 
-def test_reminders_post_push_and_close_or_repeat(
-    database: Database, service: TaskService
-) -> None:
+def test_reminders_post_push_and_close_or_repeat(database: Database, service: TaskService) -> None:
     chat = service.create_chat_session()
     schedules = ScheduleService(database)
     now = datetime(2026, 10, 5, 7, 0, tzinfo=UTC)

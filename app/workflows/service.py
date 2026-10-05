@@ -177,9 +177,7 @@ class WorkflowService:
             statement = statement.where(WorkflowRunModel.chat_session_id == chat_session_id)
         with self.database.session() as session:
             return list(
-                session.scalars(
-                    statement.order_by(WorkflowRunModel.created_at.desc()).limit(limit)
-                )
+                session.scalars(statement.order_by(WorkflowRunModel.created_at.desc()).limit(limit))
             )
 
     def list_events(self, workflow_run_id: str) -> list[WorkflowRunEventModel]:
@@ -400,9 +398,7 @@ class WorkflowService:
                 return run
             succeeded = workflow.conclusion == "success"
             run.status = (
-                WorkflowRunStatus.COMPLETED.value
-                if succeeded
-                else WorkflowRunStatus.FAILED.value
+                WorkflowRunStatus.COMPLETED.value if succeeded else WorkflowRunStatus.FAILED.value
             )
             run.current_stage = "promote" if succeeded else "health_check"
             run.updated_at = utc_now()
