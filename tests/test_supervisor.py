@@ -354,3 +354,17 @@ def test_only_links_the_supervisor_was_given_survive(client: TestClient) -> None
 
     assert f"PR: {real}" in "\n".join(m.content for m in model.requests[0])
     assert [b["label"] for b in output["blocks"] if b["type"] == "link"] == ["PR 35", "Review"]
+
+
+def test_a_reply_that_stops_at_a_heading_is_asked_to_finish(client: TestClient) -> None:
+    chat, message = _chat_with_message(client, "status?")
+    executor, model = _supervisor(
+        client,
+        _step(action="reply", reply="Recent coding work includes:"),
+        _step(action="reply", reply="Recent coding work: PR 35 is ready for review."),
+    )
+
+    output = _run(executor, chat, message, "status?")
+
+    assert output["reply"] == "Recent coding work: PR 35 is ready for review."
+    assert "whole answer" in model.requests[1][-1].content

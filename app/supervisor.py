@@ -274,6 +274,7 @@ class SupervisorExecutor:
         messages.append(ChatMessage("user", request))
 
         started: list[str] = []
+        completed_once = False
         for _step in range(self.max_steps):
             if is_cancelled():
                 raise ExecutionCancelled(f"Task {task_id} was cancelled")
@@ -295,6 +296,17 @@ class SupervisorExecutor:
                 continue
             messages.append(ChatMessage("assistant", step.model_dump_json(exclude_defaults=True)))
             if step.action == "reply" and step.reply and step.reply.strip():
+                # "Here's what's been happening:" with the content left out; ask once more.
+                if step.reply.rstrip().endswith(":") and not completed_once:
+                    completed_once = True
+                    messages.append(
+                        ChatMessage(
+                            "user",
+                            "Your reply stops before the answer. Reply again with the whole "
+                            "answer inside reply.",
+                        )
+                    )
+                    continue
                 return self._result(request, step, started, known_urls)
             if step.action == "start_coding":
                 if len(started) >= MAX_STARTS_PER_TURN:
