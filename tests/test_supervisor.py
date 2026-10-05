@@ -412,3 +412,80 @@ def test_a_revision_can_be_routed_to_the_coding_agent(client: TestClient) -> Non
         revision.required_capabilities
     )
     assert chosen.id == "coding-pull-request"
+
+
+def _open_pr_with_revision(client: TestClient) -> tuple[str, dict, str]:
+    """A run with draft PR #41 waiting for review, and a revision of it requested."""
+    chat, message, run = _started_run(client)
+    service = client.app.state.task_service
+    execution_id = _execution(client, run["task_id"])
+    service.start_validation(run["task_id"], execution_id, output={"summary": "Opened a PR"})
+    service.request_approval(
+        run["task_id"],
+        execution_id,
+        artifacts=[],
+        approval={
+            "type": "github_pull_request_merge",
+            "number": 41,
+            "repository": "acme/widget",
+            "url": "https://github.com/acme/widget/pull/41",
+            "head_branch": "assistant/x",
+            "expected_head_sha": "a" * 40,
+            "draft": True,
+        },
+    )
+    executor, _ = _supervisor(
+        client,
+        _step(action="message_agent", run=run["id"][:8], text="Use a different icon."),
+        _step(action="reply", reply="Started a revision."),
+    )
+    _run(executor, chat, message, "use a different icon")
+    revision_id = service.get_task(run["task_id"]).superseded_by_task_id
+    return chat, run, revision_id
+
+
+def test_a_revision_that_fails_before_pushing_gives_the_pr_its_gate_back(
+    client: TestClient,
+) -> None:
+    chat, run, revision_id = _open_pr_with_revision(client)
+    service = client.app.state.task_service
+
+    service.fail_task(revision_id, error="No enabled capability provides: coding-pull-request")
+
+    original = client.get(f"/tasks/{run['task_id']}").json()
+    assert original["status"] == "waiting_for_approval"
+    assert original["superseded_by_task_id"] is None
+    approval = client.get(f"/tasks/{run['task_id']}/pending-approval").json()
+    assert (approval["number"], approval["expected_head_sha"]) == (41, "a" * 40)
+    assert client.get(f"/workflow-runs/{run['id']}").json()["task_id"] == run["task_id"]
+    report = client.get(f"/chat-sessions/{chat}/messages").json()["messages"][-1]
+    assert "PR #41" in report["content"] and "back waiting for your review" in report["content"]
+    # The restored gate works: approving moves the task on to the merge.
+    service.begin_pull_request_approval(run["task_id"], expected_head_sha="a" * 40)
+    assert service.get_task(run["task_id"]).status == "executing"
+
+
+def test_a_revision_that_already_pushed_keeps_the_old_gate_closed(client: TestClient) -> None:
+    from app.coding.runs import CodingRunPhase, CodingRunStore
+
+    _, run, revision_id = _open_pr_with_revision(client)
+    store = CodingRunStore(client.app.state.database)
+    store.start(
+        task_id=revision_id,
+        repository_id="personal-assistant",
+        github_repository="acme/widget",
+        branch="assistant/x",
+    )
+    store.update(revision_id, CodingRunPhase.PUSHED)
+
+    client.app.state.task_service.fail_task(revision_id, error="GitHub was down")
+
+    assert client.get(f"/tasks/{run['task_id']}").json()["status"] == "superseded"
+
+
+def test_a_cancelled_revision_also_gives_the_gate_back(client: TestClient) -> None:
+    _, run, revision_id = _open_pr_with_revision(client)
+
+    client.app.state.task_service.cancel_task(revision_id)
+
+    assert client.get(f"/tasks/{run['task_id']}").json()["status"] == "waiting_for_approval"

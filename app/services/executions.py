@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -19,6 +20,8 @@ from app.services.common import (
     REPLY_EMOTIONS,
     _reply_payload,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionOperations(ServiceBase):
@@ -283,6 +286,7 @@ class ExecutionOperations(ServiceBase):
                 EventType.TASK_FAILED,
                 {"execution_id": execution_id, "error": error},
             )
+        self._restore_after_revision(task_id)
 
     def cancel_task(self, task_id: str) -> TaskModel:
         with self.database.session() as session, session.begin():
@@ -308,7 +312,15 @@ class ExecutionOperations(ServiceBase):
                 EventType.TASK_CANCELLED,
                 {"previous_status": current_status.value},
             )
-            return task
+        self._restore_after_revision(task_id)
+        return task
+
+    def _restore_after_revision(self, task_id: str) -> None:
+        """A revision that ended without touching its PR gives the PR its review back."""
+        try:
+            self.restore_pull_request_approval(task_id)
+        except Exception:  # never turn a failure into a second failure
+            logger.exception("Could not restore the review gate after revision %s", task_id)
 
     def finish_cancelled_execution(self, execution_id: str) -> None:
         with self.database.session() as session, session.begin():
