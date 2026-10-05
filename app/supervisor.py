@@ -18,7 +18,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 
 from app.blocks import model_blocks
@@ -61,8 +61,9 @@ Work in steps. Each reply is exactly one JSON object, one of:
   Stop a run, only when the user asks to stop or cancel it.
 {"action": "reply", "reply": "<what you say>", "choices": ["<short label>", ...],
  "links": [{"label": "...", "href": "https://..."}]}
-  Answer the user and end your turn. choices (at most 4) and links are optional: use them
-  when they help the user pick or open something.
+  Answer the user and end your turn. The reply holds your whole answer; choices (at most
+  4) and links only add to it. Link only to URLs given to you in ACTIVE WORK or tool
+  results, never to an address you made up.
 Answer questions about progress from ACTIVE WORK and tool results; never claim a run
 started, stopped or finished unless that is what you were told. Merging, marking a pull
 request ready and deploying are done by the user in the console, never by you.
@@ -79,6 +80,14 @@ def _plain(text: str) -> str:
 
 class SupervisorStep(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reply_without_action(cls, data: Any) -> Any:
+        # Some models drop the action key on a final answer: {"reply": "..."}.
+        if isinstance(data, dict) and "action" not in data and isinstance(data.get("reply"), str):
+            return {**data, "action": "reply"}
+        return data
 
     action: Literal["start_coding", "run_detail", "message_agent", "stop_run", "reply"]
     repository_id: str | None = Field(default=None, max_length=120)
@@ -105,8 +114,10 @@ class SupervisorTools:
         self.workflows = workflows
         self.repositories = repositories
 
-    def overview(self, chat_session_id: str | None) -> str:
-        return render_overview(coding_runs(self.database, chat_session_id=chat_session_id))
+    def overview(self, chat_session_id: str | None) -> tuple[str, set[str]]:
+        """The rendered overview and the URLs in it, the only ones a reply may link to."""
+        views = coding_runs(self.database, chat_session_id=chat_session_id)
+        return render_overview(views), {v.pull_request_url for v in views if v.pull_request_url}
 
     def repository_catalog(self) -> list[dict[str, Any]]:
         return [
@@ -238,6 +249,7 @@ class SupervisorExecutor:
         context = context or {}
         chat_session_id = context.get("chat_session_id")
         origin_message_id = context.get("origin_message_id")
+        overview, known_urls = self.tools.overview(chat_session_id)
         messages = [
             ChatMessage("system", SYSTEM_PROMPT),
             ChatMessage(
@@ -245,9 +257,7 @@ class SupervisorExecutor:
                 "REGISTERED REPOSITORIES\n"
                 + json.dumps(self.tools.repository_catalog(), ensure_ascii=False),
             ),
-            ChatMessage(
-                "system", "ACTIVE WORK (current state)\n" + self.tools.overview(chat_session_id)
-            ),
+            ChatMessage("system", "ACTIVE WORK (current state)\n" + overview),
         ]
         work_items = context.get("work_items")
         if isinstance(work_items, list) and work_items:
@@ -271,14 +281,21 @@ class SupervisorExecutor:
             try:
                 step = SupervisorStep.model_validate(extract_json_object(completion.text))
             except (ValueError, ValidationError):
+                # Restate the question: a bare format reminder gets answered as if the user
+                # had said it.
                 messages += [
                     ChatMessage("assistant", completion.text[:1000]),
-                    ChatMessage("user", "Reply with exactly one JSON object as instructed."),
+                    ChatMessage(
+                        "user",
+                        "That step was not valid JSON for this protocol. Still answering the "
+                        f"user's message: {request[:300]!r}. Reply with exactly one JSON "
+                        "object from the instructions.",
+                    ),
                 ]
                 continue
             messages.append(ChatMessage("assistant", step.model_dump_json(exclude_defaults=True)))
             if step.action == "reply" and step.reply and step.reply.strip():
-                return self._result(request, step, started)
+                return self._result(request, step, started, known_urls)
             if step.action == "start_coding":
                 if len(started) >= MAX_STARTS_PER_TURN:
                     result: dict[str, Any] = {
@@ -295,6 +312,8 @@ class SupervisorExecutor:
                         started.append(result["workflow_run_id"])
             elif step.action == "run_detail":
                 result = self.tools.run_detail(step.run, chat_session_id)
+                if result.get("pull_request"):
+                    known_urls.add(result["pull_request"])
             elif step.action == "message_agent":
                 result = self.tools.message_agent(step.run, step.text, chat_session_id)
             elif step.action == "stop_run":
@@ -309,10 +328,20 @@ class SupervisorExecutor:
             )
         raise RuntimeError("The assistant did not finish within its step limit")
 
-    def _result(self, request: str, step: SupervisorStep, started: list[str]) -> ExecutionResult:
+    def _result(
+        self, request: str, step: SupervisorStep, started: list[str], known_urls: set[str]
+    ) -> ExecutionResult:
         reply = _plain(step.reply or "")[:MAX_REPLY_CHARACTERS]
         blocks = [{"type": "workflow", "workflow_run_id": run_id} for run_id in started]
-        blocks += model_blocks({"choices": step.choices, "links": step.links})
+        # Models invent plausible URLs (a PR under the wrong owner); keep only console
+        # routes and addresses the tools actually gave.
+        links = [
+            link
+            for link in step.links
+            if isinstance(link, dict)
+            and (str(link.get("href", "")).startswith("#/") or link.get("href") in known_urls)
+        ]
+        blocks += model_blocks({"choices": step.choices, "links": links})
         return ExecutionResult(
             output={
                 "summary": f"Supervised: {request[:200]}",
