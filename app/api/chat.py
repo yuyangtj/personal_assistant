@@ -25,9 +25,10 @@ from app.api.schemas import (
     TaskListResponse,
     TaskProposalResponse,
     TaskResponse,
+    TriageDecisionResponse,
     WorkflowRunResponse,
 )
-from app.chat.turns import propose_coding_run, triage_message
+from app.chat.turns import private_memory_text, propose_coding_run, triage_message
 from app.services import (
     ChatMessageNotFoundError,
     ChatSessionNotFoundError,
@@ -119,6 +120,9 @@ def append_chat_message(
     request: Request,
 ) -> AppendChatMessageResponse:
     """Record what the user said. Nothing is executed until a task is confirmed."""
+    private = private_memory_text(body.content)
+    if private is not None:
+        return _remember_privately(request, chat_session_id, private)
     try:
         posted = task_service(request).append_chat_message(
             chat_session_id,
@@ -137,6 +141,45 @@ def append_chat_message(
         ),
         focused_work_items=posted.focused_work_items,
         decision=triage_message(request, chat_session_id, body, posted.message.id),
+    )
+
+
+PRIVATE_PLACEHOLDER = "🔒 A private memory (kept out of the chat)"
+PRIVATE_REPLY = (
+    "Saved privately. It stays on your server and is never sent to an AI model; "
+    "you'll find it under Memories."
+)
+
+
+def _remember_privately(
+    request: Request, chat_session_id: str, text: str
+) -> AppendChatMessageResponse:
+    """ "Remember privately …": saved before any model sees it, and kept out of the chat.
+
+    The transcript (which later turns pass to models as history) only gets a placeholder.
+    """
+    service = task_service(request)
+    try:
+        posted = service.append_chat_message(chat_session_id, content=PRIVATE_PLACEHOLDER)
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+    request.app.state.memory_service.create(
+        kind="fact", content=text, private=True, chat_session_id=chat_session_id
+    )
+    service.append_chat_message(chat_session_id, content=PRIVATE_REPLY, role="assistant")
+    return AppendChatMessageResponse(
+        message=ChatMessageResponse.from_model(posted.message),
+        proposal=None,
+        focused_work_items=[],
+        decision=TriageDecisionResponse(
+            intent="direct_action",
+            goal="",
+            reason="Saved as a private memory",
+            confidence=1.0,
+            result=PRIVATE_REPLY,
+            handled=True,
+            source="rules",
+        ),
     )
 
 

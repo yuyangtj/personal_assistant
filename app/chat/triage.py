@@ -43,7 +43,7 @@ class DirectAction(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    type: Literal["checklist_add", "checklist_check", "remember", "remind", "routine"]
+    type: Literal["checklist_add", "checklist_check", "remember", "forget", "remind", "routine"]
     text: str = Field(min_length=1, max_length=300)
     #: For remind/routine: local wall-clock time "YYYY-MM-DDTHH:MM" in the user's zone.
     at: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
@@ -109,17 +109,19 @@ Decide what the message needs:
 - "propose_task": other real work that should be tracked (research, planning,
   comparisons, errands), not code changes. Set "needs_web_search": true when it needs
   current facts from the web (products, prices, news, comparisons).
-- "direct_action": a small bookkeeping request done instantly, with "action":
-  {"type": "checklist_add", "text": entry, "work_item": tag or null} to add to a list
-  or checklist ("add oat milk to groceries"); {"type": "checklist_check", "text": entry,
+- "direct_action": a small bookkeeping request done instantly, with "action": {"type":
+  "checklist_add", "text": entry, "work_item": tag or null} to add to a list or
+  checklist ("add oat milk to groceries"); {"type": "checklist_check", "text": entry,
   "work_item": tag or null} to tick an entry off; {"type": "remember", "text": the fact,
   "kind": "fact" | "preference" | "project"} when the user explicitly asks you to
-  remember something; {"type": "remind", "text": what to remind, "at":
-  "YYYY-MM-DDTHH:MM" local time, "recurrence": "none" | "daily" | "weekdays" | "weekly" |
-  "monthly", "work_item": tag or null} for reminders ("remind me tomorrow at 9 to call
-  mum"); {"type": "routine", ...same fields} when something should be done for the user
-  on a schedule ("every Monday at 8, summarize my open work"). Resolve relative dates
-  from the user's local time. Use tags from work_items; null when the list is not named.
+  remember something; {"type": "forget", "text": what to forget} when the user asks you
+  to forget or delete something you were told to remember; {"type": "remind", "text":
+  what to remind, "at": "YYYY-MM-DDTHH:MM" local time, "recurrence": "none" | "daily" |
+  "weekdays" | "weekly" | "monthly", "work_item": tag or null} for reminders ("remind me
+  tomorrow at 9 to call mum"); {"type": "routine", ...same fields} when something should
+  be done for the user on a schedule ("every Monday at 8, summarize my open work").
+  Resolve relative dates from the user's local time. Use tags from work_items; null when
+  the list is not named.
 For propose_task, set "space" to the best-fitting slug from spaces (or null).
 Set "needs_grocery_tools": true when the message is about grocery offers, prices, receipts,
 purchases or grocery spending at the user's stores (Willys, Lidl); otherwise false.
@@ -158,6 +160,10 @@ _CHECK = re.compile(
     re.IGNORECASE,
 )
 _REMEMBER = re.compile(r"^(?:please\s+)?remember(?:\s+that)?\s+(?P<text>.+?)[.!]?$", re.IGNORECASE)
+_FORGET = re.compile(
+    r"^(?:please\s+)?forget\s+(?:that\s+|about\s+|the\s+memory\s+(?:about\s+)?)?(?P<text>.+?)[.!]?$",
+    re.IGNORECASE,
+)
 
 
 def _known_tag(name: str | None, work_items: Sequence[dict]) -> str | None:
@@ -181,6 +187,8 @@ def _rule_action(text: str, work_items: Sequence[dict] = ()) -> DirectAction | N
     normalized = " ".join(text.split())
     if (match := _REMEMBER.match(normalized)) and len(match["text"]) <= 300:
         return DirectAction(type="remember", text=match["text"], kind="fact")
+    if (match := _FORGET.match(normalized)) and len(match["text"]) <= 300:
+        return DirectAction(type="forget", text=match["text"])
     if (match := _ADD.match(normalized)) and len(match["text"]) <= 300:
         tag = _known_tag(match["tag"] or match["name"], work_items)
         if tag is not None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import Request
 
 from app.api.schemas import AppendChatMessageRequest, TriageDecisionResponse
@@ -105,6 +107,19 @@ def resolve_choice(
         handled=True,
         source="rules",
     )
+
+
+_PRIVATE = re.compile(
+    r"^(?:please\s+)?(?:(?:remember|save|note)\s+(?:this\s+)?privately|privately\s+remember)"
+    r"(?:\s+that)?[:,]?\s+(?P<text>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def private_memory_text(content: str) -> str | None:
+    """The text of "remember privately …", which is handled before any model sees it."""
+    match = _PRIVATE.match(content.strip())
+    return match["text"].strip() if match and match["text"].strip() else None
 
 
 #: A coding request this clear starts work right away; less clear ones are offered.

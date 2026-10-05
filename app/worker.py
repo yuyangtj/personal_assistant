@@ -541,10 +541,12 @@ class TaskWorker:
                 work_items = self.service.work_item_context(task)
                 if work_items:
                     execution_context["work_items"] = work_items
+            # Saved memories (never the private ones): all of them for conversation, so
+            # the model judges relevance; food preferences for the grocery agent.
             if self.memory_service is not None and executor.id == "model-conversation":
-                execution_context["memories"] = [
-                    memory.content for memory in self.memory_service.relevant(task.original_request)
-                ]
+                execution_context["memories"] = self.memory_service.for_model()
+            if self.memory_service is not None and executor.id == "grocery-agent":
+                execution_context["memories"] = self.memory_service.for_groceries()
             result = executor.execute(
                 task_id=task.id,
                 request=task.original_request,

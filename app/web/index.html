@@ -11,7 +11,7 @@
 
 <header class="topbar">
   <span class="brand">Assistant</span>
-  <nav aria-label="Sections"><a href="#/chats" id="nav-chats">Chats</a><a href="#/items" id="nav-items">Work items</a></nav>
+  <nav aria-label="Sections"><a href="#/chats" id="nav-chats">Chats</a><a href="#/items" id="nav-items">Work items</a><a href="#/memories" id="nav-memories">Memories</a></nav>
   <span id="error" class="err grow" role="alert"></span>
   <span id="status" class="sub" style="margin:0"></span>
   <button class="ghost" id="passkeys-open" type="button" hidden title="Approve with Touch ID or your fingerprint">Passkeys</button>
@@ -74,6 +74,32 @@
   <main id="item-main"><div id="item-page"><div class="empty">Pick a work item.</div></div></main>
 </div>
 
+<div class="view single" id="memories-view" hidden>
+  <main>
+    <div class="memories-page">
+      <h1>Memories</h1>
+      <div class="sub">What the assistant remembers about you. Say “remember that …” or
+        “forget …” in chat, or manage them here. Shared memories are given to the chat model
+        with your messages (food ones to the grocery agent too). <strong>Private</strong>
+        ones stay on your server and are never sent to any AI model; in chat, say
+        “remember privately …”.</div>
+      <form id="memory-form" class="memory-form">
+        <textarea id="memory-content" rows="2" maxlength="4000" required
+          placeholder="Something to remember…" aria-label="New memory"></textarea>
+        <div class="row wrap">
+          <select id="memory-kind" aria-label="Kind"><option value="fact">Fact</option>
+            <option value="preference">Preference</option><option value="project">Project</option></select>
+          <label class="check"><input type="checkbox" id="memory-food"> Food</label>
+          <label class="check"><input type="checkbox" id="memory-private"> Private</label>
+          <span class="grow"></span><button type="submit">Save</button></div>
+      </form>
+      <input id="memory-search" type="search" placeholder="Search memories…" aria-label="Search memories">
+      <div id="memory-error" class="err" role="alert"></div>
+      <div id="memory-list"></div>
+    </div>
+  </main>
+</div>
+
 <div class="scrim" id="detail-scrim"></div>
 <section class="detail" id="task-panel" aria-label="Task details">
   <div class="row"><h1 class="grow" id="detail-title">Task</h1><button class="ghost" id="close-task">Close</button></div>
@@ -116,6 +142,7 @@
 <script src="/ui/static/drawer.js"></script>
 <script src="/ui/static/items.js"></script>
 <script src="/ui/static/phone.js"></script>
+<script src="/ui/static/memories.js"></script>
 <script src="/ui/static/passkeys.js"></script>
 <script src="/ui/static/events.js"></script>
 <script src="/ui/static/main.js"></script>

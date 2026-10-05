@@ -354,8 +354,16 @@ class CreateMemoryRequest(BaseModel):
     kind: Literal["fact", "preference", "project"]
     content: str = Field(min_length=1, max_length=4000)
     tags: list[str] = Field(default_factory=list, max_length=20)
+    private: bool = False
     chat_session_id: str | None = None
     task_id: str | None = None
+
+
+class UpdateMemoryRequest(BaseModel):
+    kind: Literal["fact", "preference", "project"] | None = None
+    content: str | None = Field(default=None, min_length=1, max_length=4000)
+    tags: list[str] | None = Field(default=None, max_length=20)
+    private: bool | None = None
 
 
 class MemoryResponse(BaseModel):
@@ -367,6 +375,7 @@ class MemoryResponse(BaseModel):
     source_chat_session_id: str | None
     source_task_id: str | None
     active: bool
+    private: bool
     created_at: datetime
     updated_at: datetime
 

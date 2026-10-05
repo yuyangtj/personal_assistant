@@ -14,7 +14,7 @@ function parseRoute() {
   const [path, query = ""] = location.hash.replace(/^#\/?/, "").split("?");
   const [section, id = null] = path.split("/").map(decodeURIComponent);
   const params = new URLSearchParams(query);
-  return { section: section === "items" ? "items" : "chats", id: id || null,
+  return { section: ["items", "memories"].includes(section) ? section : "chats", id: id || null,
     task: params.get("task"), workflow: params.get("workflow") };
 }
 function routeHash({ section, id = null, task = null, workflow = null }) {
@@ -35,17 +35,23 @@ const goItem = (ref) => go({ section: "items", id: ref });
 async function render() {
   const route = parseRoute();
   const items = route.section === "items";
+  const memories = route.section === "memories";
   // A view coming back into sight is refreshed even when its route is unchanged.
   const returning = items ? $("items-view").hidden : $("chat-view").hidden;
-  $("chat-view").hidden = items;
+  $("chat-view").hidden = items || memories;
   $("items-view").hidden = !items;
+  $("memories-view").hidden = !memories;
+  $("nav-memories").classList.toggle("active", memories);
+  $("nav-memories").toggleAttribute("aria-current", memories);
   $("chat-view").classList.toggle("has-detail", !items && Boolean(route.id));
   $("items-view").classList.toggle("has-detail", items && Boolean(route.id));
-  $("nav-chats").classList.toggle("active", !items);
+  $("nav-chats").classList.toggle("active", !items && !memories);
   $("nav-items").classList.toggle("active", items);
-  $("nav-chats").toggleAttribute("aria-current", !items);
+  $("nav-chats").toggleAttribute("aria-current", !items && !memories);
   $("nav-items").toggleAttribute("aria-current", items);
-  if (items) {
+  if (memories) {
+    loadMemories();
+  } else if (items) {
     if (route.id !== state.itemRef || returning) {
       state.itemRef = route.id;
       if (route.id) await renderWorkItem(route.id);

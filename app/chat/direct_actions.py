@@ -81,6 +81,22 @@ def _schedule(
     )
 
 
+def _forget(text: str, memory: MemoryService) -> DirectActionResult:
+    matches = memory.find(text)
+    if len(matches) == 1:
+        memory.archive(matches[0].id)
+        return DirectActionResult(True, f"Forgotten: {matches[0].content}")
+    if not matches:
+        return DirectActionResult(
+            False, "I don't have a memory about that. Everything I remember is under Memories."
+        )
+    listed = "\n".join(f"- {match.content}" for match in matches[:5])
+    return DirectActionResult(
+        False,
+        f"More than one memory matches; say which one, or delete it under Memories:\n{listed}",
+    )
+
+
 def run_direct_action(
     action: DirectAction,
     *,
@@ -107,6 +123,8 @@ def run_direct_action(
             kind=action.kind or "fact", content=action.text, chat_session_id=chat_session_id
         )
         return DirectActionResult(True, f"I'll remember that: {action.text}")
+    if action.type == "forget":
+        return _forget(action.text, memory)
     try:
         item = _target_item(action, chat_session_id, items)
     except WorkItemNotFoundError:
