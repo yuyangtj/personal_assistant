@@ -81,12 +81,14 @@ def _plain(text: str) -> str:
 
 
 _URL = re.compile(r"https?://[^\s)>\]]*[^\s)>\].,;:!?]")
+#: A URL with the words that introduce it ("at", "see") and any brackets around it.
+_URL_PHRASE = re.compile(r"\s*\(?\s*(?:at|here:|see)?\s*" + _URL.pattern + r"\s*\)?")
 
 
 def _without_urls(text: str) -> tuple[str, list[str]]:
     """The text with URLs taken out ("at <url>" and "(<url>)" go with them), and the URLs."""
     found = _URL.findall(text)
-    text = re.sub(r"\s*\(?\s*(?:at|here:|see)?\s*https?://[^\s)>\]]*[^\s)>\].,;:!?]\s*\)?", "", text)
+    text = _URL_PHRASE.sub("", text)
     text = re.sub(r" +([.,;:!?])", r"\1", text)
     lines = [" ".join(line.split()) for line in text.splitlines()]
     return "\n".join(line for line in lines if line), found
