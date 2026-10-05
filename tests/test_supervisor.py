@@ -284,3 +284,73 @@ def test_supervisor_replies_drop_markdown_emphasis(client: TestClient) -> None:
     output = _run(executor, chat, message, "status?")
 
     assert output["reply"] == "Recent work:\n- PR #35 is ready\n- Run 804e failed"
+
+
+def test_a_reply_without_an_action_key_is_still_a_reply(client: TestClient) -> None:
+    chat, message = _chat_with_message(client, "status?")
+    executor, model = _supervisor(client, '{"reply": "reply", "reply": "Nothing is running."}')
+
+    output = _run(executor, chat, message, "status?")
+
+    assert output["reply"] == "Nothing is running."
+    assert len(model.requests) == 1  # no repair round-trip
+
+
+def test_a_repair_prompt_restates_the_users_question(client: TestClient) -> None:
+    chat, message = _chat_with_message(client, "status?")
+    executor, model = _supervisor(
+        client, "Here is the status, in prose.", _step(action="reply", reply="All quiet.")
+    )
+
+    _run(executor, chat, message, "What coding work has been going on recently?")
+
+    repair = model.requests[1][-1].content
+    assert "What coding work has been going on recently?" in repair
+
+
+def test_only_links_the_supervisor_was_given_survive(client: TestClient) -> None:
+    from app.coding_flow import start_coding_run
+    from app.coding_runs import CodingRunPhase, CodingRunStore
+
+    state = client.app.state
+    chat, message = _chat_with_message(client, "fix the toggle")
+    run = start_coding_run(
+        state.task_service,
+        state.workflow_service,
+        state.repository_registry,
+        repository_id="personal-assistant",
+        request="Fix the toggle.",
+        chat_session_id=chat,
+        origin_message_id=message,
+        approved_by="chat",
+    )
+    # The run's checkpoint holds the real PR URL.
+    store = CodingRunStore(state.database)
+    store.start(
+        task_id=run.task_id,
+        repository_id="personal-assistant",
+        github_repository="yuyangtj/personal_assistant",
+        branch="assistant/x",
+    )
+    real = "https://github.com/yuyangtj/personal_assistant/pull/35"
+    store.update(
+        run.task_id, CodingRunPhase.PR_CREATED, pull_request_number=35, pull_request_url=real
+    )
+    executor, model = _supervisor(
+        client,
+        _step(
+            action="reply",
+            reply="PR 35 is ready.",
+            links=[
+                {"label": "PR 35", "href": real},
+                {"label": "Wrong owner", "href": "https://github.com/personal-assistant/x/pull/35"},
+                {"label": "Made up", "href": "https://console/user/runs/1"},
+                {"label": "Review", "href": f"#/chats/{chat}?task={run.task_id}"},
+            ],
+        ),
+    )
+
+    output = _run(executor, chat, message, "is the PR ready?")
+
+    assert f"PR: {real}" in "\n".join(m.content for m in model.requests[0])
+    assert [b["label"] for b in output["blocks"] if b["type"] == "link"] == ["PR 35", "Review"]

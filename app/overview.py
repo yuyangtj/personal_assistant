@@ -152,6 +152,8 @@ def render_overview(views: list[RunView], *, now: datetime | None = None) -> str
         line = f"- run {view.ref} [{view.repository_id}] “{view.goal}”: {view.state}"
         if view.progress:
             line += f"; latest step: {view.progress}"
+        if view.pull_request_url:
+            line += f"; PR: {view.pull_request_url}"
         if view.in_this_chat:
             line += " (started from this chat)"
         lines.append(line)
