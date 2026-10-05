@@ -11,6 +11,7 @@ from app.chat.blocks import model_blocks
 from app.domain.task_context import render_task_context
 from app.domain.work_items import render_work_item_context
 from app.execution.actions import alarm_matches_next_occurrence, validate_action
+from app.execution.attachments import attachments_prompt
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.execution.routine_context import notable, routine_prompt
@@ -163,6 +164,9 @@ class ConversationExecutor:
         routine = routine_prompt(context)
         if routine:
             messages.append(ChatMessage("system", routine))
+        attached = attachments_prompt(context)
+        if attached:
+            messages.append(ChatMessage("system", attached))
         for turn in history:
             messages.append(ChatMessage("user", turn.request))
             messages.append(ChatMessage("assistant", json.dumps({"reply": turn.reply})))

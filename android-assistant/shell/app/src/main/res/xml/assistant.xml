@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app as the phone's digital assistant: sessions read the screen when allowed. -->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.personalassistant.shell.AssistantSessionService"
+    android:recognitionService="com.personalassistant.shell.AssistantRecognitionService"
+    android:supportsAssist="true" />

@@ -169,6 +169,7 @@ def triage_message(
         work_items=open_items,
         local_time=body.local_time,
         timezone=body.timezone,
+        screen=body.attachments[0].text if body.attachments else None,
     )
     response = TriageDecisionResponse.model_validate(decision.model_dump(mode="json"))
     if decision.action is not None:

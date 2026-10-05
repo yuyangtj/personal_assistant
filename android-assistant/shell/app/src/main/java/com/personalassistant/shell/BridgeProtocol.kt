@@ -24,9 +24,15 @@ object BridgeProtocol {
         )
     }
 
-    fun capabilities(voice: Boolean, deviceAi: DeviceAiState): String = JSONObject()
+    /** Most a shared file or screen may carry to the page (the server caps it again). */
+    const val MAX_SHARED_TEXT = 5_000_000
+    const val MAX_SCREEN_TEXT = 8_000
+
+    fun capabilities(voice: Boolean, deviceAi: DeviceAiState, assistant: Boolean? = null): String =
+        JSONObject()
         .put("type", "capabilities")
         .put("voice", voice)
+        .apply { if (assistant != null) put("assistant", assistant) }
         .put("speak", true)
         .put("onDevice", deviceAi.availability.wire)
         .put("onDeviceDetail", deviceAi.detail)
@@ -37,6 +43,26 @@ object BridgeProtocol {
         .put("onDevice", state.availability.wire)
         .put("onDeviceDetail", state.detail)
         .apply { state.progress?.let { put("progress", it.toDouble()) } }
+        .toString()
+
+    /** Text shared from another app, for the chat box. */
+    fun shared(text: String): String = JSONObject()
+        .put("type", "shared")
+        .put("text", text.take(MAX_TEXT))
+        .toString()
+
+    /** A text file shared from another app, to upload into the chat. */
+    fun sharedFile(name: String, text: String): String = JSONObject()
+        .put("type", "shared_file")
+        .put("name", name.take(200))
+        .put("text", text.take(MAX_SHARED_TEXT))
+        .toString()
+
+    /** The screen the user was on when they opened the assistant (may be empty). */
+    fun screen(app: String, text: String): String = JSONObject()
+        .put("type", "screen")
+        .put("app", app.take(80))
+        .put("text", text.take(MAX_SCREEN_TEXT))
         .toString()
 
     fun voice(state: String, text: String? = null): String = JSONObject()
@@ -65,6 +91,7 @@ object BridgeProtocol {
         .toString()
 
     private val INCOMING_TYPES = setOf(
+        "open_assistant_settings",
         "hello",
         "listen",
         "stop_listening",

@@ -39,6 +39,12 @@ class AddMessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=20_000)
 
 
+class MessageAttachment(BaseModel):
+    kind: Literal["screen"] = "screen"
+    app: str = Field(default="", max_length=80)
+    text: str = Field(min_length=1, max_length=8_000)
+
+
 class AppendChatMessageRequest(BaseModel):
     """A turn of conversation. Posting one never launches work."""
 
@@ -48,6 +54,8 @@ class AppendChatMessageRequest(BaseModel):
     #: The user's clock, so "tomorrow at 9" resolves in their timezone.
     local_time: str | None = Field(default=None, max_length=40)
     timezone: str | None = Field(default=None, max_length=64)
+    #: Context attached on the phone (the screen the user was on); at most one.
+    attachments: list[MessageAttachment] = Field(default_factory=list, max_length=1)
 
 
 class CreateTaskFromMessageRequest(BaseModel):

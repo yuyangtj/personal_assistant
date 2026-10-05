@@ -5,7 +5,7 @@
 // replies, timers and alarms, and simple answers that stay on the phone. In a browser
 // none of this exists and the console works as before.
 const phone = { bridge: window.AndroidAssistant || null, caps: null, routes: new Map(), next: 0,
-                turns: {}, speakFor: null, listening: false, dictated: false, dictationBase: "" };
+                turns: {}, speakFor: null, listening: false, dictated: false, dictationBase: "", screen: null };
 
 function phoneSend(message) { phone.bridge.postMessage(JSON.stringify(message)); }
 
@@ -89,6 +89,40 @@ function showListening(listening) {
     : "Say something — mention a work item with #tag. Nothing runs on its own…";
 }
 
+// Context handed over from other apps: shared text goes into the box to edit, a shared
+// file is uploaded into the chat, and the screen (from the assistant gesture) rides along
+// with the next message.
+function setScreen(screen) {
+  phone.screen = screen;
+  const chip = $("screen-chip");
+  chip.hidden = !screen;
+  chip.innerHTML = screen
+    ? `📱 Screen${screen.app ? " from " + esc(screen.app) : ""} · ${esc(screen.text.length.toLocaleString())} characters`
+      + ` <button type="button" class="chip-x" id="screen-remove" aria-label="Don't send the screen">✕</button>`
+    : "";
+  if (screen) $("screen-remove").onclick = () => setScreen(null);
+}
+
+// Context arriving with no chat open (phones show the chat list then) starts a new one,
+// so the chat box and the chip are on screen.
+async function ensureChatOpen() {
+  if (state.chatId && parseRoute().id === state.chatId) return;
+  const chat = state.chatId || (await api("/chat-sessions", { method: "POST", body: "{}" })).id;
+  go({ section: "chats", id: chat });
+  await render();
+  loadChats();
+}
+
+async function shareFile(name, text) {
+  try {
+    await ensureChatOpen();
+    await api(`/chat-sessions/${state.chatId}/files`, {
+      method: "POST", body: JSON.stringify({ filename: name, content: text }),
+    });
+    await refreshTranscript();
+  } catch (error) { fail(error); }
+}
+
 function renderDeviceAi(caps) {
   const note = $("phone-note");
   if (caps.onDevice === "downloadable") {
@@ -99,7 +133,21 @@ function renderDeviceAi(caps) {
   } else {
     note.textContent = "";
   }
-  note.hidden = !note.textContent;
+  // Until it is the phone's assistant, offer the settings page once (dismissable).
+  let dismissed = false;
+  try { dismissed = localStorage.getItem("assistantHintDismissed") === "1"; } catch (_) {}
+  if (caps.assistant === false && !dismissed && !note.querySelector("#make-assistant")) {
+    note.insertAdjacentHTML("beforeend", `<div>Open me with a long press on the power button, and let me`
+      + ` read the screen you're on. <button type="button" class="quiet" id="make-assistant">Set as phone assistant</button>`
+      + ` <button type="button" class="ghost" id="skip-assistant">Not now</button></div>`);
+    $("make-assistant").onclick = () => phoneSend({ type: "open_assistant_settings" });
+    $("skip-assistant").onclick = () => {
+      try { localStorage.setItem("assistantHintDismissed", "1"); } catch (_) {}
+      $("make-assistant").parentElement.remove();
+      note.hidden = !note.textContent.trim();
+    };
+  }
+  note.hidden = !note.textContent.trim();
 }
 
 function onPhoneMessage(message) {
@@ -123,6 +171,20 @@ function onPhoneMessage(message) {
       showListening(false);
       if (message.text) fail(new Error(message.text));
     }
+  } else if (message.type === "shared") {
+    ensureChatOpen().then(() => {
+      phone.dictationBase = $("input").value.trimEnd();
+      $("input").value = withDictation(message.text);
+      $("input").focus();
+    }).catch(fail);
+  } else if (message.type === "shared_file") {
+    shareFile(message.name || "shared file", message.text || "");
+  } else if (message.type === "screen") {
+    ensureChatOpen().then(() => {
+      setScreen(message.text ? { app: message.app || "", text: message.text } : null);
+      // The assistant gesture means "I want to say something": listen right away.
+      if (!phone.listening) phoneSend({ type: "listen" });
+    }).catch(fail);
   } else if (message.type === "route") {
     const resolve = phone.routes.get(message.id);
     phone.routes.delete(message.id);

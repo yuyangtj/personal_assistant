@@ -87,8 +87,22 @@ class UploadBlock(BaseModel):
     result: str | None = Field(default=None, max_length=300)
 
 
+class AttachmentBlock(BaseModel):
+    """Context the user attached to their message, e.g. the text of the screen they were on.
+
+    It came from another app, so it is untrusted data for every agent that sees it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["attachment"] = "attachment"
+    kind: Literal["screen"] = "screen"
+    app: str = Field(default="", max_length=80)
+    text: str = Field(min_length=1, max_length=8_000)
+
+
 Block = Annotated[
-    ChoicesBlock | LinkBlock | WorkflowBlock | ItemBlock | UploadBlock,
+    ChoicesBlock | LinkBlock | WorkflowBlock | ItemBlock | UploadBlock | AttachmentBlock,
     Field(discriminator="type"),
 ]
 _BLOCKS = TypeAdapter(list[Block])

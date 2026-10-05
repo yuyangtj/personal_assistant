@@ -118,3 +118,24 @@ skill; there is no separate workflow engine (`app/chat/routines.py`).
   asking which when several match.
 - **Prices outside the grocery stores** need the research agent, so a Tavily or Brave
   search key has to be configured.
+
+## Context from other Android apps
+
+Both ways in are started by the user, and nothing is sent until they send it.
+
+- **Share to Assistant.** Any app's Share menu, and "Ask Assistant" on selected text.
+  Links and text go into the chat box to edit. A shared text file is uploaded into the
+  chat (`POST /chat-sessions/{chat}/files`), and the upload target that recognizes it
+  (`detect` in `app/chat/uploads.py`, today the Klarna export) handles it. A cold start
+  keeps the item until the page says hello.
+- **The phone's assistant.** Once picked under Default apps → Digital assistant app,
+  long-press power opens the console. When "Use text from screen" is on, the screen's
+  visible text is attached (password fields are skipped, and secure windows such as
+  banking apps share nothing; `ScreenText.kt`). It shows as a removable chip and goes with
+  the next message as an `attachment` block.
+- **Where it goes.** Routing gets the first 600 characters. The answering agents
+  (conversation, shopping, research) get the attachment as untrusted data. The supervisor
+  and coding agents never get it (`UNTRUSTED_CONTEXT_EXCLUDED`).
+- The assistant role requires a speech recognizer in the app. `AssistantRecognitionService`
+  forwards to Google's, so making the app the assistant doesn't break voice input
+  elsewhere.
