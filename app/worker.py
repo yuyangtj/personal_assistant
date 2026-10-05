@@ -16,6 +16,7 @@ from app.capabilities import CapabilityRegistry
 from app.coding.base import CodeAgentRunner
 from app.coding.decision import CodingDecisionEngine, CodingRunnerRegistry
 from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
+from app.coding.reconcile import PullRequestReconciler
 from app.coding.runners import (
     ClaudeCodeMiniMaxRunner,
     CodexCliRunner,
@@ -423,6 +424,8 @@ class TaskWorker:
         brief_writeback_interval_seconds: float = 30.0,
         scheduler: Scheduler | None = None,
         scheduler_interval_seconds: float = 20.0,
+        pull_requests: PullRequestReconciler | None = None,
+        pull_request_interval_seconds: float = 300.0,
         notifier: Notifier | None = None,
     ):
         self.service = service
@@ -443,6 +446,9 @@ class TaskWorker:
         self.scheduler = scheduler
         self.scheduler_interval_seconds = scheduler_interval_seconds
         self._scheduler_thread: threading.Thread | None = None
+        self.pull_requests = pull_requests
+        self.pull_request_interval_seconds = pull_request_interval_seconds
+        self._pull_request_thread: threading.Thread | None = None
         self.notifier: Notifier = notifier or NullNotifier()
         self._stop_event = threading.Event()
 
@@ -667,6 +673,29 @@ class TaskWorker:
             self._scheduler_thread.start()
         return self._scheduler_thread
 
+    def start_pull_request_sync(self) -> threading.Thread | None:
+        """Notice PRs merged or closed on GitHub (general worker only)."""
+        if self.pull_requests is None or self.coding_only:
+            return None
+        if self._pull_request_thread is None or not self._pull_request_thread.is_alive():
+            self._pull_request_thread = threading.Thread(
+                target=self._pull_request_loop, name="pull-requests", daemon=True
+            )
+            self._pull_request_thread.start()
+        return self._pull_request_thread
+
+    def _pull_request_loop(self) -> None:
+        reconciler = self.pull_requests
+        if reconciler is None:
+            return
+        while True:
+            try:
+                reconciler.run_once()
+            except Exception:
+                logger.exception("Could not sync pull requests with GitHub")
+            if self._stop_event.wait(self.pull_request_interval_seconds):
+                return
+
     def _scheduler_loop(self) -> None:
         scheduler = self.scheduler
         if scheduler is None:
@@ -697,6 +726,7 @@ class TaskWorker:
         logger.info("Worker %s started", self.worker_id)
         self.start_brief_writeback()
         self.start_scheduler()
+        self.start_pull_request_sync()
         while not self._stop_event.is_set():
             processed = self.run_once()
             if not processed:
@@ -810,6 +840,15 @@ def main() -> None:
         ),
         scheduler=Scheduler(database, start_run=start_routine, notifier=notifier),
         scheduler_interval_seconds=settings.scheduler_interval_seconds,
+        pull_requests=(
+            PullRequestReconciler(
+                task_service,
+                GitHubClient(token=settings.github_token, base_url=settings.github_api_base_url),
+                on_change=workflow_service.sync_for_task,
+            )
+            if settings.github_token and not settings.worker_coding_only
+            else None
+        ),
         notifier=notifier,
     )
 

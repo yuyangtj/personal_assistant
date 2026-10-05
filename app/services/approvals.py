@@ -369,7 +369,9 @@ class ApprovalOperations(ServiceBase):
             )
             return task
 
-    def reject_approval(self, task_id: str) -> TaskModel:
+    def reject_approval(
+        self, task_id: str, *, reply: str = "Okay, I left the pull request unmerged."
+    ) -> TaskModel:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
             if TaskStatus(task.status) != TaskStatus.WAITING_FOR_APPROVAL:
@@ -402,12 +404,7 @@ class ApprovalOperations(ServiceBase):
             self._record_assistant_reply(
                 session,
                 task,
-                _reply_payload(
-                    "Okay, I left the pull request unmerged.",
-                    emotion="Neutral",
-                    intensity=0.5,
-                    outcome="cancelled",
-                ),
+                _reply_payload(reply, emotion="Neutral", intensity=0.5, outcome="cancelled"),
             )
             task.cancel_requested = True
             task.status = TaskStatus.CANCELLED.value
@@ -584,3 +581,46 @@ class ApprovalOperations(ServiceBase):
                     ],
                 )
             return task
+
+    def open_pull_request_gates(self) -> list[dict[str, Any]]:
+        """Every task waiting for a pull request review, with the PR it waits on."""
+        with self.database.session() as session:
+            waiting = session.scalars(
+                select(TaskModel).where(TaskModel.status == TaskStatus.WAITING_FOR_APPROVAL.value)
+            ).all()
+            gates = []
+            for task in waiting:
+                approval = session.scalar(
+                    select(TaskEventModel)
+                    .where(TaskEventModel.task_id == task.id)
+                    .where(TaskEventModel.event_type == EventType.APPROVAL_REQUESTED.value)
+                    .order_by(TaskEventModel.sequence.desc())
+                    .limit(1)
+                )
+                payload = approval.payload if approval is not None else {}
+                if payload.get("type") == "github_pull_request_merge" and payload.get("number"):
+                    gates.append(
+                        {
+                            "task_id": task.id,
+                            "repository": str(payload.get("repository") or ""),
+                            "number": int(payload["number"]),
+                            "url": str(payload.get("url") or ""),
+                            "expected_head_sha": str(payload.get("expected_head_sha") or ""),
+                        }
+                    )
+            return gates
+
+    def record_merged_elsewhere(self, task_id: str, *, merge_sha: str | None) -> TaskModel:
+        """The PR was merged outside the console (on GitHub): close its gate as merged."""
+        gate = next(g for g in self.open_pull_request_gates() if g["task_id"] == task_id)
+        approval = self.begin_pull_request_approval(
+            task_id, expected_head_sha=gate["expected_head_sha"]
+        )
+        return self.complete_pull_request_merge(
+            task_id,
+            execution_id=approval["execution_id"],
+            repository=gate["repository"],
+            number=gate["number"],
+            url=gate["url"],
+            merge_sha=merge_sha,
+        )

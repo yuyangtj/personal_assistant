@@ -63,7 +63,7 @@ def test_supervisor_starts_a_coding_agent_and_says_so(client: TestClient) -> Non
     # The model saw the registered repositories and the (empty) active work.
     prompt = "\n".join(message.content for message in model.requests[0])
     assert "personal-assistant" in prompt
-    assert "No coding runs are active or recent." in prompt
+    assert "No coding runs in the last week." in prompt
 
 
 def test_supervisor_answers_progress_from_active_work(client: TestClient) -> None:
@@ -488,4 +488,129 @@ def test_a_cancelled_revision_also_gives_the_gate_back(client: TestClient) -> No
 
     client.app.state.task_service.cancel_task(revision_id)
 
+    assert client.get(f"/tasks/{run['task_id']}").json()["status"] == "waiting_for_approval"
+
+
+def test_the_overview_tells_a_runs_whole_story(client: TestClient) -> None:
+    """PR #41 merged, then a revision of it failed: the run is still a merge, not a failure."""
+    from app.assistant.overview import coding_runs, render_overview
+    from app.coding.runs import CodingRunPhase, CodingRunStore
+
+    _, run, revision_id = _open_pr_with_revision(client)
+    state = client.app.state
+    store = CodingRunStore(state.database)
+    store.start(
+        task_id=run["task_id"],
+        repository_id="personal-assistant",
+        github_repository="acme/widget",
+        branch="assistant/x",
+    )
+    store.update(
+        run["task_id"],
+        CodingRunPhase.PR_CREATED,
+        pull_request_number=41,
+        pull_request_url="https://github.com/acme/widget/pull/41",
+    )
+    service = state.task_service
+    # The PR was merged (the restore puts the gate back, the merge completes it) ...
+    service.fail_task(revision_id, error="No enabled capability provides: coding-pull-request")
+    approval = service.begin_pull_request_approval(run["task_id"], expected_head_sha="a" * 40)
+    service.complete_pull_request_merge(
+        run["task_id"],
+        execution_id=approval["execution_id"],
+        repository="acme/widget",
+        number=41,
+        url="https://github.com/acme/widget/pull/41",
+        merge_sha="b" * 40,
+    )
+
+    overview = render_overview(coding_runs(state.database))
+
+    assert "Merged: PR #41" in overview
+    assert "Needs your review: none" in overview
+    assert "[MERGED]" in overview and "PR #41 merged" in overview
+
+
+class _FakeGitHub:
+    def __init__(self, **state):
+        self.state = state
+
+    def get_pull_request(self, *, repository: str, number: int):
+        from app.integrations.github import GitHubPullRequest
+
+        return GitHubPullRequest(
+            repository=repository,
+            number=number,
+            url=f"https://github.com/{repository}/pull/{number}",
+            head_branch="assistant/x",
+            head_sha="a" * 40,
+            base_branch="main",
+            state=self.state.get("state", "open"),
+            draft=False,
+            merged=self.state.get("merged", False),
+            merge_commit_sha="c" * 40 if self.state.get("merged") else None,
+        )
+
+
+def _waiting_pr(client: TestClient) -> tuple[str, dict]:
+    chat, _, run = _started_run(client)
+    service = client.app.state.task_service
+    execution_id = _execution(client, run["task_id"])
+    service.start_validation(run["task_id"], execution_id, output={"summary": "Opened a PR"})
+    service.request_approval(
+        run["task_id"],
+        execution_id,
+        artifacts=[],
+        approval={
+            "type": "github_pull_request_merge",
+            "number": 41,
+            "repository": "acme/widget",
+            "url": "https://github.com/acme/widget/pull/41",
+            "head_branch": "assistant/x",
+            "expected_head_sha": "a" * 40,
+            "draft": True,
+        },
+    )
+    return chat, run
+
+
+def test_a_pr_merged_on_github_is_recorded_as_merged(client: TestClient) -> None:
+    from app.coding.reconcile import PullRequestReconciler
+
+    chat, run = _waiting_pr(client)
+    synced: list[str] = []
+    reconciler = PullRequestReconciler(
+        client.app.state.task_service,
+        _FakeGitHub(state="closed", merged=True),
+        on_change=synced.append,
+    )
+
+    assert reconciler.run_once() == 1
+    assert reconciler.run_once() == 0  # nothing waits on it any more
+
+    task = client.get(f"/tasks/{run['task_id']}").json()
+    assert task["status"] == "completed"
+    assert synced == [run["task_id"]]
+    messages = client.get(f"/chat-sessions/{chat}/messages").json()["messages"]
+    assert any(m["content"] == "Pull request #41 was merged successfully." for m in messages)
+
+
+def test_a_pr_closed_on_github_closes_its_gate(client: TestClient) -> None:
+    from app.coding.reconcile import PullRequestReconciler
+
+    _, run = _waiting_pr(client)
+    reconciler = PullRequestReconciler(
+        client.app.state.task_service, _FakeGitHub(state="closed", merged=False)
+    )
+
+    assert reconciler.run_once() == 1
+    assert client.get(f"/tasks/{run['task_id']}").json()["status"] == "cancelled"
+
+
+def test_an_open_pr_is_left_waiting(client: TestClient) -> None:
+    from app.coding.reconcile import PullRequestReconciler
+
+    _, run = _waiting_pr(client)
+
+    assert PullRequestReconciler(client.app.state.task_service, _FakeGitHub()).run_once() == 0
     assert client.get(f"/tasks/{run['task_id']}").json()["status"] == "waiting_for_approval"
