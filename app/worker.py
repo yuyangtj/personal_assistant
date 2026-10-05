@@ -782,6 +782,7 @@ def main() -> None:
     )
     if search is not None and conversation_executor is not None:
         executors[ToolAgentExecutor.id] = ToolAgentExecutor(conversation_executor.client, search)
+        logger.info("Web research agent enabled with %s search", search.name)
     if settings.mcp_gateway_url and conversation_executor is not None:
         executors[GroceryAgentExecutor.id] = GroceryAgentExecutor(
             conversation_executor.client,
@@ -789,7 +790,6 @@ def main() -> None:
             Toolset.load(settings.toolsets_directory / "groceries.yaml"),
         )
         logger.info("Grocery agent enabled through %s", settings.mcp_gateway_url)
-        logger.info("Web research agent enabled with %s search", search.name)
     provider_state_store = DatabaseProviderStateStore(database)
     coding_executor = build_coding_executor(
         settings,
