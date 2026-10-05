@@ -206,3 +206,32 @@ def test_the_grocery_agent_is_routable() -> None:
     chosen = CapabilityRegistry.from_directory("capabilities").select(["groceries"])
 
     assert chosen.id == "grocery-agent"
+
+
+def test_minimax_native_tool_calls_are_understood() -> None:
+    gateway = FakeGateway({"willys.get_purchase_history": _text({"configured": False})})
+    agent, _ = _agent(
+        gateway,
+        '[TOOL_CALL] {tool => "willys.get_purchase_history", arguments => '
+        '{"fromDate": "2026-09-28", "toDate": "2026-10-04"}} [/TOOL_CALL]',
+        json.dumps({"action": "finish", "answer": "Your Willys account isn't connected yet."}),
+    )
+
+    output = _run(agent, "what did I buy at willys last week?")
+
+    assert gateway.calls == [
+        ("willys", "get_purchase_history", {"fromDate": "2026-09-28", "toDate": "2026-10-04"})
+    ]
+    assert output["reply"] == "Your Willys account isn't connected yet."
+
+
+def test_an_agent_that_never_answers_gets_a_polite_reply_not_a_failure() -> None:
+    call = json.dumps({"action": "tool", "tool": "willys.get_promotions", "arguments": {}})
+    gateway = FakeGateway({"willys.get_promotions": _text({"offers": []})})
+    agent, model = _agent(gateway, *[call] * 10)
+
+    output = _run(agent, "offers?")
+
+    assert output["reply"].startswith("Sorry, I couldn't get a clear answer")
+    assert len(gateway.calls) == 1  # repeats are answered from the earlier result
+    assert "Last step" in model.requests[-1][-1].content
