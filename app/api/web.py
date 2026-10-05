@@ -34,6 +34,7 @@ WEB_STATIC = {
     "phone.js": "text/javascript",
     "passkeys.js": "text/javascript",
     "memories.js": "text/javascript",
+    "purchases.js": "text/javascript",
     "events.js": "text/javascript",
     "main.js": "text/javascript",
 }

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     LargeBinary,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -387,3 +390,39 @@ class PasskeyChallengeModel(Base):
     action: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class PurchaseModel(Base):
+    """A purchase imported from a payment provider's export (Klarna)."""
+
+    __tablename__ = "purchases"
+    __table_args__ = (
+        # Identical purchases (same minute, merchant, amount) are told apart by occurrence.
+        UniqueConstraint(
+            "source",
+            "occurred_on",
+            "occurred_time",
+            "merchant",
+            "amount",
+            "occurrence",
+            name="uq_purchases_identity",
+        ),
+        Index("ix_purchases_occurred_on", "occurred_on"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    occurred_on: Mapped[date] = mapped_column(Date, nullable=False)
+    occurred_time: Mapped[str] = mapped_column(String(5), nullable=False, default="")
+    merchant: Mapped[str] = mapped_column(String(200), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    original_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    payment_type: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    #: As the export says it: "" for a normal purchase, or Pending, Cancelled, ...
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    occurrence: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )

@@ -10,11 +10,15 @@ const state = { chats: [], repositories: [], deploymentTargets: [], repositoryId
 
 // Every view has its own address: #/chats/<id>, #/items/<slug>; ?task=<id> or
 // ?workflow=<id> opens a drawer over either, so back/forward, reload and push links work.
+// Each section has a view (#<section>-view, chats: #chat-view) and a nav link (#nav-<section>).
+const SECTIONS = ["chats", "items", "memories", "purchases"];
+const sectionView = (section) => $(section === "chats" ? "chat-view" : `${section}-view`);
+
 function parseRoute() {
   const [path, query = ""] = location.hash.replace(/^#\/?/, "").split("?");
   const [section, id = null] = path.split("/").map(decodeURIComponent);
   const params = new URLSearchParams(query);
-  return { section: ["items", "memories"].includes(section) ? section : "chats", id: id || null,
+  return { section: SECTIONS.includes(section) ? section : "chats", id: id || null,
     task: params.get("task"), workflow: params.get("workflow") };
 }
 function routeHash({ section, id = null, task = null, workflow = null }) {
@@ -35,22 +39,19 @@ const goItem = (ref) => go({ section: "items", id: ref });
 async function render() {
   const route = parseRoute();
   const items = route.section === "items";
-  const memories = route.section === "memories";
   // A view coming back into sight is refreshed even when its route is unchanged.
-  const returning = items ? $("items-view").hidden : $("chat-view").hidden;
-  $("chat-view").hidden = items || memories;
-  $("items-view").hidden = !items;
-  $("memories-view").hidden = !memories;
-  $("nav-memories").classList.toggle("active", memories);
-  $("nav-memories").toggleAttribute("aria-current", memories);
-  $("chat-view").classList.toggle("has-detail", !items && Boolean(route.id));
-  $("items-view").classList.toggle("has-detail", items && Boolean(route.id));
-  $("nav-chats").classList.toggle("active", !items && !memories);
-  $("nav-items").classList.toggle("active", items);
-  $("nav-chats").toggleAttribute("aria-current", !items && !memories);
-  $("nav-items").toggleAttribute("aria-current", items);
-  if (memories) {
+  const returning = sectionView(route.section).hidden;
+  for (const section of SECTIONS) {
+    const shown = section === route.section;
+    sectionView(section).hidden = !shown;
+    sectionView(section).classList.toggle("has-detail", shown && Boolean(route.id));
+    $(`nav-${section}`).classList.toggle("active", shown);
+    $(`nav-${section}`).toggleAttribute("aria-current", shown);
+  }
+  if (route.section === "memories") {
     loadMemories();
+  } else if (route.section === "purchases") {
+    loadPurchases();
   } else if (items) {
     if (route.id !== state.itemRef || returning) {
       state.itemRef = route.id;

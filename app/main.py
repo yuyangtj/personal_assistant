@@ -23,6 +23,7 @@ from app.services import TaskService
 from app.validation import ValidationProfileRegistry
 from app.work.items import WorkItemService, configure_spaces
 from app.work.memory import MemoryService
+from app.work.purchases import PurchaseService
 from app.work.spaces import SpaceRegistry
 from app.workflows import WorkflowRegistry, WorkflowService
 
@@ -63,6 +64,7 @@ def create_app(
     application.state.database = database
     application.state.task_service = TaskService(database)
     application.state.memory_service = MemoryService(database)
+    application.state.purchase_service = PurchaseService(database)
     application.state.work_item_service = WorkItemService(database)
     application.state.schedule_service = ScheduleService(database)
     application.state.space_registry = space_registry
@@ -73,7 +75,8 @@ def create_app(
         research_available=bool(
             resolved_settings.tavily_api_key or resolved_settings.brave_search_api_key
         ),
-        groceries_available=bool(resolved_settings.mcp_gateway_url),
+        # Klarna purchases are always there; the stores need the MCP gateway.
+        groceries_available=True,
         spaces=space_registry,
     )
     application.state.capability_registry = registry

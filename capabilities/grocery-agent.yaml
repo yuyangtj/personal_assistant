@@ -1,7 +1,7 @@
 id: grocery-agent
 name: Grocery agent
 kind: agent
-description: Answers grocery questions from the user's stores (Willys, Lidl) through read-only MCP tools - offers, receipts, purchases and spending.
+description: Answers grocery and shopping questions from the user's stores (Willys, Lidl, through read-only MCP tools) and their imported Klarna purchases - offers, receipts, purchases and spending.
 provides:
   - groceries
 availability:

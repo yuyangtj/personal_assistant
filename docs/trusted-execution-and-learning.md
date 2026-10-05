@@ -25,6 +25,17 @@ and an immutable lowercase Git SHA. It records approval and intended stages, but
 no remote-shell executor yet. Adding one requires a target-specific credential, health check, and
 rollback implementation rather than granting an LLM general server access.
 
+## Klarna purchases
+
+Klarna has no API for customers, so purchases come from CSV exports uploaded on the console's
+**Purchases** page (`POST /purchases/import`). Imports merge: a purchase is identified by
+date, time, merchant and amount (identical ones by occurrence), and a later export updates
+its status, so overlapping exports never duplicate. The rows live in the `purchases` table
+(`018`). The shopping agent (the grocery agent, `toolsets/groceries.yaml`) answers from them
+with two read-only tools, `klarna.spending` and `klarna.purchases`. They are served from the
+database, not MCP, and work without the store gateway. Cancelled and failed purchases are
+not counted as spending. Only the rows or totals a question needs go to the chat model.
+
 ## Memory and historical learning
 
 Long-term memory is explicit and inspectable. Nothing is extracted automatically: a memory

@@ -1,7 +1,8 @@
-# Tools the grocery agent may call through the MCP gateway. Only what is listed here is
-# offered to the model; every tool only reads (none can buy or change anything).
+# Tools the shopping agent may call: the stores through the MCP gateway, and Klarna
+# purchases from the server's database. Only what is listed here is offered to the model;
+# every tool only reads (none can buy or change anything).
 id: groceries
-description: Your grocery stores in Sweden, Willys and Lidl
+description: Your grocery stores in Sweden (Willys, Lidl) and your Klarna purchases
 servers:
   willys:
     get_promotions: This week's offers at your Willys store (search with query)
@@ -14,3 +15,6 @@ servers:
     get_promotions: This week's Lidl campaigns and offers (results are large - pass query and a small limit)
     get_leaflet_promotions: The products in the current Lidl leaflet (pass query to narrow it)
     get_historical_receipts: Your Lidl Plus receipts
+  klarna:
+    spending: Totals spent with Klarna (any shop) over a period, optionally per merchant or month; cancelled and failed purchases are left out
+    purchases: Your Klarna purchases, newest first (filter by dates and merchant; at most 25)
