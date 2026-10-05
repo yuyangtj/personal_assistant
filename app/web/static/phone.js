@@ -109,8 +109,8 @@ function onPhoneMessage(message) {
     else if (message.state === "partial") $("input").value = message.text || "";
     else if (message.state === "final") {
       showListening(false);
-      $("input").value = "";
-      if (message.text && !state.busy) send(message.text, { voice: true });
+      $("input").value = message.text || "";
+      $("input").focus();
     } else if (message.state === "error") {
       showListening(false);
       if (message.text) fail(new Error(message.text));
