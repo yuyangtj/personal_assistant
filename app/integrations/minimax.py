@@ -9,7 +9,7 @@ from app.integrations.chat import ChatCompletion, ChatMessage, ProviderError
 from app.manager.model.contracts import ManagerModelRequest, ModelInvocation
 
 DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.chat/v1"
-DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7-highspeed"
+DEFAULT_MINIMAX_MODEL = "MiniMax-M3"
 
 _LEADING_THINK = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
 

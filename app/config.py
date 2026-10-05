@@ -54,7 +54,7 @@ class Settings:
     kimi_timeout_seconds: float = 30.0
     minimax_api_key: str | None = None
     minimax_base_url: str = "https://api.minimax.chat/v1"
-    minimax_model: str = "MiniMax-M2.7-highspeed"
+    minimax_model: str = "MiniMax-M3"
     minimax_timeout_seconds: float = 30.0
     gemini_tts_api_key: str | None = None
     gemini_tts_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
