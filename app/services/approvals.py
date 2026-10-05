@@ -10,13 +10,14 @@ from sqlalchemy import func, select
 from app.domain.enums import EventType, ExecutionStatus, TaskStatus
 from app.domain.transitions import ensure_transition
 from app.persistence.models import (
+    CodingRunModel,
     TaskEventModel,
     TaskModel,
     WorkflowRunEventModel,
     WorkflowRunModel,
     utc_now,
 )
-from app.persistence.repository import TaskRepository
+from app.persistence.repository import ChatMessageRepository, TaskRepository
 from app.services.base import ServiceBase
 from app.services.common import (
     ApprovalConflictError,
@@ -489,5 +490,97 @@ class ApprovalOperations(ServiceBase):
                             "stage": "implement",
                         },
                     )
+                )
+            return task
+
+    def restore_pull_request_approval(self, revision_task_id: str) -> TaskModel | None:
+        """Give a PR its review gate back when a revision of it ended without changing it.
+
+        A revision supersedes the PR's approval when it starts. If it then fails or is
+        cancelled before pushing anything, the PR's head is exactly what was reviewed, so
+        the original task goes back to waiting for approval instead of being stranded.
+        Returns the restored task, or None when nothing applies.
+        """
+        with self.database.session() as session, session.begin():
+            revision = self._require_task(session, revision_task_id)
+            if not revision.parent_task_id or not (revision.source_context or {}).get(
+                "revision_pull_request"
+            ):
+                return None
+            if TaskStatus(revision.status) not in (TaskStatus.FAILED, TaskStatus.CANCELLED):
+                return None
+            checkpoint = session.get(CodingRunModel, revision.id)
+            if checkpoint is not None and checkpoint.phase in ("pushed", "pr_created"):
+                return None  # the PR head moved; the old review no longer applies
+            task = self._require_task(session, revision.parent_task_id, for_update=True)
+            if (
+                TaskStatus(task.status) != TaskStatus.SUPERSEDED
+                or task.superseded_by_task_id != revision.id
+            ):
+                return None
+            approval = session.scalar(
+                select(TaskEventModel)
+                .where(TaskEventModel.task_id == task.id)
+                .where(TaskEventModel.event_type == EventType.APPROVAL_REQUESTED.value)
+                .order_by(TaskEventModel.sequence.desc())
+                .limit(1)
+            )
+            if approval is None:
+                return None
+            execution_id = approval.payload.get("execution_id")
+            execution = self._require_execution(session, execution_id) if execution_id else None
+            # Superseded is terminal for the state machine; this is the one sanctioned undo.
+            task.status = TaskStatus.WAITING_FOR_APPROVAL.value
+            task.superseded_by_task_id = None
+            if execution is not None:
+                execution.status = ExecutionStatus.RUNNING.value
+                execution.completed_at = None
+            TaskRepository.append_event(
+                session,
+                task,
+                EventType.APPROVAL_REQUESTED,
+                {**approval.payload, "restored_after_revision": revision.id},
+            )
+            run = session.scalar(
+                select(WorkflowRunModel)
+                .where(WorkflowRunModel.task_id == revision.id)
+                .with_for_update()
+            )
+            if run is not None:
+                run.task_id = task.id
+                run.status = WorkflowRunStatus.RUNNING.value
+                run.current_stage = "review"
+                run.updated_at = utc_now()
+                sequence = session.scalar(
+                    select(func.max(WorkflowRunEventModel.sequence)).where(
+                        WorkflowRunEventModel.workflow_run_id == run.id
+                    )
+                )
+                session.add(
+                    WorkflowRunEventModel(
+                        workflow_run_id=run.id,
+                        sequence=(sequence or 0) + 1,
+                        event_type="WORKFLOW_REVISION_ABANDONED",
+                        payload={"revision_task_id": revision.id, "task_id": task.id},
+                    )
+                )
+            number = approval.payload.get("number")
+            if task.chat_session_id and number:
+                ChatMessageRepository.append(
+                    session,
+                    chat_session_id=task.chat_session_id,
+                    role="assistant",
+                    content=(
+                        f"The revision didn't change PR #{number}, so it is back waiting for "
+                        "your review."
+                    ),
+                    linked_task_id=task.id,
+                    blocks=[
+                        {
+                            "type": "link",
+                            "label": "Review and merge",
+                            "href": f"#/chats/{task.chat_session_id}?task={task.id}",
+                        }
+                    ],
                 )
             return task
