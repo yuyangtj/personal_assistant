@@ -20,6 +20,19 @@ document.addEventListener("change", async (e) => {
 });
 
 document.addEventListener("click", (e) => {
+  const menu = e.target.closest("[data-chat-menu]");
+  if (menu) {
+    const id = menu.dataset.chatMenu;
+    state.chatMenu = state.chatMenu === id ? null : id;
+    state.chatDeleteArmed = null;
+    return renderChats();
+  }
+  const chatAct = e.target.closest("[data-chat-action]");
+  if (chatAct) return chatAction(chatAct.dataset.chatAction, chatAct.dataset.id).catch(fail);
+  if (e.target.closest("[data-chat-archived]")) {
+    state.showArchived = !state.showArchived;
+    return loadChats();
+  }
   const chat = e.target.closest("[data-chat]");
   if (chat) return goChat(chat.dataset.chat);
   const taskNav = e.target.closest("[data-task-nav]");

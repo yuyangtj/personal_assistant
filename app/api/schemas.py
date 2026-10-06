@@ -89,8 +89,16 @@ class ChatSessionResponse(BaseModel):
     id: str
     title: str
     archived: bool
+    pinned: bool = False
+    #: Where its latest coding work was, for grouping the chat list.
+    repository_id: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class UpdateChatSessionRequest(BaseModel):
+    pinned: bool | None = None
+    archived: bool | None = None
 
 
 class ChatMessageResponse(BaseModel):

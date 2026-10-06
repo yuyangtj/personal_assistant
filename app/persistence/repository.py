@@ -24,11 +24,13 @@ class ChatSessionRepository:
         return session.get(ChatSessionModel, chat_session_id)
 
     @staticmethod
-    def list(session: Session, *, limit: int = 100) -> list[ChatSessionModel]:
+    def list(
+        session: Session, *, limit: int = 100, archived: bool = False
+    ) -> list[ChatSessionModel]:
         return list(
             session.scalars(
                 select(ChatSessionModel)
-                .where(ChatSessionModel.archived.is_(False))
+                .where(ChatSessionModel.archived.is_(archived))
                 .order_by(ChatSessionModel.updated_at.desc())
                 .limit(limit)
             )

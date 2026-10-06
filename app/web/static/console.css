@@ -257,3 +257,10 @@
 .attachment-chip { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12px; color: var(--muted); background: var(--raised); }
 #screen-chip { align-self: flex-start; }
 #screen-chip[hidden] { display: none; }
+.chat-row { display: flex; align-items: center; gap: 2px; margin-bottom: 4px; }
+.chat-row .chat-item { flex: 1; min-width: 0; margin-bottom: 0; }
+.chat-more { color: var(--muted); flex: none; font-size: 18px; line-height: 1; padding: 4px 8px; }
+.chat-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 8px 10px; }
+.chat-actions button { padding: 4px 10px; font-size: 12.5px; }
+button.danger { background: var(--danger); color: #fff; }
+.archived-toggle { margin-top: 12px; color: var(--muted); padding-left: 2px; }

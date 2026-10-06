@@ -2,7 +2,7 @@
 // and small formatting helpers.
 
 const $ = (id) => document.getElementById(id);
-const state = { chats: [], repositories: [], deploymentTargets: [], repositoryId: null, chatId: null, messages: [], tasks: [],
+const state = { chats: [], archivedChats: [], showArchived: false, chatMenu: null, chatDeleteArmed: null, repositories: [], deploymentTargets: [], repositoryId: null, chatId: null, messages: [], tasks: [],
                 workflowId: null, taskId: null, busy: false, timer: null,
                 taskTimer: null, prPollAttempts: 0, pendingAction: null,
                 workflowRuns: [], items: [], focus: [], itemId: null,
@@ -118,13 +118,67 @@ async function taskDeployment(taskId) {
 async function loadChats() {
   try {
     state.chats = (await api("/chat-sessions")).sessions;
-    $("chat-list").innerHTML = state.chats.map((c) => `
-      <button class="chat-item ${c.id === state.chatId ? "active" : ""}" data-chat="${c.id}" type="button">
-        <div>${esc(c.title)}</div>
-        <div class="when">${new Date(c.updated_at).toLocaleString()}</div>
-      </button>`).join("") || `<div class="sub">No conversations yet.</div>`;
+    state.archivedChats = state.showArchived
+      ? (await api("/chat-sessions?archived=true")).sessions : [];
+    renderChats();
     clearError();
   } catch (e) { fail(e); }
+}
+
+// The chat list: Pinned, then one section per repository a chat's coding work was in,
+// then Other; archived chats fold away at the bottom. Each chat has a ⋯ menu.
+const repositoryName = (id) => (state.repositories.find((r) => r.id === id) || {}).name || id;
+
+function chatRow(c) {
+  const open = state.chatMenu === c.id;
+  const armed = state.chatDeleteArmed === c.id;
+  const actions = open ? `<div class="chat-actions">
+      ${c.archived ? "" : `<button type="button" class="quiet" data-chat-action="${c.pinned ? "unpin" : "pin"}" data-id="${c.id}">${c.pinned ? "Unpin" : "Pin"}</button>`}
+      <button type="button" class="quiet" data-chat-action="${c.archived ? "unarchive" : "archive"}" data-id="${c.id}">${c.archived ? "Unarchive" : "Archive"}</button>
+      <button type="button" class="${armed ? "danger" : "quiet"}" data-chat-action="delete" data-id="${c.id}">${armed ? "Delete for good?" : "Delete"}</button>
+    </div>` : "";
+  return `<div class="chat-row">
+      <button class="chat-item ${c.id === state.chatId ? "active" : ""}" data-chat="${c.id}" type="button">
+        <div>${c.pinned ? "📌 " : ""}${esc(c.title)}</div>
+        <div class="when">${new Date(c.updated_at).toLocaleString()}</div>
+      </button>
+      <button type="button" class="ghost icon-btn chat-more" data-chat-menu="${c.id}"
+        aria-expanded="${open}" aria-label="More for ${esc(c.title)}" title="Pin, archive or delete">⋯</button>
+    </div>${actions}`;
+}
+
+function renderChats() {
+  const pinned = state.chats.filter((c) => c.pinned);
+  const rest = state.chats.filter((c) => !c.pinned);
+  const repos = [...new Set(rest.map((c) => c.repository_id).filter(Boolean))];
+  const sections = [["Pinned", pinned],
+    ...repos.map((repo) => [repositoryName(repo), rest.filter((c) => c.repository_id === repo)]),
+    [repos.length || pinned.length ? "Other" : "", rest.filter((c) => !c.repository_id)]];
+  const list = sections.filter(([, chats]) => chats.length).map(([name, chats]) =>
+    (name ? `<div class="space-head">${esc(name)}</div>` : "") + chats.map(chatRow).join("")).join("");
+  const archived = `<button type="button" class="ghost archived-toggle" data-chat-archived
+      aria-expanded="${Boolean(state.showArchived)}">${state.showArchived ? "▾" : "▸"} Archived</button>`
+    + (state.showArchived ? (state.archivedChats.map(chatRow).join("")
+      || `<div class="sub">Nothing archived.</div>`) : "");
+  $("chat-list").innerHTML = (list || `<div class="sub">No conversations yet.</div>`) + archived;
+}
+
+async function chatAction(action, id) {
+  if (action === "delete" && state.chatDeleteArmed !== id) {
+    state.chatDeleteArmed = id;  // a second tap confirms; no browser dialog (the app has none)
+    return renderChats();
+  }
+  state.chatMenu = null;
+  state.chatDeleteArmed = null;
+  if (action === "delete") {
+    await api(`/chat-sessions/${id}`, { method: "DELETE" });
+    if (state.chatId === id) { state.chatId = null; go({ section: "chats" }); }
+  } else {
+    const change = { pin: { pinned: true }, unpin: { pinned: false },
+      archive: { archived: true }, unarchive: { archived: false } }[action];
+    await api(`/chat-sessions/${id}`, { method: "PATCH", body: JSON.stringify(change) });
+  }
+  await loadChats();
 }
 
 async function loadRepositories() {
@@ -134,6 +188,7 @@ async function loadRepositories() {
       + state.repositories.map((repository) => `<option value="${esc(repository.id)}"
         ${repository.id === state.repositoryId ? "selected" : ""}>
         ${esc(repository.name)}</option>`).join("");
+    if (state.chats.length) renderChats();  // section names use repository names
   } catch (e) { fail(e); }
 }
 
