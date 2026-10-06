@@ -158,7 +158,7 @@ class GroceryAgentExecutor:
                     + "\n- ".join(preferences),
                 )
             )
-        for turn in list(history)[-4:]:
+        for turn in list(history)[-8:]:
             messages += [
                 ChatMessage("user", turn.request[:1000]),
                 ChatMessage("assistant", turn.reply[:1000]),

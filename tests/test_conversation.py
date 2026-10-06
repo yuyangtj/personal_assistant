@@ -426,3 +426,27 @@ def test_invalid_proposed_action_replaces_confirm_reply() -> None:
     assert result.output["action"] is None
     assert result.output["emotion"] == "Concerned"
     assert "couldn't prepare that" in result.output["reply"]
+
+
+def test_a_chat_reply_sees_everything_said_in_the_chat(service: TaskService) -> None:
+    """Quick actions, uploads and failed runs are part of the conversation too."""
+    client = RecordingChatClient(['{"reply": "Yes, Anna.", "emotion": "Warm"}'])
+    worker = _conversation_worker(service, client)
+    chat = service.create_chat_session()
+    service.append_chat_message(chat.id, content="remember my partner is Anna")
+    service.append_chat_message(chat.id, content="I'll remember that.", role="assistant")
+    service.append_chat_message(chat.id, content="check run status")
+    service.append_chat_message(chat.id, content="📎 klarna.csv")
+    service.append_chat_message(chat.id, content="Imported 1051 purchases.", role="assistant")
+    asked = service.append_chat_message(chat.id, content="what's my partner's name?")
+    service.create_task_from_message(chat.id, asked.message.id)
+
+    worker.run_once()
+
+    seen = [(message.role, message.content) for message in client.calls[0]]
+    assert ("user", "remember my partner is Anna") in seen
+    assert ("assistant", json.dumps({"reply": "I'll remember that."})) in seen
+    assert ("user", "check run status") in seen  # its run failed; the turn still counts
+    assert ("assistant", json.dumps({"reply": "Imported 1051 purchases."})) in seen
+    assert seen[-1] == ("user", "what's my partner's name?")
+    assert sum(1 for role, text in seen if text == "what's my partner's name?") == 1

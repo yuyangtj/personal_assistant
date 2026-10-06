@@ -290,7 +290,7 @@ class SupervisorExecutor:
                     + render_work_item_context(work_items),
                 )
             )
-        for turn in list(history)[-6:]:
+        for turn in list(history)[-12:]:
             messages.append(ChatMessage("user", turn.request[:2000]))
             messages.append(ChatMessage("assistant", turn.reply[:2000]))
         messages.append(ChatMessage("user", request))

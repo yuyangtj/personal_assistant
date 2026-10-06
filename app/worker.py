@@ -811,7 +811,8 @@ def main() -> None:
     if search is not None and conversation_executor is not None:
         executors[ToolAgentExecutor.id] = ToolAgentExecutor(conversation_executor.client, search)
         logger.info("Web research agent enabled with %s search", search.name)
-    if conversation_executor is not None:
+    # Not on coding-only workers: they never run it, and their image has no toolsets.
+    if conversation_executor is not None and not settings.worker_coding_only:
         # Klarna purchases come from the database; the stores need the MCP gateway.
         stores = (
             McpGateway(settings.mcp_gateway_url, settings.mcp_gateway_token)

@@ -148,7 +148,7 @@ def triage_message(
     work_items = request.app.state.work_item_service
     focused = work_items.focused(chat_session_id)
     spaces = work_items.space_slugs(focused)
-    history = messages[-7:-1]
+    history = messages[-13:-1]
     open_items = [
         {"slug": item.slug, "title": item.title, "kind": item.kind}
         for item in work_items.list(limit=50)
