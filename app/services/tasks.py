@@ -77,7 +77,7 @@ class TaskOperations(ServiceBase):
             normalized_context = dict(source_context or {})
             if chat_session_id is not None:
                 chat_session = ChatSessionRepository.get(session, chat_session_id)
-                if chat_session is None or chat_session.archived:
+                if chat_session is None:
                     raise ChatSessionNotFoundError(chat_session_id)
                 normalized_context["conversation_id"] = chat_session.id
             if origin_message_id is not None:

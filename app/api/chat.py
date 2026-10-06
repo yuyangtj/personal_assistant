@@ -27,6 +27,7 @@ from app.api.schemas import (
     TaskProposalResponse,
     TaskResponse,
     TriageDecisionResponse,
+    UpdateChatSessionRequest,
     WorkflowRunResponse,
 )
 from app.chat.turns import private_memory_text, propose_coding_run, triage_message
@@ -63,11 +64,42 @@ def create_chat_session(
 def list_chat_sessions(
     request: Request,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    archived: bool = False,
 ) -> ChatSessionListResponse:
-    sessions = task_service(request).list_chat_sessions(limit=limit)
+    service = task_service(request)
+    sessions = service.list_chat_sessions(limit=limit, archived=archived)
+    repositories = service.chat_repositories([chat.id for chat in sessions])
     return ChatSessionListResponse(
-        sessions=[ChatSessionResponse.model_validate(chat) for chat in sessions]
+        sessions=[
+            ChatSessionResponse.model_validate(chat).model_copy(
+                update={"repository_id": repositories.get(chat.id)}
+            )
+            for chat in sessions
+        ]
     )
+
+
+@router.patch("/chat-sessions/{chat_session_id}", response_model=ChatSessionResponse)
+def update_chat_session(
+    chat_session_id: str, body: UpdateChatSessionRequest, request: Request
+) -> ChatSessionResponse:
+    """Pin, unpin, archive or unarchive a chat."""
+    try:
+        chat = task_service(request).update_chat_session(
+            chat_session_id, pinned=body.pinned, archived=body.archived
+        )
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+    return ChatSessionResponse.model_validate(chat)
+
+
+@router.delete("/chat-sessions/{chat_session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_chat_session(chat_session_id: str, request: Request) -> None:
+    """Delete a chat and its messages; the work it started is kept."""
+    try:
+        task_service(request).delete_chat_session(chat_session_id)
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
 
 
 @router.get("/chat-sessions/{chat_session_id}", response_model=ChatSessionResponse)

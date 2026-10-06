@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 
 from app.chat.blocks import validate_blocks
 from app.domain.enums import EventType, TaskStatus
@@ -16,6 +16,9 @@ from app.execution.base import ConversationTurn
 from app.persistence.models import (
     ChatMessageModel,
     ChatSessionModel,
+    ChatWorkItemModel,
+    MemoryModel,
+    ScheduleModel,
     TaskEventModel,
     TaskModel,
     WorkflowRunModel,
@@ -73,9 +76,82 @@ class ChatOperations(ServiceBase):
                 raise ChatSessionNotFoundError(chat_session_id)
             return chat_session
 
-    def list_chat_sessions(self, *, limit: int = 100) -> list[ChatSessionModel]:
+    def list_chat_sessions(
+        self, *, limit: int = 100, archived: bool = False
+    ) -> list[ChatSessionModel]:
         with self.database.session() as session:
-            return ChatSessionRepository.list(session, limit=limit)
+            return ChatSessionRepository.list(session, limit=limit, archived=archived)
+
+    def update_chat_session(
+        self, chat_session_id: str, *, pinned: bool | None = None, archived: bool | None = None
+    ) -> ChatSessionModel:
+        """Pin or archive a chat; neither changes its place in time (updated_at)."""
+        changes: dict[str, Any] = {}
+        if pinned is not None:
+            changes["pinned"] = pinned
+        if archived is not None:
+            changes["archived"] = archived
+            if archived:
+                changes["pinned"] = False
+        with self.database.session() as session, session.begin():
+            if ChatSessionRepository.get(session, chat_session_id) is None:
+                raise ChatSessionNotFoundError(chat_session_id)
+            if changes:
+                # Keeping updated_at as it is stops the column's onupdate from bumping it.
+                session.execute(
+                    update(ChatSessionModel)
+                    .where(ChatSessionModel.id == chat_session_id)
+                    .values(**changes, updated_at=ChatSessionModel.updated_at)
+                )
+        return self.get_chat_session(chat_session_id)
+
+    def delete_chat_session(self, chat_session_id: str) -> None:
+        """Delete a chat and its messages for good. What it started (tasks, workflow runs,
+        routines, memories) is kept, no longer linked to a chat."""
+        with self.database.session() as session, session.begin():
+            chat_session = ChatSessionRepository.get(session, chat_session_id)
+            if chat_session is None:
+                raise ChatSessionNotFoundError(chat_session_id)
+            for model in (TaskModel, WorkflowRunModel, MemoryModel, ScheduleModel):
+                column = (
+                    model.source_chat_session_id if model is MemoryModel else model.chat_session_id
+                )
+                session.execute(
+                    update(model).where(column == chat_session_id).values({column.key: None})
+                )
+            session.execute(
+                delete(ChatWorkItemModel).where(
+                    ChatWorkItemModel.chat_session_id == chat_session_id
+                )
+            )
+            session.execute(
+                delete(ChatMessageModel).where(ChatMessageModel.chat_session_id == chat_session_id)
+            )
+            session.delete(chat_session)
+
+    def chat_repositories(self, chat_session_ids: list[str]) -> dict[str, str]:
+        """The repository each chat's latest coding work was in, for grouping the list."""
+        if not chat_session_ids:
+            return {}
+        found: dict[str, tuple[Any, str]] = {}
+        with self.database.session() as session:
+            rows = session.execute(
+                select(
+                    TaskModel.chat_session_id, TaskModel.source_context, TaskModel.created_at
+                ).where(TaskModel.chat_session_id.in_(chat_session_ids))
+            ).all()
+            rows += session.execute(
+                select(
+                    WorkflowRunModel.chat_session_id,
+                    WorkflowRunModel.workflow_input,
+                    WorkflowRunModel.created_at,
+                ).where(WorkflowRunModel.chat_session_id.in_(chat_session_ids))
+            ).all()
+        for chat_id, context, created_at in rows:
+            repository = (context or {}).get("repository_id")
+            if repository and (chat_id not in found or created_at > found[chat_id][0]):
+                found[chat_id] = (created_at, str(repository))
+        return {chat_id: repository for chat_id, (_, repository) in found.items()}
 
     def list_chat_session_tasks(
         self,
@@ -126,8 +202,10 @@ class ChatOperations(ServiceBase):
 
         with self.database.session() as session, session.begin():
             chat_session = ChatSessionRepository.get(session, chat_session_id)
-            if chat_session is None or chat_session.archived:
+            if chat_session is None:
                 raise ChatSessionNotFoundError(chat_session_id)
+            if role == "user":
+                chat_session.archived = False  # writing in an archived chat brings it back
             message = ChatMessageRepository.append(
                 session,
                 chat_session_id=chat_session.id,
