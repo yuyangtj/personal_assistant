@@ -119,10 +119,21 @@ async function loadChats() {
   try {
     state.chats = (await api("/chat-sessions")).sessions;
     $("chat-list").innerHTML = state.chats.map((c) => `
-      <button class="chat-item ${c.id === state.chatId ? "active" : ""}" data-chat="${c.id}" type="button">
-        <div>${esc(c.title)}</div>
-        <div class="when">${new Date(c.updated_at).toLocaleString()}</div>
-      </button>`).join("") || `<div class="sub">No conversations yet.</div>`;
+      <div class="chat-row">
+        <button class="chat-item ${c.id === state.chatId ? "active" : ""}" data-chat="${c.id}" type="button">
+          <div>${esc(c.title)}</div>
+          <div class="when">${new Date(c.updated_at).toLocaleString()}</div>
+        </button>
+        <button class="ghost icon-btn chat-delete" data-chat-delete="${c.id}" type="button"
+          title="Delete conversation" aria-label="Delete conversation ${esc(c.title)}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>
+          </svg>
+        </button>
+      </div>`).join("") || `<div class="sub">No conversations yet.</div>`;
     clearError();
   } catch (e) { fail(e); }
 }

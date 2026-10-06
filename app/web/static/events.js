@@ -20,6 +20,24 @@ document.addEventListener("change", async (e) => {
 });
 
 document.addEventListener("click", (e) => {
+  const chatDelete = e.target.closest("[data-chat-delete]");
+  if (chatDelete) {
+    const id = chatDelete.dataset.chatDelete;
+    const chat = state.chats.find((c) => c.id === id);
+    const title = chat ? `"${chat.title}"` : "this conversation";
+    if (!window.confirm(`Delete ${title}? The tasks it started are kept.`)) return;
+    return api(`/chat-sessions/${id}`, { method: "DELETE" })
+      .then(async () => {
+        if (state.chatId === id) {
+          // The open conversation is gone: pick another one, or show the empty state.
+          const next = state.chats.find((c) => c.id !== id);
+          if (next) goChat(next.id);
+          else go({ section: "chats" });
+        }
+        await loadChats();
+      })
+      .catch(fail);
+  }
   const chat = e.target.closest("[data-chat]");
   if (chat) return goChat(chat.dataset.chat);
   const taskNav = e.target.closest("[data-task-nav]");

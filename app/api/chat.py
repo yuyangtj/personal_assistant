@@ -80,6 +80,14 @@ def get_chat_session(chat_session_id: str, request: Request) -> ChatSessionRespo
         raise HTTPException(status_code=404, detail="Chat session not found") from error
 
 
+@router.delete("/chat-sessions/{chat_session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_chat_session(chat_session_id: str, request: Request) -> None:
+    try:
+        task_service(request).delete_chat_session(chat_session_id)
+    except ChatSessionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat session not found") from error
+
+
 @router.get("/chat-sessions/{chat_session_id}/tasks", response_model=TaskListResponse)
 def list_chat_session_tasks(
     chat_session_id: str,

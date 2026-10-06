@@ -77,6 +77,19 @@ class ChatOperations(ServiceBase):
         with self.database.session() as session:
             return ChatSessionRepository.list(session, limit=limit)
 
+    def delete_chat_session(self, chat_session_id: str) -> None:
+        """Remove a conversation from the console; what it started keeps its record.
+
+        The session is archived rather than dropped, so tasks, workflow runs and
+        memories that reference it stay intact and no longer list it.
+        """
+        with self.database.session() as session, session.begin():
+            chat_session = ChatSessionRepository.get(session, chat_session_id)
+            if chat_session is None or chat_session.archived:
+                raise ChatSessionNotFoundError(chat_session_id)
+            chat_session.archived = True
+            session.flush()
+
     def list_chat_session_tasks(
         self,
         chat_session_id: str,

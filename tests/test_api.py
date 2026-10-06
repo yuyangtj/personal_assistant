@@ -456,6 +456,30 @@ def test_chat_session_can_be_created_listed_resumed_and_populated(client: TestCl
     assert first.json()["origin_message_id"] == messages[0]["id"]
 
 
+def test_chat_session_can_be_deleted_and_drops_out_of_the_list(client: TestClient) -> None:
+    kept = client.post("/chat-sessions", json={}).json()
+    chat = client.post("/chat-sessions", json={}).json()
+    task = client.post(
+        "/tasks",
+        json={"request": "Plan my afternoon", "chat_session_id": chat["id"]},
+    ).json()
+
+    deleted = client.delete(f"/chat-sessions/{chat['id']}")
+
+    assert deleted.status_code == 204
+    sessions = client.get("/chat-sessions").json()["sessions"]
+    assert [session["id"] for session in sessions] == [kept["id"]]
+    # The task the conversation started keeps its record.
+    resumed = client.get(f"/tasks/{task['id']}")
+    assert resumed.status_code == 200
+    # An archived conversation no longer accepts messages.
+    posted = client.post(f"/chat-sessions/{chat['id']}/messages", json={"content": "Anyone there?"})
+    assert posted.status_code == 404
+    # Deleting it again, or an unknown session, is a missing session.
+    assert client.delete(f"/chat-sessions/{chat['id']}").status_code == 404
+    assert client.delete("/chat-sessions/00000000-0000-0000-0000-000000000000").status_code == 404
+
+
 def test_chat_transcript_records_the_assistant_reply(client: TestClient) -> None:
     chat = client.post("/chat-sessions", json={}).json()
     task = client.post(
