@@ -33,6 +33,10 @@ from app.services.common import (
     _focus_mentions,
 )
 
+#: How much of a chat each reply sees: the last messages, each cut to this length.
+HISTORY_MESSAGES = 24
+HISTORY_MESSAGE_CHARACTERS = 1_500
+
 #: Agents that never get context the user attached from other apps (it is untrusted).
 UNTRUSTED_CONTEXT_EXCLUDED = {
     "supervision",
@@ -369,9 +373,16 @@ class ChatOperations(ServiceBase):
         *,
         limit: int = MAX_HISTORY_TURNS,
     ) -> list[ConversationTurn]:
-        """Earlier completed turns sharing the task's persistent chat session."""
+        """Earlier turns of the task's conversation, oldest first.
+
+        In a chat they come from the transcript itself, so everything said there counts:
+        quick actions, uploads, offers and choices, and turns whose run failed. Phone-only
+        conversations (no chat) fall back to their completed runs.
+        """
         conversation_id = (task.source_context or {}).get("conversation_id")
-        if not task.chat_session_id and not conversation_id:
+        if task.chat_session_id:
+            return self._transcript_turns(task)
+        if not conversation_id:
             return []
         with self.database.session() as session:
             statement = (
@@ -421,6 +432,47 @@ class ChatOperations(ServiceBase):
                         )
                     )
             return list(reversed(turns))
+
+    def _transcript_turns(self, task: TaskModel) -> list[ConversationTurn]:
+        """The chat's recent messages before this task, grouped as user turn + replies."""
+        with self.database.session() as session:
+            statement = (
+                select(ChatMessageModel)
+                .where(ChatMessageModel.chat_session_id == task.chat_session_id)
+                .where(ChatMessageModel.created_at <= task.created_at)
+                .order_by(ChatMessageModel.created_at.desc(), ChatMessageModel.id.desc())
+                .limit(HISTORY_MESSAGES)
+            )
+            if task.origin_message_id:
+                statement = statement.where(ChatMessageModel.id != task.origin_message_id)
+            messages = list(reversed(session.scalars(statement).all()))
+            turns: list[list[Any]] = []  # [request, replies, linked task]
+            for message in messages:
+                text = message.content[:HISTORY_MESSAGE_CHARACTERS]
+                if message.role == "user":
+                    turns.append([text, [], message.linked_task_id])
+                elif turns:
+                    turns[-1][1].append(text)
+                # An assistant message before the first user message in the window has
+                # lost its question; it is left out rather than shown out of context.
+            result = []
+            for request, replies, linked_task_id in turns:
+                outcome = None
+                if linked_task_id:
+                    notes = session.scalars(
+                        select(TaskEventModel.payload)
+                        .where(TaskEventModel.task_id == linked_task_id)
+                        .where(TaskEventModel.event_type == EventType.USER_MESSAGE_RECEIVED.value)
+                        .order_by(TaskEventModel.sequence.desc())
+                    ).all()
+                    outcome = next(
+                        (t for n in notes if (t := self._trusted_action_outcome(n)) is not None),
+                        None,
+                    )
+                result.append(
+                    ConversationTurn(request, "\n".join(replies) or "(no reply)", outcome)
+                )
+            return result
 
     @staticmethod
     def _trusted_action_outcome(payload: dict[str, Any] | None) -> str | None:

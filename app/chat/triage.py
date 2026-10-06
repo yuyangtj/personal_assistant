@@ -349,7 +349,7 @@ class Triager:
                 for item in work_items[:30]
             ],
             "recent_turns": [
-                {"role": role, "text": _clip(content, 400)} for role, content in recent[-4:]
+                {"role": role, "text": _clip(content, 400)} for role, content in recent[-8:]
             ],
             "user_clock": clock or {},
             "message": text,
