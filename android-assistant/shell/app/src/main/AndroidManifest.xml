@@ -77,6 +77,17 @@
             android:name=".AssistantSessionService"
             android:exported="true"
             android:permission="android.permission.BIND_VOICE_INTERACTION" />
+        <!-- Quick Settings tile: open the assistant from the shade, over any app. -->
+        <service
+            android:name=".AssistantTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_assistant"
+            android:label="Assistant"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
         <service
             android:name=".AssistantRecognitionService"
             android:exported="true">
