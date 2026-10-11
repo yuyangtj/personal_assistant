@@ -223,6 +223,11 @@ def test_a_short_follow_up_to_a_shopping_answer_stays_with_the_shopping_agent(
         "groceries",
     )
     # Not for long, unrelated messages, nor for bookkeeping.
-    long_text = "Tell me about the history of the Roman empire and why it eventually fell, in as much detail as you can."
+    long_text = (
+        "Tell me about the history of the Roman empire and why it eventually fell, "
+        "in as much detail as you can."
+    )
     assert triager.decide(long_text, after_groceries=True).capabilities == ()
-    assert triager.decide("remind me tomorrow at 9 to call mum", after_groceries=True).action
+    lists = [{"slug": "groceries", "title": "Groceries", "kind": "list"}]
+    added = triager.decide("add oat milk to groceries", after_groceries=True, work_items=lists)
+    assert added.action and added.capabilities == ()
