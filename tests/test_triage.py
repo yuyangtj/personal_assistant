@@ -210,3 +210,19 @@ def test_chat_model_offers_research_only_when_available() -> None:
 
     assert "research agent can" in with_research._messages("find one", (), {})[0].content
     assert "research agent" not in without._messages("find one", (), {})[0].content
+
+
+def test_a_short_follow_up_to_a_shopping_answer_stays_with_the_shopping_agent(
+    repositories: RepositoryRegistry,
+) -> None:
+    triager = Triager(repositories, groceries_available=True)
+
+    assert triager.decide("pls do").capabilities == ()
+    assert triager.decide("pls do", after_groceries=True).capabilities == ("groceries",)
+    assert triager.decide("weekly total (bar chart)", after_groceries=True).capabilities == (
+        "groceries",
+    )
+    # Not for long, unrelated messages, nor for bookkeeping.
+    long_text = "Tell me about the history of the Roman empire and why it eventually fell, in as much detail as you can."
+    assert triager.decide(long_text, after_groceries=True).capabilities == ()
+    assert triager.decide("remind me tomorrow at 9 to call mum", after_groceries=True).action

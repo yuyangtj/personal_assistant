@@ -12,7 +12,7 @@ import csv
 import io
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
@@ -26,6 +26,9 @@ KLARNA_COLUMNS = {"date", "time", "merchant", "amount", "currency"}
 #: Statuses of purchases that never went through; they don't count as spending.
 NOT_SPENT = {"cancelled", "incorrect details", "insufficient balance", "rejected", "refunded"}
 MAX_IMPORT_ROWS = 50_000
+MAX_GROUPS = 40
+#: Two years of weeks.
+MAX_WEEKS = 104
 
 
 class PurchaseImportError(ValueError):
@@ -49,6 +52,20 @@ def _amount(text: str, row: int) -> Decimal:
 
 def counts_as_spent(status: str) -> bool:
     return status.strip().lower() not in NOT_SPENT
+
+
+def _latest(totals: list[dict], group_by: str | None) -> list[dict]:
+    """The groups to report: the newest ones for a time series, else the biggest."""
+    if group_by == "week":
+        return totals[-MAX_WEEKS:]
+    if group_by == "month":
+        return totals[-MAX_GROUPS:]
+    return totals[:MAX_GROUPS] if group_by else []
+
+
+def _week(day: date) -> str:
+    """The Monday of the day's week, as the label of that week."""
+    return (day - timedelta(days=day.weekday())).isoformat()
 
 
 class PurchaseService:
@@ -182,6 +199,8 @@ class PurchaseService:
                 if group_by == "merchant"
                 else row.occurred_on.strftime("%Y-%m")
                 if group_by == "month"
+                else _week(row.occurred_on)
+                if group_by == "week"
                 else "all"
             )
             groups[key].append(row)
@@ -192,7 +211,7 @@ class PurchaseService:
             ),
             key=lambda item: -Decimal(item["total"]),
         )
-        if group_by == "month":
+        if group_by in ("month", "week"):
             totals.sort(key=lambda item: item["group"])
         return {
             "total": str(sum((row.amount for row in spent), Decimal("0"))),
@@ -203,5 +222,5 @@ class PurchaseService:
                 "reason": "cancelled or failed (e.g. insufficient balance)",
             },
             "pending": sum(1 for row in spent if row.status.lower() == "pending"),
-            "groups": totals[:40] if group_by else [],
+            "groups": _latest(totals, group_by),
         }

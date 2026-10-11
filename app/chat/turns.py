@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from fastapi import Request
 
@@ -127,6 +128,21 @@ def private_memory_text(content: str) -> str | None:
 SUPERVISOR_CONFIDENCE = 0.85
 
 
+def _last_turn_was_groceries(service: Any, history: list[Any]) -> bool:
+    """Whether the assistant's latest reply came from the shopping agent (so a short
+    follow-up like "yes" or "show it weekly" belongs there too)."""
+    for message in reversed(history):
+        if message.role == "assistant" and message.linked_task_id:
+            try:
+                task = service.get_task(message.linked_task_id)
+            except Exception:  # a task that is gone just means no stickiness
+                return False
+            return "groceries" in (task.required_capabilities or [])
+        if message.role == "assistant":
+            return False
+    return False
+
+
 def triage_message(
     request: Request, chat_session_id: str, body: AppendChatMessageRequest, message_id: str
 ) -> TriageDecisionResponse:
@@ -156,6 +172,7 @@ def triage_message(
     ]
     decision = request.app.state.triager.decide(
         body.content,
+        after_groceries=_last_turn_was_groceries(service, history),
         selected_repository_id=body.repository_id,
         focused_items=[
             {"slug": item.slug, "title": item.title, "space": spaces.get(item.space_id)}

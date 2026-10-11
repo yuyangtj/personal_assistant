@@ -27,7 +27,7 @@ TOOLS = [
         "inputSchema": {
             "properties": {
                 **_DATES,
-                "group_by": {"type": "string", "enum": ["merchant", "month"]},
+                "group_by": {"type": "string", "enum": ["merchant", "month", "week"]},
             }
         },
     },
@@ -67,6 +67,15 @@ def _chart(totals: dict[str, Any], group_by: str | None) -> dict[str, Any]:
             "kind": "bar",
             "title": "Klarna spending per month",
             "x": {"label": "Month", "type": "time"},
+            "y": axis_y,
+            "series": [{"name": "Spent", "points": points}],
+        }
+    elif group_by == "week" and len(groups) >= 3:
+        chart = {
+            "type": "chart",
+            "kind": "bar",
+            "title": "Klarna spending per week",
+            "x": {"label": "Week starting (Monday)", "type": "time"},
             "y": axis_y,
             "series": [{"name": "Spent", "points": points}],
         }
@@ -126,8 +135,8 @@ class KlarnaTools:
             )
         if tool == "spending":
             group_by = arguments.get("group_by")
-            if group_by not in (None, "", "merchant", "month"):
-                raise McpError("group_by must be merchant or month")
+            if group_by not in (None, "", "merchant", "month", "week"):
+                raise McpError("group_by must be merchant, month or week")
             totals = self.purchases.spending(**span, group_by=group_by or None)
             return _text(known | totals | _chart(totals, group_by))
         if tool == "purchases":

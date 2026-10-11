@@ -201,3 +201,33 @@ def test_spending_per_merchant_is_a_category_chart(client: TestClient) -> None:
 
     (chart,) = output.output["blocks"]
     assert chart["x"]["type"] == "category" and chart["series"][0]["points"][0] == ["SJ", 776.0]
+
+
+def test_weekly_spending_groups_by_monday_and_gets_a_chart(client: TestClient) -> None:
+    rows = "2026-09-07,10:00,Apotea,100,SEK,,Pay in 30 days,,7 Sep\n"
+    _service(client).import_klarna_csv(EXPORT + rows)
+
+    weeks = _service(client).spending(group_by="week")["groups"]
+
+    # 2026-08-14 (Fri) -> week of 08-10; 09-02 (Wed) -> 08-31; 09-07 (Mon) and 09-19 (Sat).
+    assert [(g["group"], g["total"]) for g in weeks] == [
+        ("2026-08-10", "776.00"),
+        ("2026-08-31", "173.00"),
+        ("2026-09-07", "100.00"),
+        ("2026-09-14", "499.00"),
+    ]
+    agent, _ = _agent(client, _call("spending", group_by="week"), _finish("Four weeks."))
+    output = agent.execute(task_id="t", request="Weekly total?", is_cancelled=lambda: False)
+    (chart,) = output.output["blocks"]
+    assert chart["title"] == "Klarna spending per week" and len(chart["series"][0]["points"]) == 4
+
+
+def test_a_long_history_reports_the_newest_months_and_weeks(client: TestClient) -> None:
+    lines = "".join(
+        f"{2020 + n // 12}-{n % 12 + 1:02d}-05,10:00,Shop,10,SEK,,x,,d\n" for n in range(48)
+    )
+    _service(client).import_klarna_csv(HEADER + lines)
+
+    months = _service(client).spending(group_by="month")["groups"]
+
+    assert len(months) == 40 and months[-1]["group"] == "2023-12"
