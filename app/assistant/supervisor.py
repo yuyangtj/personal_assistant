@@ -292,7 +292,8 @@ class SupervisorExecutor:
             )
         for turn in list(history)[-12:]:
             messages.append(ChatMessage("user", turn.request[:2000]))
-            messages.append(ChatMessage("assistant", turn.reply[:2000]))
+            if turn.reply:  # an unanswered message is still part of what was said
+                messages.append(ChatMessage("assistant", turn.reply[:2000]))
         messages.append(ChatMessage("user", request))
 
         started: list[str] = []

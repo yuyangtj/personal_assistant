@@ -512,23 +512,44 @@ class ChatOperations(ServiceBase):
             return list(reversed(turns))
 
     def _transcript_turns(self, task: TaskModel) -> list[ConversationTurn]:
-        """The chat's recent messages before this task, grouped as user turn + replies."""
+        """The chat's messages before the one this task answers, as user turn + replies.
+
+        The history ends where the request was said: what came after it (an offer about it,
+        the choice that started this task) is not earlier conversation. Messages the assistant
+        never answered are folded into the next user turn; one left unanswered right before
+        the request keeps an empty reply, which agents leave out (never a placeholder that a
+        model could copy).
+        """
         with self.database.session() as session:
+            origin = (
+                session.get(ChatMessageModel, task.origin_message_id)
+                if task.origin_message_id
+                else None
+            )
             statement = (
                 select(ChatMessageModel)
                 .where(ChatMessageModel.chat_session_id == task.chat_session_id)
-                .where(ChatMessageModel.created_at <= task.created_at)
                 .order_by(ChatMessageModel.created_at.desc(), ChatMessageModel.id.desc())
                 .limit(HISTORY_MESSAGES)
             )
-            if task.origin_message_id:
-                statement = statement.where(ChatMessageModel.id != task.origin_message_id)
+            if origin is not None:
+                statement = statement.where(
+                    ChatMessageModel.created_at <= origin.created_at,
+                    ChatMessageModel.id != origin.id,
+                )
+            else:
+                statement = statement.where(ChatMessageModel.created_at <= task.created_at)
             messages = list(reversed(session.scalars(statement).all()))
             turns: list[list[Any]] = []  # [request, replies, linked task]
             for message in messages:
                 text = message.content[:HISTORY_MESSAGE_CHARACTERS]
                 if message.role == "user":
-                    turns.append([text, [], message.linked_task_id])
+                    if turns and not turns[-1][1]:
+                        # Said twice in a row: one turn, both lines.
+                        turns[-1][0] = f"{turns[-1][0]}\n{text}"
+                        turns[-1][2] = message.linked_task_id or turns[-1][2]
+                    else:
+                        turns.append([text, [], message.linked_task_id])
                 elif turns:
                     turns[-1][1].append(text)
                 # An assistant message before the first user message in the window has
@@ -547,9 +568,7 @@ class ChatOperations(ServiceBase):
                         (t for n in notes if (t := self._trusted_action_outcome(n)) is not None),
                         None,
                     )
-                result.append(
-                    ConversationTurn(request, "\n".join(replies) or "(no reply)", outcome)
-                )
+                result.append(ConversationTurn(request, "\n".join(replies), outcome))
             return result
 
     @staticmethod

@@ -162,10 +162,9 @@ class GroceryAgentExecutor:
                 )
             )
         for turn in list(history)[-8:]:
-            messages += [
-                ChatMessage("user", turn.request[:1000]),
-                ChatMessage("assistant", turn.reply[:1000]),
-            ]
+            messages.append(ChatMessage("user", turn.request[:1000]))
+            if turn.reply:  # an unanswered message is still part of what was said
+                messages.append(ChatMessage("assistant", turn.reply[:1000]))
         # Store data is Swedish and pulls the model along; say which language to answer in.
         messages.append(ChatMessage("user", f"{request}\n\n(Answer in {_language(request)}.)"))
         calls: list[dict[str, Any]] = []
