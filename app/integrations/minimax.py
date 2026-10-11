@@ -5,7 +5,13 @@ import re
 
 import httpx
 
-from app.integrations.chat import ChatCompletion, ChatMessage, ProviderError
+from app.integrations.chat import (
+    CONNECT_SECONDS,
+    ChatCompletion,
+    ChatMessage,
+    ProviderError,
+    post_within,
+)
 from app.manager.model.contracts import ManagerModelRequest, ModelInvocation
 
 DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.chat/v1"
@@ -35,10 +41,13 @@ class MiniMaxChatClient:
         if not api_key:
             raise ValueError("A MiniMax API key is required")
         self.model = model
+        self._deadline_seconds = timeout_seconds
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=timeout_seconds,
+            # Connecting normally takes well under a second; a host that doesn't answer
+            # must not cost the full timeout for each of its addresses.
+            timeout=httpx.Timeout(timeout_seconds, connect=min(CONNECT_SECONDS, timeout_seconds)),
             transport=transport,
         )
 
@@ -57,7 +66,12 @@ class MiniMaxChatClient:
             ],
         }
         try:
-            response = self._client.post("/chat/completions", json=payload)
+            response = post_within(
+                self._client,
+                "/chat/completions",
+                json=payload,
+                deadline_seconds=self._deadline_seconds,
+            )
         except httpx.HTTPError as error:
             raise MiniMaxError(f"MiniMax request failed: {type(error).__name__}") from error
         if response.status_code != 200:
@@ -135,9 +149,11 @@ class MiniMaxManagerModelClient:
             ],
         }
         try:
-            response = self._client.post(
+            response = post_within(
+                self._client,
                 "/chat/completions",
                 json=payload,
+                deadline_seconds=timeout_seconds,
                 timeout=timeout_seconds,
             )
         except httpx.HTTPError as error:

@@ -4,7 +4,13 @@ import json
 
 import httpx
 
-from app.integrations.chat import ChatCompletion, ChatMessage, ProviderError
+from app.integrations.chat import (
+    CONNECT_SECONDS,
+    ChatCompletion,
+    ChatMessage,
+    ProviderError,
+    post_within,
+)
 from app.manager.model.contracts import ManagerModelRequest, ModelInvocation
 
 DEFAULT_KIMI_BASE_URL = "https://api.kimi.com/coding/v1"
@@ -32,10 +38,13 @@ class KimiChatClient:
         if not api_key:
             raise ValueError("A Kimi API key is required")
         self.model = model
+        self._deadline_seconds = timeout_seconds
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=timeout_seconds,
+            # Connecting normally takes well under a second; a host that doesn't answer
+            # must not cost the full timeout for each of its addresses.
+            timeout=httpx.Timeout(timeout_seconds, connect=min(CONNECT_SECONDS, timeout_seconds)),
             transport=transport,
         )
 
@@ -48,7 +57,12 @@ class KimiChatClient:
             ],
         }
         try:
-            response = self._client.post("/chat/completions", json=payload)
+            response = post_within(
+                self._client,
+                "/chat/completions",
+                json=payload,
+                deadline_seconds=self._deadline_seconds,
+            )
         except httpx.HTTPError as error:
             raise KimiError(f"Kimi request failed: {type(error).__name__}") from error
         if response.status_code != 200:
@@ -117,9 +131,11 @@ class KimiManagerModelClient:
             ],
         }
         try:
-            response = self._client.post(
+            response = post_within(
+                self._client,
                 "/chat/completions",
                 json=payload,
+                deadline_seconds=timeout_seconds,
                 timeout=timeout_seconds,
             )
         except httpx.HTTPError as error:
