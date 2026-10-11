@@ -47,3 +47,9 @@ def test_the_android_app_may_open_this_sites_links(client: TestClient) -> None:
     ]
     assert statement["target"]["package_name"] == "com.personalassistant.shell"
     assert len(statement["target"]["sha256_cert_fingerprints"][0].split(":")) == 32
+
+
+def test_the_chart_script_is_served_and_loaded_by_the_console(client: TestClient) -> None:
+    assert "/ui/static/charts.js" in client.get("/ui").text
+    assert "chartSvg" in client.get("/ui/static/charts.js").text
+    assert "charts.js" in client.get("/sw.js").text

@@ -5,7 +5,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app.chat.blocks import model_blocks, validate_blocks
+from app.chat.blocks import model_blocks, take_tool_blocks, validate_blocks
 from app.chat.offers import match_choice
 from app.chat.triage import Triager
 from app.execution.conversation import reply_blocks
@@ -163,6 +163,48 @@ def test_blocks_are_data_from_a_fixed_set() -> None:
     with pytest.raises(ValueError):
         validate_blocks([{"type": "choices", "options": [{"label": str(n)} for n in range(5)]}])
     assert validate_blocks([{"type": "link", "label": "PR", "href": "https://github.com/x"}])
+
+
+def _chart(**changes) -> dict:
+    return {
+        "type": "chart",
+        "title": "Spending",
+        "series": [{"name": "Spent", "points": [["2026-01", 1.0], ["2026-02", 2.5]]}],
+    } | changes
+
+
+def test_charts_and_tables_are_checked_data() -> None:
+    assert validate_blocks([_chart()])[0]["kind"] == "line"
+    assert validate_blocks([{"type": "table", "columns": ["a"], "rows": [["1"], ["2"]]}])
+    for bad in (
+        _chart(kind="pie"),
+        _chart(series=[{"name": "s", "points": [["x", float("inf")]]}]),
+        _chart(series=[{"name": "s", "points": [["x", 1.0]] * 201}]),
+        _chart(series=[{"name": "s", "points": [["x", 1.0]]}] * 7),
+        _chart(script="alert(1)"),
+    ):
+        with pytest.raises(ValueError):
+            validate_blocks([bad])
+    with pytest.raises(ValueError):
+        validate_blocks([{"type": "table", "columns": ["a", "b"], "rows": [["1"]]}])
+
+
+def test_a_model_cannot_ask_for_a_chart() -> None:
+    assert model_blocks({"choices": [], "chart": _chart(), "blocks": [_chart()]}) == []
+
+
+def test_tool_blocks_are_taken_out_of_the_result_and_bad_ones_dropped() -> None:
+    payload = {"total": "5", "blocks": [_chart()]}
+    result = {"content": [{"type": "text", "text": json.dumps(payload)}]}
+
+    blocks, cleaned = take_tool_blocks(result)
+
+    assert [block["type"] for block in blocks] == ["chart"]
+    assert (
+        "blocks" not in cleaned["content"][0]["text"] and "total" in cleaned["content"][0]["text"]
+    )
+    bad = {"content": [{"type": "text", "text": json.dumps({"blocks": [{"type": "html"}]})}]}
+    assert take_tool_blocks(bad)[0] == []
 
 
 def test_model_choices_and_links_are_validated_or_dropped() -> None:

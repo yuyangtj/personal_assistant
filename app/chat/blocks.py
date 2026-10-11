@@ -9,11 +9,17 @@ an ordinary message.
 
 from __future__ import annotations
 
+import json
+import math
 from contextlib import suppress
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+
+MAX_CHART_SERIES = 6
+MAX_CHART_POINTS = 200
+MAX_TABLE_ROWS = 50
 
 ChoiceAction = Literal["start_coding", "start_research", "start_task", "answer", "reply"]
 
@@ -101,12 +107,76 @@ class AttachmentBlock(BaseModel):
     text: str = Field(min_length=1, max_length=8_000)
 
 
+class ChartAxis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(default="", max_length=60)
+    #: ``time`` x values are ISO dates or months (YYYY-MM-DD, YYYY-MM); ``category`` is any label.
+    type: Literal["time", "category"] = "category"
+    unit: str = Field(default="", max_length=20)
+
+
+class ChartSeries(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=60)
+    #: [x, y] pairs, x as text and y a finite number.
+    points: list[tuple[str, float]] = Field(min_length=1, max_length=MAX_CHART_POINTS)
+
+    @field_validator("points")
+    @classmethod
+    def _finite(cls, points: list[tuple[str, float]]) -> list[tuple[str, float]]:
+        for x, y in points:
+            if not math.isfinite(y) or len(x) > 60:
+                raise ValueError("chart points need a short x and a finite y")
+        return points
+
+
+class ChartBlock(BaseModel):
+    """A line, area or bar chart of a few series; the console draws it, interactively."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["chart"] = "chart"
+    kind: Literal["line", "area", "bar"] = "line"
+    title: str = Field(min_length=1, max_length=120)
+    x: ChartAxis = Field(default_factory=ChartAxis)
+    y: ChartAxis = Field(default_factory=ChartAxis)
+    series: list[ChartSeries] = Field(min_length=1, max_length=MAX_CHART_SERIES)
+
+
+class TableBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["table"] = "table"
+    title: str = Field(default="", max_length=120)
+    columns: list[Annotated[str, Field(max_length=60)]] = Field(min_length=1, max_length=8)
+    rows: list[list[Annotated[str, Field(max_length=200)]]] = Field(max_length=MAX_TABLE_ROWS)
+
+    @field_validator("rows")
+    @classmethod
+    def _as_wide_as_columns(cls, rows: list[list[str]], info: Any) -> list[list[str]]:
+        width = len(info.data.get("columns", []))
+        if any(len(row) != width for row in rows):
+            raise ValueError("table rows must have one cell per column")
+        return rows
+
+
 Block = Annotated[
-    ChoicesBlock | LinkBlock | WorkflowBlock | ItemBlock | UploadBlock | AttachmentBlock,
+    ChoicesBlock
+    | LinkBlock
+    | WorkflowBlock
+    | ItemBlock
+    | UploadBlock
+    | AttachmentBlock
+    | ChartBlock
+    | TableBlock,
     Field(discriminator="type"),
 ]
 _BLOCKS = TypeAdapter(list[Block])
 MAX_BLOCKS = 4
+#: Serialized size of one block; keeps a message small whatever a tool returned.
+MAX_BLOCK_BYTES = 24_000
 
 
 def validate_blocks(raw: Any) -> list[dict[str, Any]]:
@@ -117,7 +187,34 @@ def validate_blocks(raw: Any) -> list[dict[str, Any]]:
         raise ValueError(str(error).splitlines()[0]) from error
     if len(blocks) > MAX_BLOCKS:
         raise ValueError(f"at most {MAX_BLOCKS} blocks")
-    return [block.model_dump(mode="json") for block in blocks]
+    dumped = [block.model_dump(mode="json") for block in blocks]
+    if any(len(json.dumps(block)) > MAX_BLOCK_BYTES for block in dumped):
+        raise ValueError(f"a block is over {MAX_BLOCK_BYTES} bytes")
+    return dumped
+
+
+def take_tool_blocks(result: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Blocks a tool built from its own data (a ``blocks`` key in its JSON result).
+
+    Returns the valid ones, and the result without that key so the model is not shown the
+    same numbers twice. Only tools the server runs can do this; a model's own reply never
+    gets here (see ``model_blocks``). Invalid blocks are dropped.
+    """
+    found: list[dict[str, Any]] = []
+    parts = []
+    for part in result.get("content", []):
+        try:
+            payload = json.loads(part.get("text", ""))
+        except (AttributeError, TypeError, ValueError):
+            parts.append(part)
+            continue
+        if isinstance(payload, dict) and "blocks" in payload:
+            raw = payload.pop("blocks")
+            with suppress(ValueError):
+                found += validate_blocks(raw)
+            part = {**part, "text": json.dumps(payload, ensure_ascii=False)}
+        parts.append(part)
+    return found[:MAX_BLOCKS], {**result, "content": parts}
 
 
 def model_blocks(decoded: dict[str, Any]) -> list[dict[str, Any]]:
