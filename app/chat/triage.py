@@ -314,7 +314,10 @@ class Triager:
             return decision
         follows_on = (
             after_groceries
-            and decision.intent == TriageIntent.ANSWER
+            # Read as a task or unclear on its own, it is still a question about what the
+            # shopping agent just showed ("can you do it by week"); answering it is instant.
+            and decision.intent
+            in (TriageIntent.ANSWER, TriageIntent.PROPOSE_TASK, TriageIntent.CLARIFY)
             and len(text) <= FOLLOW_UP_CHARACTERS
         )
         if flagged or follows_on or _GROCERY.search(text):
