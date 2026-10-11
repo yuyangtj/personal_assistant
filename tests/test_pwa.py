@@ -53,3 +53,11 @@ def test_the_chart_script_is_served_and_loaded_by_the_console(client: TestClient
     assert "/ui/static/charts.js" in client.get("/ui").text
     assert "chartSvg" in client.get("/ui/static/charts.js").text
     assert "charts.js" in client.get("/sw.js").text
+
+
+def test_the_console_can_stop_and_mute_spoken_replies(client: TestClient) -> None:
+    page = client.get("/ui").text
+    script = client.get("/ui/static/phone.js").text
+
+    assert 'id="stop-speaking"' in page and 'id="mute-voice"' in page
+    assert '"stop_speaking"' in script and "assistantMuted" in script

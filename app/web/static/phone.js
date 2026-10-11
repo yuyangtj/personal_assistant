@@ -7,6 +7,43 @@
 const phone = { bridge: window.AndroidAssistant || null, caps: null, routes: new Map(), next: 0,
                 turns: {}, speakFor: null, listening: false, dictated: false, dictationBase: "", screen: null };
 
+// Spoken replies: the phone does not say when it finishes, so "speaking" is an estimate
+// from the text length (it speaks at most 2,000 characters). Muting keeps the text only.
+const SPEECH_MS_PER_CHARACTER = 60;
+let speakingTimer = null;
+const readMuted = () => { try { return localStorage.getItem("assistantMuted") === "1"; } catch (_) { return false; } };
+phone.muted = readMuted();
+
+function showSpeaking(on) {
+  $("stop-speaking").hidden = !on;
+  if (!on) { clearTimeout(speakingTimer); speakingTimer = null; }
+}
+
+function phoneSpeak(text) {
+  if (phone.muted) return;
+  phoneSend({ type: "speak", text });
+  showSpeaking(true);
+  clearTimeout(speakingTimer);
+  speakingTimer = setTimeout(() => showSpeaking(false), Math.min(text.length, 2000) * SPEECH_MS_PER_CHARACTER + 1500);
+}
+
+function stopSpeaking() {
+  if (!phone.bridge) return;
+  phoneSend({ type: "stop_speaking" });
+  showSpeaking(false);
+}
+
+function setMuted(muted) {
+  phone.muted = muted;
+  try { localStorage.setItem("assistantMuted", muted ? "1" : "0"); } catch (_) {}
+  const button = $("mute-voice");
+  button.textContent = muted ? "🔇" : "🔊";
+  button.setAttribute("aria-pressed", String(muted));
+  button.setAttribute("aria-label", muted ? "Unmute spoken replies" : "Mute spoken replies");
+  button.title = button.getAttribute("aria-label");
+  if (muted) stopSpeaking();
+}
+
 function phoneSend(message) { phone.bridge.postMessage(JSON.stringify(message)); }
 
 function phoneRoute(text) {
@@ -32,7 +69,7 @@ function answerOnPhone(text, route, voice) {
   addPhoneTurn({ role: "user", text });
   const answer = route.route === "reply" ? route.text : `${route.label}?`;
   addPhoneTurn({ role: "assistant", text: answer, action: route.route === "confirm" ? route.action : null });
-  if (voice) phoneSend({ type: "speak", text: answer });
+  if (voice) phoneSpeak(answer);
   renderTranscript();
   $("transcript").scrollTop = $("transcript").scrollHeight;
 }
@@ -75,7 +112,7 @@ function speakReplyIfWaiting() {
   const reply = index >= 0 && state.messages.slice(index + 1).find((m) => m.role === "assistant");
   if (!reply) return;
   phone.speakFor = null;
-  phoneSend({ type: "speak", text: reply.content });
+  phoneSpeak(reply.content);
 }
 
 const withDictation = (text) =>
@@ -153,7 +190,10 @@ function renderDeviceAi(caps) {
 function onPhoneMessage(message) {
   if (message.type === "capabilities" || message.type === "device_ai") {
     phone.caps = { ...(phone.caps || {}), ...message };
-    if (message.type === "capabilities") $("mic").hidden = !message.voice;
+    if (message.type === "capabilities") {
+      $("mic").hidden = !message.voice;
+      $("mute-voice").hidden = !message.voice;
+    }
     renderDeviceAi(phone.caps);
   } else if (message.type === "voice") {
     if (message.state === "listening") {
@@ -197,6 +237,13 @@ function onPhoneMessage(message) {
 
 if (phone.bridge) {
   phone.bridge.onmessage = (event) => onPhoneMessage(JSON.parse(event.data));
-  $("mic").onclick = () => phoneSend({ type: phone.listening ? "stop_listening" : "listen" });
+  $("mic").onclick = () => {
+    stopSpeaking(); // talking over the assistant: let it be quiet
+    phoneSend({ type: phone.listening ? "stop_listening" : "listen" });
+  };
+  $("stop-speaking").onclick = stopSpeaking;
+  $("mute-voice").onclick = () => setMuted(!phone.muted);
+  setMuted(phone.muted);
+  $("composer").addEventListener("submit", stopSpeaking, true);
   phoneSend({ type: "hello" });
 }
