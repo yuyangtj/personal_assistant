@@ -231,3 +231,22 @@ def test_a_long_history_reports_the_newest_months_and_weeks(client: TestClient) 
     months = _service(client).spending(group_by="month")["groups"]
 
     assert len(months) == 40 and months[-1]["group"] == "2023-12"
+
+
+def test_each_message_keeps_how_it_was_routed(client: TestClient) -> None:
+    chat = client.post("/chat-sessions", json={}).json()["id"]
+
+    for text in ("How much did I spend with Klarna last month?", "good morning"):
+        client.post(f"/chat-sessions/{chat}/messages", json={"content": text})
+
+    routed = {
+        m["content"]: m["routing"]
+        for m in client.get(f"/chat-sessions/{chat}/messages").json()["messages"]
+        if m["role"] == "user"
+    }
+    klarna = routed["How much did I spend with Klarna last month?"]
+    assert (klarna["route"], klarna["capabilities"]) == ("shopping agent", ["groceries"])
+    assert (routed["good morning"]["route"], routed["good morning"]["source"]) == (
+        "chat reply",
+        "rules",
+    )

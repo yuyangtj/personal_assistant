@@ -207,6 +207,18 @@ function closeActionDialog() {
   $("action-dialog").close();
 }
 
+// How the message behind a task was routed and why, as recorded by the server.
+function routingNote(task) {
+  const origin = state.messages.find((m) => m.id === task.origin_message_id);
+  const routing = origin && origin.routing;
+  if (!routing) return "";
+  const parts = [routing.route, routing.capabilities?.length ? routing.capabilities.join(", ") : "",
+    routing.source === "rules" ? "keyword rules" : `model, ${Math.round((routing.confidence || 0) * 100)}% sure`,
+    routing.follow_up ? "follow-up to a shopping answer" : ""].filter(Boolean);
+  return `<div class="sub routing-note" style="margin-top:6px">Routed: ${esc(parts.join(" · "))}`
+    + `${routing.reason ? ` — ${esc(routing.reason)}` : ""}</div>`;
+}
+
 async function renderTask(id) {
   const taskChanged = state.taskId !== id;
   state.taskId = id;
@@ -272,6 +284,7 @@ async function renderTask(id) {
       ${codingQueueNotice ? `<div class="gate-notice">${esc(codingQueueNotice)}</div>` : ""}
       <h2 style="margin-top:12px">Request</h2><div>${esc(task.original_request)}</div>
       ${task.current_goal !== task.original_request ? `<div class="sub" style="margin-top:6px">Current goal: ${esc(task.current_goal)}</div>` : ""}
+      ${routingNote(task)}
       <div class="summary-grid">
         <div class="summary-card"><div class="key">Repository</div><div class="value">${esc(repository)}</div></div>
         <div class="summary-card"><div class="key">Validation</div><div class="value">${statusPill(ctx.validation)}</div></div>

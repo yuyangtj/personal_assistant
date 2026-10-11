@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -101,6 +102,7 @@ def resolve_choice(
     if reply:
         service.append_chat_message(chat_session_id, content=reply, role="assistant", blocks=blocks)
     return TriageDecisionResponse(
+        route=f"choice: {option['label']}",
         intent="direct_action" if action != "answer" else "answer",
         goal=str(payload.get("goal") or ""),
         reason=f"Picked “{option['label']}”",
@@ -110,6 +112,8 @@ def resolve_choice(
         source="rules",
     )
 
+
+logger = logging.getLogger(__name__)
 
 _PRIVATE = re.compile(
     r"^(?:please\s+)?(?:(?:remember|save|note)\s+(?:this\s+)?privately|privately\s+remember)"
@@ -146,7 +150,39 @@ def _last_turn_was_groceries(service: Any, history: list[Any]) -> bool:
 def triage_message(
     request: Request, chat_session_id: str, body: AppendChatMessageRequest, message_id: str
 ) -> TriageDecisionResponse:
-    """Decide what a just-stored message needs; never raises (rules are the fallback)."""
+    """Decide what a just-stored message needs; never raises (rules are the fallback).
+
+    The decision and where it led are kept on the message, so "why did it do that" can
+    always be answered later (see ``ChatMessageResponse.routing``).
+    """
+    response = _route_message(request, chat_session_id, body, message_id)
+    try:
+        request.app.state.task_service.set_message_routing(
+            message_id,
+            response.model_dump(
+                mode="json",
+                include={
+                    "route",
+                    "intent",
+                    "capabilities",
+                    "goal",
+                    "reason",
+                    "confidence",
+                    "source",
+                    "follow_up",
+                    "about_work",
+                    "repository_id",
+                },
+            ),
+        )
+    except Exception:  # a record that fails to save never fails the message
+        logger.exception("Could not record the routing of message %s", message_id)
+    return response
+
+
+def _route_message(
+    request: Request, chat_session_id: str, body: AppendChatMessageRequest, message_id: str
+) -> TriageDecisionResponse:
     service = request.app.state.task_service
     messages = service.list_chat_messages(chat_session_id, limit=500)
     # An answer to the assistant's open choices (a click sends the label; "yes" or "no"
@@ -170,9 +206,10 @@ def triage_message(
         for item in work_items.list(limit=50)
         if item.status != "done"
     ]
+    follow_up = _last_turn_was_groceries(service, history)
     decision = request.app.state.triager.decide(
         body.content,
-        after_groceries=_last_turn_was_groceries(service, history),
+        after_groceries=follow_up,
         selected_repository_id=body.repository_id,
         focused_items=[
             {"slug": item.slug, "title": item.title, "space": spaces.get(item.space_id)}
@@ -189,6 +226,7 @@ def triage_message(
         screen=body.attachments[0].text if body.attachments else None,
     )
     response = TriageDecisionResponse.model_validate(decision.model_dump(mode="json"))
+    response.follow_up = follow_up
     if decision.action is not None:
         # T0: done now, without a chat model; the reply lands in the transcript.
         timezone = body.timezone or request.app.state.settings.default_timezone
@@ -215,6 +253,7 @@ def triage_message(
         )
         response.result = result.reply
         response.handled = True
+        response.route = f"action: {decision.action.type}"
         return response
     # Questions about the user's grocery stores run the grocery agent right away: it only
     # reads offers, receipts and purchases, so there is nothing to confirm.
@@ -226,6 +265,7 @@ def triage_message(
             source_context={"client": "web-console"},
         )
         response.handled = True
+        response.route = "shopping agent"
         return response
     # Work goes to the supervisor, which sees every run and can start, inspect or stop
     # them: a clear request for a code change, or any message about coding work.
@@ -252,6 +292,7 @@ def triage_message(
             },
         )
         response.handled = True
+        response.route = "supervisor"
         return response
     # Proposals are asked in the conversation, with the options as choices to pick.
     offer = offer_for(
@@ -267,4 +308,8 @@ def triage_message(
         )
         response.result = offer.reply
         response.handled = True
+        response.route = f"offer ({decision.intent.value})"
+    else:
+        # The client queues an ordinary chat reply for it.
+        response.route = "chat reply"
     return response

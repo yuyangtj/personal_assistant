@@ -111,6 +111,8 @@ class ChatMessageResponse(BaseModel):
     linked_task_id: str | None
     #: Choices, links and cards to render under the text (see app.chat.blocks).
     blocks: list[dict[str, Any]] = Field(default_factory=list)
+    #: For a user message: how it was routed and why (see app.chat.turns.triage_message).
+    routing: dict[str, Any] | None = None
     created_at: datetime
 
     @field_validator("blocks", mode="before")
@@ -156,6 +158,10 @@ class TriageDecisionResponse(BaseModel):
     #: picked); the client only refreshes and must not queue a chat reply.
     handled: bool = False
     source: str
+    #: Where the message went: "chat reply", "shopping agent", "offer (propose_task)", ...
+    route: str | None = None
+    #: The previous reply came from the shopping agent (short follow-ups stay there).
+    follow_up: bool = False
 
 
 class AppendChatMessageResponse(BaseModel):

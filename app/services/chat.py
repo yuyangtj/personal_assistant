@@ -264,6 +264,14 @@ class ChatOperations(ServiceBase):
                 raise ChatMessageNotFoundError(message_id)
             message.blocks = validate_blocks(blocks) or None
 
+    def set_message_routing(self, message_id: str, routing: dict[str, Any]) -> None:
+        """Keep how a user message was routed, to explain it later."""
+        with self.database.session() as session, session.begin():
+            message = session.get(ChatMessageModel, message_id)
+            if message is None:
+                raise ChatMessageNotFoundError(message_id)
+            message.routing = routing
+
     def create_task_from_message(
         self,
         chat_session_id: str,
