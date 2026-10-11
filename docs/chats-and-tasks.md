@@ -139,3 +139,18 @@ Both ways in are started by the user, and nothing is sent until they send it.
 - The assistant role requires a speech recognizer in the app. `AssistantRecognitionService`
   forwards to Google's, so making the app the assistant doesn't break voice input
   elsewhere.
+
+## Charts and tables in replies
+
+A reply can carry `chart` and `table` blocks (`app/chat/blocks.py`): data only (kind, title,
+axes, series of `[x, y]` points), never markup or script. The console draws them itself
+(`app/web/static/charts.js`: hover or tap for values, legend toggles, a hidden table for
+screen readers), and the Android shell shows them because it wraps the console. The native
+avatar app ignores blocks and shows the reply text.
+
+- Only tools run by the server create them: a tool result may carry a `blocks` list, and
+  `take_tool_blocks` validates it, attaches it to the reply and strips it from what the model
+  sees. A model's own JSON can never ask for a chart (`model_blocks`).
+- Limits: 6 series, 200 points per series, 50 table rows, 24 kB per block.
+- Today `klarna.spending` builds one: bars per month (3 or more months) or per merchant
+  (top 12). To chart something else, build the block in that tool the same way.

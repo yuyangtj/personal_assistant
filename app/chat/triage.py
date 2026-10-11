@@ -156,6 +156,9 @@ space, needs_web_search, needs_grocery_tools, about_work, and action (only for
 direct_action)."""
 
 
+#: A reply this short after a shopping answer is taken as a follow-up to it.
+FOLLOW_UP_CHARACTERS = 80
+
 #: Keyword fallback for questions about the user's grocery stores.
 _GROCERY = re.compile(
     r"\b(willys|lidl|klarna|grocer(y|ies)|matbutik\w*|erbjudande\w*|kvitto|kvitton|"
@@ -271,6 +274,7 @@ class Triager:
         local_time: str | None = None,
         timezone: str | None = None,
         screen: str | None = None,
+        after_groceries: bool = False,
     ) -> TriageDecision:
         selected = self._enabled(selected_repository_id)
         if self.client is not None:
@@ -287,20 +291,33 @@ class Triager:
                 decision = self._apply_rules(suggestion, text, selected=selected)
                 if suggestion.about_work and decision.intent != TriageIntent.DIRECT_ACTION:
                     decision = decision.model_copy(update={"about_work": True})
-                return self._groceries(decision, text, bool(suggestion.needs_grocery_tools))
+                return self._groceries(
+                    decision, text, bool(suggestion.needs_grocery_tools), after_groceries
+                )
             except Exception as error:  # provider, timeout, or validation failure
                 logger.warning("Triage model failed; using keyword rules: %s", error)
         decision = self._rules(text, selected=selected, work_items=work_items)
-        return self._groceries(decision, text, False)
+        return self._groceries(decision, text, False, after_groceries)
 
-    def _groceries(self, decision: TriageDecision, text: str, flagged: bool) -> TriageDecision:
-        """Questions about the user's grocery stores go to the grocery agent (read-only)."""
+    def _groceries(
+        self, decision: TriageDecision, text: str, flagged: bool, after_groceries: bool = False
+    ) -> TriageDecision:
+        """Questions about the user's grocery stores go to the grocery agent (read-only).
+
+        A short plain follow-up to a shopping answer ("pls do", "weekly total") stays there:
+        on its own it names no store, and the conversation agent has no store tools.
+        """
         if not self.groceries_available or decision.intent in (
             TriageIntent.DIRECT_ACTION,
             TriageIntent.PROPOSE_CODING,
         ):
             return decision
-        if flagged or _GROCERY.search(text):
+        follows_on = (
+            after_groceries
+            and decision.intent == TriageIntent.ANSWER
+            and len(text) <= FOLLOW_UP_CHARACTERS
+        )
+        if flagged or follows_on or _GROCERY.search(text):
             return decision.model_copy(
                 update={"intent": TriageIntent.ANSWER, "capabilities": ("groceries",)}
             )

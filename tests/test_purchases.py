@@ -161,3 +161,73 @@ def test_klarna_questions_go_to_the_shopping_agent(client: TestClient) -> None:
 
     (task,) = client.get(f"/chat-sessions/{chat}/tasks").json()["tasks"]
     assert task["required_capabilities"] == ["groceries"]
+
+
+def test_monthly_spending_comes_with_a_chart_the_model_cannot_alter(client: TestClient) -> None:
+    rows = "2026-07-03,10:00,Apotea,100,SEK,,Pay in 30 days,,3 Jul\n"
+    _service(client).import_klarna_csv(EXPORT + rows)
+    agent, model = _agent(
+        client, _call("spending", group_by="month"), _finish("Spending dipped in July.")
+    )
+
+    output = agent.execute(task_id="t", request="Spending over time?", is_cancelled=lambda: False)
+
+    (chart,) = output.output["blocks"]
+    assert (chart["type"], chart["kind"], chart["x"]["type"]) == ("chart", "bar", "time")
+    assert chart["series"][0]["points"] == [
+        ["2026-07", 100.0],
+        ["2026-08", 776.0],
+        ["2026-09", 672.0],
+    ]
+    assert output.output["reply"] == "Spending dipped in July."
+    seen = model.requests[1][-1].content
+    assert '"total":"776.00"' in seen and '"blocks"' not in seen  # numbers shown once
+
+
+def test_two_months_or_an_ungrouped_total_get_no_chart(client: TestClient) -> None:
+    _service(client).import_klarna_csv(EXPORT)
+    agent, _ = _agent(client, _call("spending", group_by="month"), _finish("Two months."))
+
+    output = agent.execute(task_id="t", request="Per month?", is_cancelled=lambda: False)
+
+    assert "blocks" not in output.output
+
+
+def test_spending_per_merchant_is_a_category_chart(client: TestClient) -> None:
+    _service(client).import_klarna_csv(EXPORT)
+    agent, _ = _agent(client, _call("spending", group_by="merchant"), _finish("SJ leads."))
+
+    output = agent.execute(task_id="t", request="Per merchant?", is_cancelled=lambda: False)
+
+    (chart,) = output.output["blocks"]
+    assert chart["x"]["type"] == "category" and chart["series"][0]["points"][0] == ["SJ", 776.0]
+
+
+def test_weekly_spending_groups_by_monday_and_gets_a_chart(client: TestClient) -> None:
+    rows = "2026-09-07,10:00,Apotea,100,SEK,,Pay in 30 days,,7 Sep\n"
+    _service(client).import_klarna_csv(EXPORT + rows)
+
+    weeks = _service(client).spending(group_by="week")["groups"]
+
+    # 2026-08-14 (Fri) -> week of 08-10; 09-02 (Wed) -> 08-31; 09-07 (Mon) and 09-19 (Sat).
+    assert [(g["group"], g["total"]) for g in weeks] == [
+        ("2026-08-10", "776.00"),
+        ("2026-08-31", "173.00"),
+        ("2026-09-07", "100.00"),
+        ("2026-09-14", "499.00"),
+    ]
+    agent, _ = _agent(client, _call("spending", group_by="week"), _finish("Four weeks."))
+    output = agent.execute(task_id="t", request="Weekly total?", is_cancelled=lambda: False)
+    (chart,) = output.output["blocks"]
+    assert chart["title"] == "Klarna spending per week" and len(chart["series"][0]["points"]) == 4
+
+
+def test_a_long_history_reports_the_newest_months_and_weeks(client: TestClient) -> None:
+    lines = "".join(
+        f"{2020 + n // 12}-{n % 12 + 1:02d}-05,10:00,Shop,10,SEK,,x,,d\n" for n in range(48)
+    )
+    _service(client).import_klarna_csv(HEADER + lines)
+
+    months = _service(client).spending(group_by="month")["groups"]
+
+    assert len(months) == 40 and months[-1]["group"] == "2023-12"

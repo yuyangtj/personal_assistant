@@ -264,3 +264,22 @@
 .chat-actions button { padding: 4px 10px; font-size: 12.5px; }
 button.danger { background: var(--danger); color: #fff; }
 .archived-toggle { margin-top: 12px; color: var(--muted); padding-left: 2px; }
+
+/* Chart and table blocks */
+.chart { margin: 8px 0 0; }
+.chart figcaption { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.chart-svg { width: 100%; height: auto; display: block; touch-action: manipulation; }
+.chart-svg text { font-size: 9px; fill: var(--muted); }
+.chart-svg .grid { stroke: var(--border); stroke-width: 1; }
+.chart-svg .mark:hover { opacity: 0.75; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.chart-key { background: none; border: 1px solid var(--border-soft); color: var(--text); padding: 2px 8px;
+  font-size: 12px; border-radius: 12px; display: inline-flex; align-items: center; gap: 5px; }
+.chart-key i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.chart-key.off { opacity: 0.45; text-decoration: line-through; }
+.chart-tip { position: fixed; z-index: 50; background: var(--raised); color: var(--text); border: 1px solid var(--border-strong);
+  border-radius: 6px; padding: 4px 8px; font-size: 12px; pointer-events: none; box-shadow: var(--shadow); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.block-table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; }
+.block-table caption { text-align: left; color: var(--muted); padding-bottom: 4px; }
+.block-table th, .block-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--border); }

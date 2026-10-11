@@ -29,6 +29,7 @@ WEB_STATIC = {
     "console.css": "text/css",
     "state.js": "text/javascript",
     "transcript.js": "text/javascript",
+    "charts.js": "text/javascript",
     "drawer.js": "text/javascript",
     "items.js": "text/javascript",
     "phone.js": "text/javascript",
