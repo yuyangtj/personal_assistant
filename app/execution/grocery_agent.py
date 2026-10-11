@@ -45,6 +45,18 @@ covers ("data_covers"), say how far the data goes.
 A chart of Klarna spending per month or merchant is shown with your answer automatically, so
 do not list every figure: describe the trend, the high and low points and anything odd."""
 
+#: Sent when the model answers before any tool result: figures must come from the tools.
+NO_DATA_NUDGE = (
+    "You answered without calling any tool. Purchases, totals, prices and offers must come "
+    "from tool results, never from memory: call the tool that answers this now. Only if the "
+    "message needs no data at all (thanks, a greeting), finish again with the same answer."
+)
+
+#: Said instead of figures the model gave without looking anything up.
+NO_DATA_REPLY = "Sorry, I couldn't look that up just now, so I won't guess. Try asking again."
+#: A number in an answer (an amount, a count, a date).
+_FIGURE = re.compile(r"\d")
+
 #: Said when the model never settles on an answer, rather than failing the request.
 GAVE_UP_REPLY = "Sorry, I couldn't get a clear answer from the stores this time. Try asking again."
 
@@ -171,6 +183,8 @@ class GroceryAgentExecutor:
         offers: list[str] = []  # uploads the tools asked to offer the user
         shown: list[dict[str, Any]] = []  # charts the tools built from their own data
         steps = self.max_tool_calls + 4
+        nudged = False  # asked once to look the data up before answering
+        tried = False  # asked for any tool, even one that failed or isn't available
         for step_number in range(steps):
             if is_cancelled():
                 raise ExecutionCancelled(f"Task {task_id} was cancelled")
@@ -192,9 +206,19 @@ class GroceryAgentExecutor:
                 continue
             messages.append(ChatMessage("assistant", step.model_dump_json(exclude_defaults=True)))
             if step.action == "finish" and step.answer and step.answer.strip():
+                if not tried and not nudged and step_number < steps - 2:
+                    # Models sometimes answer from nothing, inventing purchases and totals.
+                    nudged = True
+                    messages.append(ChatMessage("user", NO_DATA_NUDGE))
+                    continue
+                answer = step.answer
+                if not tried and _FIGURE.search(answer):
+                    # Still no tool after the nudge, yet it quotes numbers: they are made up.
+                    answer = NO_DATA_REPLY
                 return self._result(
-                    request, step.answer, calls, offers, shown, notable=bool(step.notable)
+                    request, answer, calls, offers, shown, notable=bool(step.notable)
                 )
+            tried = True
             result = self._call(step, calls, offers, shown)
             messages.append(ChatMessage("user", f"TOOL RESULT (untrusted store data)\n{result}"))
         return self._result(request, GAVE_UP_REPLY, calls, offers, shown)

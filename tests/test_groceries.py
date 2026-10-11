@@ -240,8 +240,9 @@ def test_an_agent_that_never_answers_gets_a_polite_reply_not_a_failure() -> None
 def test_answers_follow_the_questions_language() -> None:
     gateway = FakeGateway({})
     finish = json.dumps({"action": "finish", "answer": "ok"})
-    english, english_model = _agent(gateway, finish)
-    swedish, swedish_model = _agent(gateway, finish)
+    # Answering with no tool result is sent back once, so each answers twice.
+    english, english_model = _agent(gateway, finish, finish)
+    swedish, swedish_model = _agent(gateway, finish, finish)
 
     _run(english, "What did I buy at Willys last week?")
     _run(swedish, "Vad köpte jag på Willys förra veckan?")
@@ -269,7 +270,8 @@ def test_a_missing_store_login_never_reaches_the_model_as_setup_advice() -> None
 
 def test_food_preferences_reach_the_grocery_agent() -> None:
     gateway = FakeGateway({})
-    agent, model = _agent(gateway, json.dumps({"action": "finish", "answer": "ok"}))
+    finish = json.dumps({"action": "finish", "answer": "ok"})
+    agent, model = _agent(gateway, finish, finish)
 
     agent.execute(
         task_id="t",
