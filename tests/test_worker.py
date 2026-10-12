@@ -179,7 +179,8 @@ def test_runtime_conversation_can_use_minimax() -> None:
     assert executor.id == "model-conversation"
     assert executor.client.provider == "minimax"
     assert executor.client.model == "MiniMax-M3"
-    assert executor.client._client.timeout.connect == 19
+    assert executor.client._client.timeout.read == 19
+    assert executor.client._client.timeout.connect == 5  # connecting never takes the full 19 s
     executor.client.close()
 
 

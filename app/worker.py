@@ -767,32 +767,18 @@ class TaskWorker:
         self._stop_event.set()
 
 
-def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
-    settings = Settings.from_env()
-    configure_spaces(SpaceRegistry.from_directory(settings.spaces_directory))
-    database = Database(settings.database_url)
-    if settings.auto_create_schema:
-        database.create_schema()
-    repositories = RepositoryRegistry.from_directory(settings.repositories_directory)
-    workflow_service = WorkflowService(
-        database,
-        WorkflowRegistry.from_directory(settings.workflows_directory),
-        repositories,
-        DeploymentRegistry.from_directory(settings.deployment_targets_directory),
-        host_deployer=(
-            HostDeployerSpool(settings.deploy_spool_directory)
-            if settings.deploy_spool_directory
-            else None
-        ),
-    )
-    task_service = TaskService(database)
-    executors: dict[str, Executor] = {
-        "fake": FakeExecutor(delay_seconds=settings.fake_executor_delay_seconds),
-    }
+def add_chat_executors(
+    executors: dict[str, Executor],
+    settings: Settings,
+    database: Database,
+    task_service: TaskService,
+    workflow_service: WorkflowService,
+    repositories: RepositoryRegistry,
+) -> ConversationExecutor | None:
+    """Add the agents that answer chat messages; returns the conversation agent, if any.
+
+    Shared by the worker and by scripts/chat_eval, so the eval runs what production runs.
+    """
     conversation_executor = build_conversation_executor(settings)
     if conversation_executor is not None:
         conversation_executor.research_available = bool(
@@ -828,6 +814,44 @@ def main() -> None:
             "Shopping agent enabled: Klarna%s",
             f", stores through {settings.mcp_gateway_url}" if stores else " only",
         )
+    if conversation_executor is not None and not settings.worker_coding_only:
+        executors[SupervisorExecutor.id] = SupervisorExecutor(
+            conversation_executor.client,
+            SupervisorTools(database, task_service, workflow_service, repositories),
+        )
+        logger.info("Assistant supervisor enabled")
+    return conversation_executor
+
+
+def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    settings = Settings.from_env()
+    configure_spaces(SpaceRegistry.from_directory(settings.spaces_directory))
+    database = Database(settings.database_url)
+    if settings.auto_create_schema:
+        database.create_schema()
+    repositories = RepositoryRegistry.from_directory(settings.repositories_directory)
+    workflow_service = WorkflowService(
+        database,
+        WorkflowRegistry.from_directory(settings.workflows_directory),
+        repositories,
+        DeploymentRegistry.from_directory(settings.deployment_targets_directory),
+        host_deployer=(
+            HostDeployerSpool(settings.deploy_spool_directory)
+            if settings.deploy_spool_directory
+            else None
+        ),
+    )
+    task_service = TaskService(database)
+    executors: dict[str, Executor] = {
+        "fake": FakeExecutor(delay_seconds=settings.fake_executor_delay_seconds),
+    }
+    conversation_executor = add_chat_executors(
+        executors, settings, database, task_service, workflow_service, repositories
+    )
     provider_state_store = DatabaseProviderStateStore(database)
     coding_executor = build_coding_executor(
         settings,
@@ -841,12 +865,6 @@ def main() -> None:
             "Coding pull-request agent enabled for repositories: %s",
             ", ".join(sorted(coding_executor.executors)),
         )
-    if conversation_executor is not None and not settings.worker_coding_only:
-        executors[SupervisorExecutor.id] = SupervisorExecutor(
-            conversation_executor.client,
-            SupervisorTools(database, task_service, workflow_service, repositories),
-        )
-        logger.info("Assistant supervisor enabled")
     # Only capabilities whose adapter is installed in this worker can be selected.
     registry = CapabilityRegistry.from_directory(
         settings.capabilities_directory

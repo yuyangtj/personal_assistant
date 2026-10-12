@@ -60,6 +60,8 @@ class ChatMessageModel(Base):
     )
     #: Choices, links and cards the console renders under the text (see app.chat.blocks).
     blocks: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    #: For a user message: the routing decision and where it led (kept to explain it).
+    routing: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )

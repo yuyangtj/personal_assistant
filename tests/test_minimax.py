@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 import pytest
@@ -184,3 +185,36 @@ def test_minimax_provider_error_is_sanitized() -> None:
     assert str(captured.value) == "MiniMax manager returned a provider error"
     assert "sk-minimax-secret" not in str(captured.value)
     client.close()
+
+
+class _Trickle(httpx.SyncByteStream):
+    """A server that keeps sending a byte now and then and never finishes."""
+
+    def __iter__(self):
+        while True:
+            time.sleep(0.02)
+            yield b" "
+
+
+def test_a_reply_that_never_finishes_fails_at_the_total_deadline() -> None:
+    client = MiniMaxChatClient(
+        api_key="k",
+        timeout_seconds=0.2,
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=_Trickle())),
+    )
+
+    started = time.monotonic()
+    with pytest.raises(MiniMaxError, match="ReadTimeout"):
+        client.complete([ChatMessage("user", "hi")])
+
+    assert time.monotonic() - started < 2
+
+
+def test_a_complete_reply_is_read_as_before() -> None:
+    body = {"choices": [{"message": {"content": "Hello"}}], "usage": {"prompt_tokens": 3}}
+    client = MiniMaxChatClient(
+        api_key="k",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=body)),
+    )
+
+    assert client.complete([ChatMessage("user", "hi")]).text == "Hello"

@@ -231,3 +231,20 @@ def test_a_short_follow_up_to_a_shopping_answer_stays_with_the_shopping_agent(
     lists = [{"slug": "groceries", "title": "Groceries", "kind": "list"}]
     added = triager.decide("add oat milk to groceries", after_groceries=True, work_items=lists)
     assert added.action and added.capabilities == ()
+
+
+def test_a_follow_up_the_model_reads_as_a_task_still_stays_with_the_shopping_agent(
+    repositories: RepositoryRegistry,
+) -> None:
+    # What happened in production: "can you do it by week" right after a Klarna answer was
+    # proposed as a task to track, and "Just chat about it" then had no Klarna tools.
+    proposed = suggestion(
+        intent="propose_task", goal="Analyze Klarna spending by week", needs_grocery_tools=False
+    )
+    triager = Triager(repositories, ScriptedChat(proposed, proposed), groceries_available=True)
+
+    followed = triager.decide("Can you do it for the last 4 months by week", after_groceries=True)
+    fresh = triager.decide("Can you do it for the last 4 months by week")
+
+    assert (followed.intent, followed.capabilities) == (TriageIntent.ANSWER, ("groceries",))
+    assert fresh.intent == TriageIntent.PROPOSE_TASK and fresh.capabilities == ()

@@ -446,7 +446,52 @@ def test_a_chat_reply_sees_everything_said_in_the_chat(service: TaskService) -> 
     seen = [(message.role, message.content) for message in client.calls[0]]
     assert ("user", "remember my partner is Anna") in seen
     assert ("assistant", json.dumps({"reply": "I'll remember that."})) in seen
-    assert ("user", "check run status") in seen  # its run failed; the turn still counts
+    # Its run failed; what was said still counts, folded into the next turn.
+    assert ("user", "check run status\n📎 klarna.csv") in seen
     assert ("assistant", json.dumps({"reply": "Imported 1051 purchases."})) in seen
     assert seen[-1] == ("user", "what's my partner's name?")
     assert sum(1 for role, text in seen if text == "what's my partner's name?") == 1
+
+
+def test_history_ends_where_the_request_was_said_and_has_no_empty_replies(
+    service: TaskService,
+) -> None:
+    # The chat behind the "(no reply)" bug: a request, an offer about it, then a click on
+    # "Just chat about it", which starts a task for the original request.
+    chat = service.create_chat_session().id
+    say = service.append_chat_message
+    say(chat, content="How has my Klarna spending changed?")
+    say(chat, content="It peaked in September.", role="assistant")
+    say(chat, content="hello?")
+    say(chat, content="are you there?")
+    say(chat, content="Yes, here.", role="assistant")
+    request = say(chat, content="Can you do it by week").message
+    say(chat, content="This looks like something to keep track of.", role="assistant")
+    say(chat, content="Just chat about it")
+    task = service.create_task_from_message(chat, request.id)
+
+    history = service.conversation_history(task)
+
+    assert [(turn.request, turn.reply) for turn in history] == [
+        ("How has my Klarna spending changed?", "It peaked in September."),
+        ("hello?\nare you there?", "Yes, here."),
+    ]
+
+
+def test_an_unanswered_message_just_before_the_request_keeps_an_empty_reply(
+    service: TaskService,
+) -> None:
+    chat = service.create_chat_session().id
+    say = service.append_chat_message
+    say(chat, content="Hi")
+    say(chat, content="Hello!", role="assistant")
+    say(chat, content="this one failed")
+    request = say(chat, content="try again").message
+    task = service.create_task_from_message(chat, request.id)
+
+    history = service.conversation_history(task)
+
+    assert [(turn.request, turn.reply) for turn in history] == [
+        ("Hi", "Hello!"),
+        ("this one failed", ""),
+    ]

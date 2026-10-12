@@ -95,6 +95,9 @@ def test_an_unclear_coding_request_is_offered_and_yes_starts_it(client: TestClie
     confirmed = _say(client, chat, "yes")  # no triage model call: the choice settles it
 
     assert confirmed["decision"]["handled"] is True
+    said = {m["content"]: m["routing"] for m in _messages(client, chat) if m["role"] == "user"}
+    assert said["can you update the icon to a different one"]["route"] == "offer (propose_coding)"
+    assert said["yes"]["route"] == "choice: Start coding"
     (run,) = client.get("/workflow-runs").json()["runs"]
     assert run["status"] == "running"  # agreeing in chat starts it; merging still needs the token
     assert run["task_id"] is not None

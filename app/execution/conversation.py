@@ -169,7 +169,8 @@ class ConversationExecutor:
             messages.append(ChatMessage("system", attached))
         for turn in history:
             messages.append(ChatMessage("user", turn.request))
-            messages.append(ChatMessage("assistant", json.dumps({"reply": turn.reply})))
+            if turn.reply:  # an unanswered message is still part of what was said
+                messages.append(ChatMessage("assistant", json.dumps({"reply": turn.reply})))
             if turn.outcome:
                 messages.append(ChatMessage("system", turn.outcome))
         messages.append(ChatMessage("user", request))

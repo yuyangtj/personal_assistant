@@ -231,3 +231,56 @@ def test_a_long_history_reports_the_newest_months_and_weeks(client: TestClient) 
     months = _service(client).spending(group_by="month")["groups"]
 
     assert len(months) == 40 and months[-1]["group"] == "2023-12"
+
+
+def test_each_message_keeps_how_it_was_routed(client: TestClient) -> None:
+    chat = client.post("/chat-sessions", json={}).json()["id"]
+
+    for text in ("How much did I spend with Klarna last month?", "good morning"):
+        client.post(f"/chat-sessions/{chat}/messages", json={"content": text})
+
+    routed = {
+        m["content"]: m["routing"]
+        for m in client.get(f"/chat-sessions/{chat}/messages").json()["messages"]
+        if m["role"] == "user"
+    }
+    klarna = routed["How much did I spend with Klarna last month?"]
+    assert (klarna["route"], klarna["capabilities"]) == ("shopping agent", ["groceries"])
+    assert (routed["good morning"]["route"], routed["good morning"]["source"]) == (
+        "chat reply",
+        "rules",
+    )
+
+
+def test_an_answer_without_any_tool_result_is_sent_back_once(client: TestClient) -> None:
+    _service(client).import_klarna_csv(EXPORT)
+    agent, model = _agent(
+        client,
+        _finish("You spent 3 240 kr at IKEA."),  # made up: no tool was called
+        _call("spending", group_by="merchant"),
+        _finish("SJ 776 kr, Apotea 173 kr, Uniqlo 499 kr."),
+    )
+
+    output = agent.execute(task_id="t", request="Klarna per merchant?", is_cancelled=lambda: False)
+
+    assert output.output["reply"].startswith("SJ 776 kr")
+    assert "without calling any tool" in model.requests[1][-1].content
+
+
+def test_a_message_that_needs_no_data_is_answered_after_one_nudge(client: TestClient) -> None:
+    agent, _ = _agent(client, _finish("You're welcome!"), _finish("You're welcome!"))
+
+    output = agent.execute(task_id="t", request="thanks!", is_cancelled=lambda: False)
+
+    assert output.output["reply"] == "You're welcome!"
+
+
+def test_figures_given_without_looking_anything_up_are_never_shown(client: TestClient) -> None:
+    _service(client).import_klarna_csv(EXPORT)
+    made_up = _finish("You spent 3 240 kr at IKEA.")
+    agent, _ = _agent(client, made_up, made_up)  # ignores the nudge too
+
+    output = agent.execute(task_id="t", request="Klarna total?", is_cancelled=lambda: False)
+
+    assert "3 240" not in output.output["reply"]
+    assert output.output["reply"].startswith("Sorry, I couldn't look that up")
