@@ -106,6 +106,14 @@ def server_unavailable(gateway: McpGateway, server: str) -> bool:
     return connected is not None and not connected(server)
 
 
+def _argument(name: str, spec: dict[str, Any]) -> str:
+    """One argument as the model sees it, with its allowed values when there is a fixed set."""
+    allowed = spec.get("enum")
+    if isinstance(allowed, list) and allowed:
+        return f"{name} (one of: {', '.join(str(value) for value in allowed)})"
+    return f"{name} ({spec.get('type', 'any')})"
+
+
 def _catalog(gateway: McpGateway, toolset: Toolset) -> str:
     """The allowed tools with their argument schemas, as the model sees them."""
     lines = []
@@ -120,9 +128,7 @@ def _catalog(gateway: McpGateway, toolset: Toolset) -> str:
             schemas = {}
         for name, description in tools.items():
             properties = (schemas.get(name) or {}).get("properties", {})
-            arguments = ", ".join(
-                f"{key} ({spec.get('type', 'any')})" for key, spec in properties.items()
-            )
+            arguments = ", ".join(_argument(key, spec) for key, spec in properties.items())
             lines.append(f"- {server}.{name}: {description}. Arguments: {arguments or 'none'}")
     return "\n".join(lines)
 

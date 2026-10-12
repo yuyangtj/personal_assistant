@@ -284,3 +284,14 @@ def test_figures_given_without_looking_anything_up_are_never_shown(client: TestC
 
     assert "3 240" not in output.output["reply"]
     assert output.output["reply"].startswith("Sorry, I couldn't look that up")
+
+
+def test_the_agent_is_told_every_way_spending_can_be_grouped(client: TestClient) -> None:
+    agent, model = _agent(client, _finish("ok"), _finish("ok"))
+
+    agent.execute(task_id="t", request="Klarna?", is_cancelled=lambda: False)
+
+    catalog = model.requests[0][1].content
+    spending = next(line for line in catalog.splitlines() if "klarna.spending" in line)
+    assert "group_by (one of: merchant, month, week)" in spending
+    assert "merchant, month or week" in spending
