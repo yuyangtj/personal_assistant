@@ -150,6 +150,35 @@ def slugify(title: str) -> str:
     return slug or "item"
 
 
+#: The shopping list. It is never missing: adding to it by any of these names creates it.
+GROCERY_LIST = "groceries"
+_GROCERY_LIST_NAMES = frozenset(
+    {
+        "groceries",
+        "grocery",
+        "grocery-list",
+        "groceries-list",
+        "shopping",
+        "shopping-list",
+        "inkopslista",
+        "inköpslista",
+        "handlingslista",
+        "handla",
+        "matlista",
+    }
+)
+
+
+def is_grocery_list(name: str | None) -> bool:
+    """Whether a list name ("#groceries", "shopping list", "inköpslista") is the shopping list."""
+    if not name:
+        return False
+    words = re.findall(r"[a-zåäö0-9]+", name.lower())
+    if words[:1] in (["the"], ["my"]):
+        words = words[1:]
+    return "-".join(words) in _GROCERY_LIST_NAMES
+
+
 def mentioned_slugs(text: str) -> list[str]:
     return list(dict.fromkeys(match.lower() for match in MENTION_PATTERN.findall(text.lower())))
 
