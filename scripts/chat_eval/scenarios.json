@@ -45,6 +45,16 @@
     ]
   },
   {
+    "name": "several-things-at-once",
+    "about": "One message, three requests: the instant 'remember' rule once saved it all as one memory.",
+    "lists": ["Groceries"],
+    "turns": [
+      {"say": "remember I like oat milk, add it to groceries, and remind me tomorrow at 9",
+       "expect": {"route": "chat reply", "tools_all": ["remember", "list_add", "remind"]},
+       "main_expect": {"route": "main agent", "tools_all": ["remember", "list_add", "remind"]}}
+    ]
+  },
+  {
     "name": "general-question-then-follow-up",
     "turns": [
       {"say": "How long should I bake a salmon fillet in the oven?",

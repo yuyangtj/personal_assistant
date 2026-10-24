@@ -216,6 +216,12 @@ def check(turn: dict, expect: dict) -> list[str]:
         ):
             got = [(c.get("tool"), c.get("arguments")) for c in tools]
             problems.append(f"no {expect['tool']} call with {wanted}; calls: {got}")
+    if "tools_all" in expect:
+        # Every part of a message that asks for several things, each one carried out.
+        done = {call.get("tool") for call in tools if call.get("ok", True)}
+        if missing := [tool for tool in expect["tools_all"] if tool not in done]:
+            called = [c.get("tool") for c in tools]
+            problems.append(f"did not {', '.join(missing)}; calls: {called}")
     if expect.get("chart") and not any(b.get("type") == "chart" for b in turn["blocks"]):
         problems.append("no chart")
     text = " ".join(replies).lower()
@@ -262,6 +268,8 @@ def main() -> None:
                     print(f"- {scenario['name']}: skipped (no search key)")
                     continue
                 chat = harness.client.post("/chat-sessions", json={}).json()["id"]
+                for title in scenario.get("lists", []):
+                    harness.client.post("/work-items", json={"title": title, "kind": "list"})
                 ok = True
                 print(f"- {scenario['name']}")
                 for step in scenario["turns"]:

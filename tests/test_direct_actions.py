@@ -142,6 +142,22 @@ def test_note_phrasings_and_what_is_not_a_note() -> None:
         assert rule_action(text) is None, text
 
 
+def test_a_message_asking_for_several_things_is_not_one_instant_action() -> None:
+    from app.chat.triage import rule_action
+
+    for text in [
+        "remember I like oat milk, add it to groceries, and remind me tomorrow at 9",
+        "remember my passport expires in May and remind me in April",
+        "forget the old address, then remember the new one is Sveavägen 1",
+        "add bread to #groceries and also remind me to buy it",
+    ]:
+        assert rule_action(text) is None, text
+
+    # One request stays instant, "and" inside it or not.
+    assert rule_action("remember that Anna and I swim on Mondays").type == "remember"
+    assert rule_action("note: buy bread, and remind me later").type == "note_add"
+
+
 def test_only_a_note_may_be_longer_than_300_characters() -> None:
     from pydantic import ValidationError
 
