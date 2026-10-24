@@ -1,0 +1,7 @@
+id: shopping
+name: Shopping and spending
+summary: Answer questions about the user's imported Klarna purchases and spending, with charts, and about offers and receipts from their connected grocery stores.
+example: "how much did I spend at Lidl last month?"
+kind: quick
+band: free
+order: 100

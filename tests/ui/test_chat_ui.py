@@ -188,3 +188,24 @@ def test_the_repository_picked_above_the_chat_is_sent_with_the_message(
     page.evaluate("id => createTask(id)", messages[1])
     eventually(lambda: len(sent) == 2)
     assert "selected_repository_id" not in sent[1]["source_context"]
+
+
+def test_the_stats_page_lists_what_the_assistant_can_do(page: Page, live_server: str) -> None:
+    page.goto(f"{live_server}/ui#/stats")
+
+    body = page.locator("#abilities-body")
+    expect(body.locator("h3")).to_have_text(
+        [
+            "Done without asking",
+            "Done, then you review the result",
+            "Only after you confirm",
+            "Never done by the assistant",
+        ]
+    )
+    expect(body).to_contain_text("Notes")
+    coding = body.locator("li", has_text="Coding")
+    expect(coding).to_contain_text("runs in the background")
+    # No GitHub token on the test server: shown, but marked as not set up.
+    expect(body.locator("li", has_text="Looking at repositories")).to_contain_text(
+        "not set up on this server"
+    )

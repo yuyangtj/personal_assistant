@@ -1,0 +1,6 @@
+id: work-items
+name: Work items
+summary: "Keep track of ongoing work as work items (goals, lists, routines), each with a short brief that later chats build on; mentioned with #tag."
+kind: quick
+band: free
+order: 60

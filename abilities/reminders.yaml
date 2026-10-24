@@ -1,0 +1,7 @@
+id: reminders
+name: Reminders
+summary: Remind the user at a time, once or repeating.
+example: "remind me tomorrow at 9 to call mum"
+kind: quick
+band: free
+order: 40

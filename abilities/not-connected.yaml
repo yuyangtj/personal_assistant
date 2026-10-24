@@ -1,0 +1,6 @@
+id: not-connected
+name: Email, calendar and messages
+summary: Reading the user's email, calendar or messages, or sending messages for them - not connected.
+kind: quick
+band: never
+order: 130

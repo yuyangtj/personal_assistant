@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from app.api import (
+    abilities,
     catalog,
     chat,
     memories,
@@ -16,5 +17,17 @@ from app.api import (
 )
 
 router = APIRouter()
-for module in (chat, tasks, workflows, catalog, memories, notes, passkeys, speech, stats, web):
+for module in (
+    abilities,
+    chat,
+    tasks,
+    workflows,
+    catalog,
+    memories,
+    notes,
+    passkeys,
+    speech,
+    stats,
+    web,
+):
     router.include_router(module.router)

@@ -419,3 +419,9 @@ a.upload-button { display: inline-block; }
 .stats-table td.bad { color: var(--danger); font-weight: 600; }
 .stats-facts { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 13.5px; color: var(--muted); }
 .stats-facts strong { color: var(--text); }
+.stats-page h3 { margin: 16px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.abilities { list-style: none; margin: 0; padding: 0; }
+.abilities li { padding: 7px 0; border-bottom: 1px solid var(--border); }
+.abilities li .sub { margin: 2px 0 0; }
+.abilities li .status-pill { margin-left: 6px; }
+.abilities li.unavailable strong { color: var(--muted); }

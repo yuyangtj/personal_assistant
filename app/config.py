@@ -21,6 +21,7 @@ class Settings:
     coding_concurrency: int = 2
     fake_executor_delay_seconds: float = 0.1
     capabilities_directory: Path = Path("capabilities")
+    abilities_directory: Path = Path("abilities")
     repositories_directory: Path = Path("repositories")
     workflows_directory: Path = Path("workflows")
     coding_runners_directory: Path = Path("coding-runners")
@@ -144,6 +145,9 @@ class Settings:
                     "ASSISTANT_CAPABILITIES_DIRECTORY",
                     str(defaults.capabilities_directory),
                 )
+            ),
+            abilities_directory=Path(
+                os.getenv("ASSISTANT_ABILITIES_DIRECTORY", str(defaults.abilities_directory))
             ),
             repositories_directory=Path(
                 os.getenv(

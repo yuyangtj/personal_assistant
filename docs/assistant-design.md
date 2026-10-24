@@ -56,6 +56,18 @@ whether it is a quick tool or a background job, what it can touch, and its **ban
   model nicely. The prompt only explains them.
 - Bands start conservative and move toward `free` as an ability proves reliable.
 
+### Adding an ability
+
+1. Add `abilities/<id>.yaml`: `name`, `summary` (what it does, as the assistant would say
+   it, a full sentence; quote it if it contains `#`), `example`, `kind` (`quick` or `job`),
+   `band`, and `requires` if it needs a key (`github_token`, `web_search`).
+2. Make the code do it, with the band enforced there (an approval gate for `ask`, the pull
+   request for `review`).
+3. Add a scenario to `scripts/chat_eval`.
+
+The assistant's description of itself (`abilities_prompt` in `app/abilities/`) and the
+Stats page pick it up; an ability whose `requires` is not met is not offered.
+
 ## Quality: how well it does it
 
 "Can it?" is a lookup; "how well?" is measured:
@@ -116,7 +128,7 @@ quick tools stay quick, anything slow becomes a background job, and the assistan
 | Coding as a background job (spec, live progress, review, PR) | Done |
 | Stats (reply times, failures) | Done, per kind of work |
 | Chat agent told about repositories | Done (README and files of the selected repo) |
-| **Abilities registry with bands**, generating "what I can do" | Next |
+| Abilities registry with bands, generating "what I can do" (`abilities/`, shown on the Stats page) | Done |
 | **Read-only repository tools** (list, read, search) in a tool-using reply agent | Next |
 | More tools in the same agent (notes, memories, lists, Klarna, search, coding status) | Then |
 | One assistant for every message (triage and narrow agents retired) | Then |

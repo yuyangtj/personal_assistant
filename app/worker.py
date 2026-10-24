@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from time import monotonic
 
+from app.abilities import AbilityRegistry, abilities_prompt
 from app.assistant.supervisor import SupervisorExecutor, SupervisorTools
 from app.capabilities import CapabilityRegistry
 from app.chat.routines import start_routine as run_routine
@@ -798,6 +799,9 @@ def add_chat_executors(
     if conversation_executor is not None:
         conversation_executor.research_available = bool(
             settings.tavily_api_key or settings.brave_search_api_key
+        )
+        conversation_executor.abilities_text = abilities_prompt(
+            AbilityRegistry.from_directory(settings.abilities_directory).available(settings)
         )
         conversation_executor.repository_briefs = RepositoryBriefs(
             repositories,

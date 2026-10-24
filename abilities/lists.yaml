@@ -1,0 +1,7 @@
+id: lists
+name: Lists
+summary: Add entries to the user's lists and tick them off.
+example: "add oat milk to #groceries"
+kind: quick
+band: free
+order: 30

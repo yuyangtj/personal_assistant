@@ -1,0 +1,8 @@
+id: research
+name: Web research
+summary: Research a question on the web and report back with sources.
+example: "compare the cheapest trains to Copenhagen next week"
+kind: job
+band: free
+requires: [web_search]
+order: 90

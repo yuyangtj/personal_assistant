@@ -11,10 +11,33 @@ function formatSeconds(seconds) {
 
 async function loadStats() {
   try {
-    const stats = await api(`/stats?days=${encodeURIComponent($("stats-days").value)}`);
+    const [stats, abilities] = await Promise.all([
+      api(`/stats?days=${encodeURIComponent($("stats-days").value)}`), api("/abilities"),
+    ]);
     $("stats-error").textContent = "";
     renderStats(stats);
+    renderAbilities(abilities.abilities);
   } catch (error) { $("stats-error").textContent = error.message || String(error); }
+}
+
+// What the assistant can do (abilities/*.yaml): the same list it is given about itself.
+const BANDS = [
+  ["free", "Done without asking"],
+  ["review", "Done, then you review the result"],
+  ["ask", "Only after you confirm"],
+  ["never", "Never done by the assistant"],
+];
+
+function renderAbilities(abilities) {
+  $("abilities-body").innerHTML = BANDS.map(([band, heading]) => {
+    const listed = abilities.filter((ability) => ability.band === band);
+    if (!listed.length) return "";
+    return `<h3>${esc(heading)}</h3><ul class="abilities">${listed.map((ability) =>
+      `<li class="${ability.available ? "" : "unavailable"}"><strong>${esc(ability.name)}</strong>
+        ${ability.kind === "job" ? `<span class="status-pill">runs in the background</span>` : ""}
+        ${ability.available ? "" : `<span class="status-pill warn">not set up on this server</span>`}
+        <div class="sub">${esc(ability.summary)}${ability.example ? ` · “${esc(ability.example)}”` : ""}</div></li>`).join("")}</ul>`;
+  }).join("");
 }
 
 const count = (number, one, many = one + "s") =>

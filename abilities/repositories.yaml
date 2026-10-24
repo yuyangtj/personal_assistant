@@ -1,0 +1,8 @@
+id: repositories
+name: Looking at repositories
+summary: Look at the user's registered code repositories - the README and top-level files of the one selected above the chat or named in the message.
+example: "what's this repo about?"
+kind: quick
+band: free
+requires: [github_token]
+order: 70

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from app.abilities import AbilityRegistry
 from app.api.routes import router
 from app.api.web import app_signing_fingerprints
 from app.api.work_items import router as work_items_router
@@ -39,6 +40,7 @@ def create_app(
     repository_registry = RepositoryRegistry.from_directory(
         resolved_settings.repositories_directory
     )
+    ability_registry = AbilityRegistry.from_directory(resolved_settings.abilities_directory)
     workflow_registry = WorkflowRegistry.from_directory(resolved_settings.workflows_directory)
     coding_runner_registry = CodingRunnerRegistry.from_directory(
         resolved_settings.coding_runners_directory
@@ -64,6 +66,7 @@ def create_app(
     application.state.database = database
     application.state.task_service = TaskService(database)
     application.state.memory_service = MemoryService(database)
+    application.state.ability_registry = ability_registry
     application.state.note_service = NoteService(database)
     application.state.work_item_service = WorkItemService(database)
     application.state.schedule_service = ScheduleService(database)

@@ -183,12 +183,17 @@ def test_the_selected_repository_reaches_the_reply_task_only_if_it_is_registered
 
 
 def test_the_chat_agent_is_told_what_the_assistant_really_does() -> None:
+    from app.abilities import AbilityRegistry, abilities_prompt
+    from app.config import Settings
+
     chat = RecordingChat()
-    ConversationExecutor(chat).execute(  # type: ignore[arg-type]
-        task_id="t", request="hi", is_cancelled=lambda: False
+    executor = ConversationExecutor(chat)  # type: ignore[arg-type]
+    executor.abilities_text = abilities_prompt(
+        AbilityRegistry.from_directory("abilities").available(Settings())
     )
+    executor.execute(task_id="t", request="hi", is_cancelled=lambda: False)
 
     system = chat.messages[0].content
-    assert 'Save a note ("note: ...")' in system
-    assert "Start a coding workflow on one of the registered repositories" in system
-    assert "never invent a workflow, tool or step" in system
+    assert "This is the complete list" in system
+    assert "- Notes: Save a note" in system
+    assert "- Coding: Change code in a registered repository" in system

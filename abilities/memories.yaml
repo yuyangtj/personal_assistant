@@ -1,0 +1,7 @@
+id: memories
+name: Memories
+summary: Remember a fact or preference the user tells it, and forget one; remembered facts are used in later replies.
+example: "remember that I prefer window seats"
+kind: quick
+band: free
+order: 20

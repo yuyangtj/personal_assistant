@@ -1,0 +1,7 @@
+id: coding
+name: Coding
+summary: Change code in a registered repository - a coding agent works on its own branch, runs the tests, and opens a pull request that the user reviews and merges.
+example: "fix the theme toggle in the personal assistant"
+kind: job
+band: review
+order: 80
