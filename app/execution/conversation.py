@@ -16,6 +16,7 @@ from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.execution.routine_context import notable, routine_prompt
 from app.integrations.chat import ChatClient, ChatMessage
+from app.repositories.briefs import RepositoryBriefs
 
 ALLOWED_EMOTIONS = ("Warm", "Curious", "Excited", "Concerned", "Neutral")
 MAX_REPLY_CHARACTERS = 600
@@ -57,6 +58,19 @@ Curious, Excited, Concerned, Neutral>", "action": <one action object or null>,
 or omitted}."""
 
 
+#: What the assistant really does besides chatting. The agent once promised "an inspection
+#: workflow will start" for a request, though nothing of the kind exists; it may only
+#: mention what is listed here.
+ASSISTANT_CAPABILITIES = """
+What the assistant can do for the user besides chatting (offer these when they fit; never
+promise anything else, and never invent a workflow, tool or step):
+- Save a note ("note: ..."), remember a fact ("remember that ..."), keep lists and
+  reminders ("add milk to #groceries", "remind me tomorrow at 9 to call mum").
+- Track ongoing work as work items (#tag).
+- Start a coding workflow on one of the registered repositories; the user approves the pull
+  request before anything is merged."""
+
+
 #: Added when the web research agent is installed, instead of a flat "can't browse".
 RESEARCH_HANDOFF = """
 You cannot browse the web yourself, but the assistant's research agent can. If the user
@@ -79,6 +93,8 @@ class ConversationExecutor:
         self.client = client
         self._now = now or (lambda: datetime.now(UTC))
         self.research_available = research_available
+        #: Tells the agent about the user's repositories (set where the worker is wired).
+        self.repository_briefs: RepositoryBriefs | None = None
 
     def execute(
         self,
@@ -126,7 +142,11 @@ class ConversationExecutor:
         history: Sequence[ConversationTurn],
         context: Mapping[str, Any],
     ) -> list[ChatMessage]:
-        prompt = SYSTEM_PROMPT + (RESEARCH_HANDOFF if self.research_available else "")
+        prompt = (
+            SYSTEM_PROMPT
+            + ASSISTANT_CAPABILITIES
+            + (RESEARCH_HANDOFF if self.research_available else "")
+        )
         messages = [ChatMessage("system", f"{prompt}\n{self._clock(context)}")]
         parent = context.get("parent_task")
         if isinstance(parent, dict):
@@ -149,6 +169,13 @@ class ConversationExecutor:
                     f"{render_work_item_context(work_items)}",
                 )
             )
+        if self.repository_briefs is not None:
+            selected = context.get("selected_repository_id")
+            repositories = self.repository_briefs.prompt(
+                message=request, selected=selected if isinstance(selected, str) else None
+            )
+            if repositories:
+                messages.append(ChatMessage("system", repositories))
         memories = context.get("memories")
         if isinstance(memories, list) and memories:
             lines = [str(item) for item in memories if str(item).strip()]

@@ -50,6 +50,7 @@ from app.persistence.database import Database
 from app.persistence.models import ScheduleModel
 from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
+from app.repositories.briefs import RepositoryBriefs
 from app.schedules import Scheduler
 from app.services import TaskService
 from app.tools.klarna import KlarnaTools, ToolGateway
@@ -797,6 +798,12 @@ def add_chat_executors(
     if conversation_executor is not None:
         conversation_executor.research_available = bool(
             settings.tavily_api_key or settings.brave_search_api_key
+        )
+        conversation_executor.repository_briefs = RepositoryBriefs(
+            repositories,
+            GitHubClient(token=settings.github_token, base_url=settings.github_api_base_url)
+            if settings.github_token
+            else None,
         )
     if conversation_executor is not None:
         executors[conversation_executor.id] = conversation_executor

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -296,13 +297,22 @@ def create_task_from_chat_message(
 ) -> TaskResponse:
     """Launch the work a chat message asked for, on the user's explicit confirmation."""
     reject_direct_coding(body.required_capabilities, body.repository_id, body.source_context)
+    source_context = repository_context(request, body.source_context, body.repository_id)
+    # The repository picked in the console is information for the reply, never an order to
+    # code: it only travels along if it is a registered one.
+    selected = source_context.pop("selected_repository_id", None)
+    if isinstance(selected, str):
+        with contextlib.suppress(LookupError):
+            source_context["selected_repository_id"] = request.app.state.repository_registry.get(
+                selected
+            ).id
     try:
         task = task_service(request).create_task_from_message(
             chat_session_id,
             message_id,
             goal=body.goal,
             required_capabilities=body.required_capabilities,
-            source_context=repository_context(request, body.source_context, body.repository_id),
+            source_context=source_context,
             work_item_id=body.work_item_id,
             create_work_item=body.create_work_item,
             space=(

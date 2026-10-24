@@ -232,7 +232,9 @@ async function createTask(messageId) {
   try {
     const body = {
       source_context: { client: "web-console",
-        local_time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+        local_time: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        // The repository picked above the chat: the reply is told about it.
+        ...(state.repositoryId ? { selected_repository_id: state.repositoryId } : {}) },
     };
     await api(`/chat-sessions/${state.chatId}/messages/${messageId}/task`,
       { method: "POST", body: JSON.stringify(body) });

@@ -339,6 +339,33 @@ class GitHubClient:
                 raise GitHubError("GitHub returned an invalid workflow run") from error
         return None
 
+    def read_readme(self, *, repository: str, limit: int = 4000) -> str | None:
+        """The start of the repository's README, or None when it has none."""
+        owner, name = _repository_parts(repository)
+        try:
+            response = self._client.request(
+                "GET",
+                f"/repos/{owner}/{name}/readme",
+                headers={"Accept": "application/vnd.github.raw+json"},
+            )
+        except httpx.HTTPError as error:
+            raise GitHubError(f"GitHub request failed: {type(error).__name__}") from error
+        if response.status_code == 404:
+            return None
+        if response.status_code not in range(200, 300):
+            raise GitHubError(f"GitHub returned HTTP {response.status_code}")
+        return response.text[:limit]
+
+    def list_top_level(self, *, repository: str) -> list[str]:
+        """Names in the repository's root, folders with a trailing slash."""
+        owner, name = _repository_parts(repository)
+        entries = self._request_list("GET", f"/repos/{owner}/{name}/contents")
+        return [
+            f"{entry.get('name')}{'/' if entry.get('type') == 'dir' else ''}"
+            for entry in entries
+            if isinstance(entry.get("name"), str)
+        ]
+
     def close(self) -> None:
         self._client.close()
 

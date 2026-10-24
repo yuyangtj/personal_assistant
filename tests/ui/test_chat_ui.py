@@ -160,3 +160,31 @@ def test_the_stats_page_shows_the_work_done(page: Page, live_server: str) -> Non
     expect(row.locator("td").nth(3)).to_have_text("1")  # not finished: nothing runs it here
     page.select_option("#stats-days", "30")
     expect(page.locator("#stats-body tbody tr")).to_have_count(1)
+
+
+def test_the_repository_picked_above_the_chat_is_sent_with_the_message(
+    page: Page, live_server: str, api: httpx.Client
+) -> None:
+    chat = api.post("/chat-sessions", json={}).json()["id"]
+    messages = [
+        api.post(f"/chat-sessions/{chat}/messages", json={"content": text}).json()["message"]["id"]
+        for text in ("What's this repo about", "and another thing")
+    ]
+    sent: list[dict] = []
+    page.on(
+        "request",
+        lambda r: r.method == "POST" and r.url.endswith("/task") and sent.append(r.post_data_json),
+    )
+    page.goto(f"{live_server}/ui#/chats/{chat}")
+    expect(page.locator("#transcript")).to_contain_text("What's this repo about")
+
+    # The reply task is made by the console, once the server has routed the message.
+    page.select_option("#repository", "analytics-agent-playground")
+    page.evaluate("id => createTask(id)", messages[0])
+    eventually(lambda: len(sent) == 1)
+    assert sent[0]["source_context"]["selected_repository_id"] == "analytics-agent-playground"
+
+    page.select_option("#repository", "")  # "Pick for me": nothing is sent
+    page.evaluate("id => createTask(id)", messages[1])
+    eventually(lambda: len(sent) == 2)
+    assert "selected_repository_id" not in sent[1]["source_context"]
