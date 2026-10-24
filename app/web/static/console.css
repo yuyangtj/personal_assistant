@@ -407,3 +407,15 @@ a.upload-button { display: inline-block; }
 .note-toast[hidden] { display: none; }
 /* The hidden attribute always hides, whatever display a rule gives the element. */
 [hidden] { display: none !important; }
+/* Stats */
+.stats-page { width: 100%; max-width: 900px; margin: 0 auto; padding: 18px 16px 40px; box-sizing: border-box; }
+.stats-page h1 { margin: 0; }
+.stats-page h2 { margin: 22px 0 8px; font-size: 1rem; }
+.stats-scroll { overflow-x: auto; margin-top: 12px; }
+.stats-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.stats-table th, .stats-table td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.stats-table thead th { color: var(--muted); font-weight: 500; font-size: 12px; }
+.stats-table th[scope=row], .stats-table thead th:first-child { text-align: left; }
+.stats-table td.bad { color: var(--danger); font-weight: 600; }
+.stats-facts { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 13.5px; color: var(--muted); }
+.stats-facts strong { color: var(--text); }

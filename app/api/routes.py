@@ -9,11 +9,12 @@ from app.api import (
     notes,
     passkeys,
     speech,
+    stats,
     tasks,
     web,
     workflows,
 )
 
 router = APIRouter()
-for module in (chat, tasks, workflows, catalog, memories, notes, passkeys, speech, web):
+for module in (chat, tasks, workflows, catalog, memories, notes, passkeys, speech, stats, web):
     router.include_router(module.router)
