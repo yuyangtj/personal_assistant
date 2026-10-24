@@ -140,7 +140,7 @@ def test_a_keep_export_becomes_notes(database: Database, tmp_path: Path) -> None
     result = service.import_google_keep(path)
 
     assert result == KeepImportResult(
-        added=5, already_here=0, trashed_skipped=1, images_skipped=1, unreadable=1
+        added=5, already_here=0, trashed_skipped=1, images_skipped=1, empty_skipped=0, unreadable=1
     )
     notes = {note.title or note.body[:10]: note for note in service.list(include_archived=True)}
     assert set(notes) == {"Pasta", "Shopping", "Old", "Receipt", "Read later"}
@@ -232,6 +232,7 @@ def test_keep_import_api_previews_then_imports(client: TestClient) -> None:
         "already_here": 0,
         "trashed_skipped": 1,
         "images_skipped": 1,
+        "empty_skipped": 0,
         "unreadable": 1,
     }
     assert client.get("/notes?include_archived=true").json()["notes"] == []
@@ -243,3 +244,65 @@ def test_keep_import_api_previews_then_imports(client: TestClient) -> None:
     bad = client.post("/notes/import/google-keep", content=b"plain text", headers=headers)
     assert bad.status_code == 422
     assert client.post("/notes/import/google-keep", content=b"").status_code == 422
+
+
+def _zip_of(notes: dict[str, dict]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, note in notes.items():
+            archive.writestr(name, json.dumps(note))
+    return buffer.getvalue()
+
+
+def test_a_real_export_with_odd_notes_loses_nothing(database: Database, tmp_path: Path) -> None:
+    # Shapes found in a real 1,651-note export: pasted text in the title, a title over
+    # several lines, links already typed in the text, empty and image-only notes, a note
+    # whose file name starts with a dot, and a Google Tasks link.
+    pasted = "Pasted into the title " + "word " * 80
+    notes = {
+        "Takeout/Keep/long.json": keep_note(
+            title=pasted, textContent="and a body", createdTimestampUsec=11
+        ),
+        "Takeout/Keep/lines.json": keep_note(
+            title="Exploratory Data Analysis for\nFeature Selection\n in Machine\nLearning",
+            createdTimestampUsec=12,
+        ),
+        "Takeout/Keep/typed.json": keep_note(
+            textContent="see https://example.com/a for more",
+            createdTimestampUsec=13,
+            annotations=[
+                {"url": "https://example.com/a", "title": "A", "source": "WEBLINK"},
+                {"url": "https://example.com/b", "title": "B", "source": "WEBLINK"},
+                {"url": "https://example.com/b", "title": "B again", "source": "WEBLINK"},
+            ],
+        ),
+        "Takeout/Keep/.terraform.lock.hcl.json": keep_note(
+            title=".terraform.lock.hcl", createdTimestampUsec=14
+        ),
+        "Takeout/Keep/tasks.json": keep_note(
+            title="check errors", createdTimestampUsec=15, tasks=[{"id": "abc"}]
+        ),
+        "Takeout/Keep/blank.json": keep_note(createdTimestampUsec=16),
+        "Takeout/Keep/image-only.json": keep_note(
+            createdTimestampUsec=17,
+            labels=[{"name": "Receipts"}],
+            attachments=[{"filePath": "a.png", "mimetype": "image/png"}],
+        ),
+    }
+    path = tmp_path / "takeout.zip"
+    path.write_bytes(_zip_of(notes))
+    service = NoteService(database)
+
+    result = service.import_google_keep(path)
+
+    assert result == KeepImportResult(added=5, images_skipped=1, empty_skipped=2)
+    by_key = {note.source_key.split(":")[1]: note for note in service.list(include_archived=True)}
+    long = by_key["11"]
+    assert len(long.title) <= 300 and long.title.endswith("…")
+    assert long.body == pasted.strip() + "\n\nand a body"  # nothing lost
+    assert (
+        by_key["12"].title == "Exploratory Data Analysis for Feature Selection in Machine Learning"
+    )
+    assert by_key["13"].body == "see https://example.com/a for more\n\nLinks: https://example.com/b"
+    assert by_key["14"].title == ".terraform.lock.hcl"
+    assert by_key["15"].title == "check errors"

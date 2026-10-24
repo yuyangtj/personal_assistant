@@ -345,6 +345,7 @@ function keepSummary(result) {
   const skipped = [
     result.images_skipped ? plural(result.images_skipped, "image") : "",
     result.trashed_skipped ? plural(result.trashed_skipped, "trashed note") : "",
+    result.empty_skipped ? plural(result.empty_skipped, "empty note") : "",
     result.unreadable ? plural(result.unreadable, "unreadable file") : "",
   ].filter(Boolean);
   const here = result.already_here ? `, ${result.already_here} already here` : "";
