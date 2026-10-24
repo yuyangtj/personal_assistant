@@ -3,8 +3,9 @@
 
 async function openChat(id) {
   state.chatId = id;
+  state.transcriptSignature = null;  // a different chat: draw it even if it looks the same
   if (!id) {
-    clearInterval(state.timer);
+    stopPolling();
     state.messages = []; state.tasks = []; state.focus = [];
     $("chat-title").textContent = "No conversation open";
     $("transcript").innerHTML = `<div class="empty">Start or pick a conversation.</div>`;
@@ -13,6 +14,18 @@ async function openChat(id) {
   }
   await Promise.all([loadChats(), refreshTranscript()]);
 }
+
+// While something runs the page looks again quickly at first, then gently; it doesn't look
+// at all while the tab is hidden, and catches up when it comes back.
+function pollDelay() {
+  const age = Date.now() - (state.pollStarted || Date.now());
+  return age < 10_000 ? 1000 : age < 60_000 ? 2000 : 5000;
+}
+function stopPolling() { clearTimeout(state.timer); state.timer = null; }
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { stopPolling(); return; }
+  if (state.chatId) { state.pollStarted = Date.now(); refreshTranscript(); }
+});
 
 async function refreshTranscript() {
   if (!state.chatId) return;
@@ -23,23 +36,36 @@ async function refreshTranscript() {
       api(`/workflow-runs?chat_session_id=${encodeURIComponent(state.chatId)}&limit=50`),
       api(`/chat-sessions/${state.chatId}/focus`),
     ]);
-    state.focus = focus.work_items;
-    renderFocusBar();
-    state.messages = msgs.messages; state.tasks = tasks.tasks;
-    state.workflowRuns = runs.runs.filter((run) => run.workflow_id === "coding-change");
-    speakReplyIfWaiting();
-    const chat = state.chats.find((c) => c.id === state.chatId);
-    $("chat-title").textContent = chat ? chat.title : "Conversation";
-    renderTranscript();
+    // Draw only when something is different, so text you selected stays selected.
+    const signature = JSON.stringify([msgs, tasks, runs, focus, phone.turns[state.chatId] || [],
+      state.pending.filter((entry) => entry.chatId === state.chatId).map((entry) => entry.messageId)]);
+    const changed = signature !== state.transcriptSignature;
+    state.transcriptSignature = signature;
+    state.tasks = tasks.tasks;
+    if (changed) {
+      state.focus = focus.work_items;
+      renderFocusBar();
+      state.messages = msgs.messages;
+      state.workflowRuns = runs.runs.filter((run) => run.workflow_id === "coding-change");
+      speakReplyIfWaiting();
+      const chat = state.chats.find((c) => c.id === state.chatId);
+      $("chat-title").textContent = chat ? chat.title : "Conversation";
+      renderTranscript();
+    }
     // Keep polling only while something is actually running.
     const running = state.tasks.some((task) =>
       ["planning", "executing", "validating"].includes(task.status));
     const queued = state.tasks.some((task) => task.status === "created");
     $("status").textContent = running ? "working…" : queued ? "queued…" : "";
-    clearInterval(state.timer);
-    if (running || queued) state.timer = setInterval(refreshTranscript, 2000);
-    if (state.taskId) renderTask(state.taskId);
-    clearError();
+    stopPolling();
+    if (running || queued) {
+      if (!state.pollStarted) state.pollStarted = Date.now();
+      if (!document.hidden) state.timer = setTimeout(refreshTranscript, pollDelay());
+    } else {
+      state.pollStarted = null;
+    }
+    if (changed && state.taskId) renderTask(state.taskId);
+    if (!state.stickyError) clearError();
   } catch (e) { fail(e); }
 }
 
@@ -103,6 +129,24 @@ const BLOCKS = {
 };
 const renderBlocks = (m) => (m.blocks || []).map((block) => (BLOCKS[block.type] || (() => ""))(block, m)).join("");
 
+// A message just sent shows at once (the server is still routing it), with a thinking
+// indicator until the reply's own card takes over.
+function pendingTurns() {
+  const html = [];
+  for (const entry of state.pending) {
+    if (entry.chatId !== state.chatId) continue;
+    const saved = entry.messageId && state.messages.find((m) => m.id === entry.messageId);
+    if (!saved) {
+      html.push(`<div class="msg user pending"><div class="who">YOU</div><div class="bubble">${esc(entry.text)}</div></div>`);
+    }
+    if (!saved || !saved.linked_task_id) {
+      html.push(`<div class="msg assistant"><div class="who">ASSISTANT</div><div class="bubble">`
+        + `<span class="typing" role="status" aria-label="Thinking"><i></i><i></i><i></i></span></div></div>`);
+    }
+  }
+  return html.join("");
+}
+
 function renderTranscript() {
   const byId = Object.fromEntries(state.tasks.map((t) => [t.id, t]));
   const atBottom = $("transcript").scrollHeight - $("transcript").scrollTop
@@ -124,29 +168,37 @@ function renderTranscript() {
       + `<div class="bubble">${esc(m.content)}${extras}</div></div>`;
   }).map((html, index) => html + phoneTurnsAfter(state.messages[index].id)).join("")
     // Phone turns from before the first saved message (or a chat not saved yet).
-    .replace(/^/, phoneTurnsAfter(null)) || `<div class="empty">No messages yet.</div>`;
-  if (atBottom) $("transcript").scrollTop = $("transcript").scrollHeight;
+    .replace(/^/, phoneTurnsAfter(null)) + pendingTurns() || `<div class="empty">No messages yet.</div>`;
+  if (atBottom || state.pending.length) $("transcript").scrollTop = $("transcript").scrollHeight;
 }
 
+// Sends what the user said. Returns false when it could not be sent, so the caller can put
+// the text back in the box.
 async function send(text, { local = true, voice = false } = {}) {
   state.busy = true; $("send").disabled = true;
+  let entry = null;
   try {
     const attachments = phone.screen ? [{ kind: "screen", ...phone.screen }] : [];
     if (local && phone.bridge && !awaitingChoice() && !attachments.length) {
       // Simple things (the time, a timer) can be answered on the phone itself.
       const route = await phoneRoute(text);
-      if (route && route.route !== "cloud") return answerOnPhone(text, route, voice);
+      if (route && route.route !== "cloud") { answerOnPhone(text, route, voice); return true; }
     }
     if (!state.chatId) {
       state.chatId = (await api("/chat-sessions", { method: "POST", body: "{}" })).id;
       goChat(state.chatId);
       loadChats();
     }
+    entry = { chatId: state.chatId, text, messageId: null };
+    state.pending.push(entry);
+    state.pollStarted = Date.now();
+    renderTranscript();
     const posted = await api(`/chat-sessions/${state.chatId}/messages`, {
       method: "POST", body: JSON.stringify({ content: text, repository_id: state.repositoryId,
         local_time: localIsoTime(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         attachments }),
     });
+    entry.messageId = posted.message.id;
     if (attachments.length) setScreen(null);
     // A spoken question gets its answer spoken too, whenever it arrives.
     if (voice) phone.speakFor = posted.message.id;
@@ -158,11 +210,16 @@ async function send(text, { local = true, voice = false } = {}) {
       await refreshTranscript();
       if (state.itemId) await renderWorkItem(state.itemId);
       await loadItems();
-      return;
+      return true;
     }
     await createTask(posted.message.id);
-  } catch (e) { fail(e); }
-  finally { state.busy = false; $("send").disabled = false; }
+    return true;
+  } catch (e) { fail(e, { sticky: true }); return false; }
+  finally {
+    state.pending = state.pending.filter((item) => item !== entry);
+    state.busy = false; $("send").disabled = false;
+    if (entry) { state.transcriptSignature = null; renderTranscript(); }
+  }
 }
 
 function localIsoTime() {

@@ -76,13 +76,18 @@ document.addEventListener("click", (e) => {
   }
 
 });
-$("composer").onsubmit = (e) => {
+$("composer").onsubmit = async (e) => {
   e.preventDefault();
   const text = $("input").value.trim();
   if (!text || state.busy) return;
   const voice = phone.dictated;
   phone.dictated = false;
-  $("input").value = ""; clearError(); send(text, { voice });
+  $("input").value = ""; clearError();
+  // A message that could not be sent goes back in the box, unless something new was typed.
+  if (await send(text, { voice }) === false && !$("input").value) {
+    $("input").value = text;
+    $("input").focus();
+  }
 };
 // Clearing the box drops dictation: a typed message gets a written reply only.
 $("input").addEventListener("input", () => { if (!$("input").value.trim()) phone.dictated = false; });
