@@ -52,6 +52,7 @@ from app.persistence.models import ScheduleModel
 from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.repositories.briefs import RepositoryBriefs
+from app.repositories.reader import RepositoryReader
 from app.schedules import Scheduler
 from app.services import TaskService
 from app.tools.klarna import KlarnaTools, ToolGateway
@@ -558,6 +559,9 @@ class TaskWorker:
             if executor.id == "coding-pull-request":
                 execution_context["progress"] = ProgressReporter(self.service, task.id)
                 execution_context["guidance"] = GuidanceInbox(self.service, task.id)
+            if executor.id == "model-conversation":
+                # Its repository lookups show on the reply's card ("Reading app/main.py").
+                execution_context["progress"] = ProgressReporter(self.service, task.id)
             if executor.id == "supervisor":
                 execution_context["chat_session_id"] = task.chat_session_id
                 execution_context["origin_message_id"] = task.origin_message_id
@@ -803,12 +807,14 @@ def add_chat_executors(
         conversation_executor.abilities_text = abilities_prompt(
             AbilityRegistry.from_directory(settings.abilities_directory).available(settings)
         )
-        conversation_executor.repository_briefs = RepositoryBriefs(
-            repositories,
+        github = (
             GitHubClient(token=settings.github_token, base_url=settings.github_api_base_url)
             if settings.github_token
-            else None,
+            else None
         )
+        conversation_executor.repository_briefs = RepositoryBriefs(repositories, github)
+        if github is not None:
+            conversation_executor.repository_reader = RepositoryReader(repositories, github)
     if conversation_executor is not None:
         executors[conversation_executor.id] = conversation_executor
     else:

@@ -1,7 +1,7 @@
 id: repositories
 name: Looking at repositories
-summary: Look at the user's registered code repositories - the README and top-level files of the one selected above the chat or named in the message.
-example: "what's this repo about?"
+summary: Look at the user's registered code repositories without changing them - list folders, read files and search the code - to answer questions about them.
+example: "how does triage decide where a message goes?"
 kind: quick
 band: free
 requires: [github_token]

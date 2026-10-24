@@ -47,6 +47,12 @@ flowchart LR
   the console or named in the message, the start of its README and its top-level files, read
   from GitHub and cached for 15 minutes (`app/repositories/briefs.py`). Before this it knew
   nothing about them and asked the user to paste the README.
+- **The reply agent can look at code.** With a GitHub token it has three read-only tools,
+  `repo_files`, `repo_read` (200 numbered lines at a time) and `repo_search` (GitHub code
+  search), for the registered repositories only (`app/repositories/reader.py`). It may call
+  them up to 4 times before answering, and each lookup shows on the reply's card ("Reading
+  app/chat/triage.py"). Results are wrapped as data, never instructions. What it may do is
+  generated from `abilities/` (see [`assistant-design.md`](assistant-design.md)).
 - **Replies carry blocks.** These are choices, links, workflow and work-item cards,
   rendered by pre-built console components. A choice is answered by clicking it or by
   saying "yes" or "no".
