@@ -239,6 +239,7 @@ def _route_message(
             chat_session_id=chat_session_id,
             items=work_items,
             memory=request.app.state.memory_service,
+            notes=request.app.state.note_service,
             schedules=request.app.state.schedule_service,
             timezone=timezone,
             tasks=service,

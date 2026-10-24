@@ -8,7 +8,9 @@ imported; images and colours are left out.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import re
 import zipfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -157,6 +159,10 @@ class NoteService:
                 raise LookupError(note_id)
             session.delete(note)
 
+    def export_zip(self) -> bytes:
+        """Every note, archived ones too, as a zip a person can keep (see export_notes_zip)."""
+        return export_notes_zip(self.list(include_archived=True))
+
     def import_google_keep(self, zip_path: Path, *, dry_run: bool = False) -> KeepImportResult:
         """Import the notes in a Google Takeout zip; notes imported before are left alone."""
         try:
@@ -210,6 +216,74 @@ class NoteService:
             if not dry_run:
                 session.add_all(new.values())
         return KeepImportResult(**counts)
+
+
+def _note_fields(note: NoteModel) -> dict[str, Any]:
+    return {
+        "id": note.id,
+        "title": note.title,
+        "body": note.body,
+        "checklist": note.checklist,
+        "tags": note.tags,
+        "pinned": note.pinned,
+        "archived": note.archived,
+        "source": note.source,
+        "created_at": note.created_at.isoformat(),
+        "updated_at": note.updated_at.isoformat(),
+    }
+
+
+def _note_markdown(note: NoteModel) -> str:
+    lines = [
+        "---",
+        f"created: {note.created_at.isoformat()}",
+        f"edited: {note.updated_at.isoformat()}",
+    ]
+    if note.tags:
+        lines.append(
+            "tags: [" + ", ".join(json.dumps(tag, ensure_ascii=False) for tag in note.tags) + "]"
+        )
+    if note.pinned:
+        lines.append("pinned: true")
+    if note.archived:
+        lines.append("archived: true")
+    lines += ["---", ""]
+    if note.title:
+        lines += [f"# {note.title}", ""]
+    if note.body.strip():
+        lines += [note.body.rstrip(), ""]
+    lines += [f"- [{'x' if item['done'] else ' '}] {item['text']}" for item in note.checklist]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _note_filename(note: NoteModel) -> str:
+    first_line = (
+        note.title or note.body.strip().splitlines()[0] if note.body.strip() else note.title
+    ) or ""
+    slug = re.sub(r"[\W_]+", "-", first_line.lower()).strip("-")[:50] or "note"
+    return f"markdown/{slug}-{note.id[:8]}.md"
+
+
+def export_notes_zip(notes: list[NoteModel]) -> bytes:
+    """A zip with notes.json (everything) and one Markdown file per note, with its tags,
+    dates, pin and checklist, readable anywhere."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "notes.json",
+            json.dumps(
+                {
+                    "exported_at": datetime.now(UTC).isoformat(),
+                    "count": len(notes),
+                    "notes": [_note_fields(note) for note in notes],
+                },
+                ensure_ascii=False,
+                indent=1,
+            ),
+        )
+        for note in notes:
+            archive.writestr(_note_filename(note), _note_markdown(note))
+    return buffer.getvalue()
 
 
 def _keep_note(raw: Any) -> NoteModel | Literal["trashed", "empty"]:

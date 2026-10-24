@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.domain.proposals import propose_task
 from app.integrations.chat import ChatClient, ChatMessage, correction_turns
@@ -38,6 +38,10 @@ class TriageIntent(StrEnum):
     DIRECT_ACTION = "direct_action"
 
 
+ACTION_TEXT_LIMIT = 300
+NOTE_TEXT_LIMIT = 4000
+
+
 class DirectAction(BaseModel):
     """A small, reversible action the server performs without a chat model (T0)."""
 
@@ -53,14 +57,22 @@ class DirectAction(BaseModel):
         "list_routines",
         "run_routine",
         "cancel_routine",
+        "note_add",
     ]
-    text: str = Field(min_length=1, max_length=300)
+    #: Most actions are one short phrase; a note may be longer (see the validator).
+    text: str = Field(min_length=1, max_length=NOTE_TEXT_LIMIT)
     #: For remind/routine: local wall-clock time "YYYY-MM-DDTHH:MM" in the user's zone.
     at: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
     recurrence: Literal["none", "daily", "weekdays", "weekly", "monthly"] = "none"
     #: The work item's #tag for checklist actions; None means "the obvious one".
     work_item: str | None = Field(default=None, max_length=80)
     kind: Literal["fact", "preference", "project"] | None = None
+
+    @model_validator(mode="after")
+    def _only_notes_are_long(self) -> DirectAction:
+        if self.type != "note_add" and len(self.text) > ACTION_TEXT_LIMIT:
+            raise ValueError(f"text can be at most {ACTION_TEXT_LIMIT} characters")
+        return self
 
 
 class TriageOption(BaseModel):
@@ -125,7 +137,9 @@ Decide what the message needs:
   "work_item": tag or null} to tick an entry off; {"type": "remember", "text": the fact,
   "kind": "fact" | "preference" | "project"} when the user explicitly asks you to
   remember something; {"type": "forget", "text": what to forget} when the user asks you
-  to forget or delete something you were told to remember; {"type": "remind", "text":
+  to forget or delete something you were told to remember; {"type": "note_add", "text":
+  the note} when the user asks to save, jot down or make a note ("note: call the
+  dentist"; a note is not a fact to remember); {"type": "remind", "text":
   what to remind, "at": "YYYY-MM-DDTHH:MM" local time, "recurrence": "none" | "daily" |
   "weekdays" | "weekly" | "monthly", "work_item": tag or null} for reminders ("remind me
   tomorrow at 9 to call mum"); {"type": "routine", ...same fields} when something should
@@ -194,6 +208,13 @@ _CANCEL_ROUTINE = re.compile(
     r"(?:[“\"](?P<quoted>.+?)[”\"]|(?P<text>.+?)\s+(?:routine|watch))[.!]?$",
     re.IGNORECASE,
 )
+# "note: buy oat milk", "make a note: ...", "anteckna: ...". The colon is required, so
+# "note that the build is slow" stays an ordinary message.
+_NOTE = re.compile(
+    r"^(?:please\s+)?(?:(?:make|add|take|write|save|create)\s+(?:a\s+|me\s+a\s+)?(?:new\s+)?note"
+    r"|new\s+note|note(?:\s+to\s+self)?|anteckna|anteckning|ny\s+anteckning)\s*[:：]\s*(?P<text>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
 _REMEMBER = re.compile(r"^(?:please\s+)?remember(?:\s+that)?\s+(?P<text>.+?)[.!]?$", re.IGNORECASE)
 _FORGET = re.compile(
     r"^(?:please\s+)?forget\s+(?:that\s+|about\s+|the\s+memory\s+(?:about\s+)?)?(?P<text>.+?)[.!]?$",
@@ -220,6 +241,8 @@ def _rule_action(text: str, work_items: Sequence[dict] = ()) -> DirectAction | N
     app" stays a coding request rather than becoming an entry on a list called "app".
     """
     normalized = " ".join(text.split())
+    if (match := _NOTE.match(text.strip())) and len(match["text"].strip()) <= NOTE_TEXT_LIMIT:
+        return DirectAction(type="note_add", text=match["text"].strip())
     if (match := _REMEMBER.match(normalized)) and len(match["text"]) <= 300:
         return DirectAction(type="remember", text=match["text"], kind="fact")
     if _LIST_ROUTINES.match(normalized):

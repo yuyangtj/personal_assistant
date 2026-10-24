@@ -306,3 +306,60 @@ def test_a_real_export_with_odd_notes_loses_nothing(database: Database, tmp_path
     assert by_key["13"].body == "see https://example.com/a for more\n\nLinks: https://example.com/b"
     assert by_key["14"].title == ".terraform.lock.hcl"
     assert by_key["15"].title == "check errors"
+
+
+def test_an_export_holds_every_note_with_its_details(database: Database) -> None:
+    import json as jsonlib
+    import zipfile as zipfilelib
+
+    service = NoteService(database)
+    service.create(title="Pasta night", body="Boil water", tags=["Recipes", "Dinner"], pinned=True)
+    service.create(
+        title="Shopping",
+        checklist=[{"text": "milk", "done": True}, {"text": "eggs"}],
+        tags=["Home"],
+    )
+    service.create(body="No title here, just a line\nand another")
+    archived = service.create(title="Old plans")
+    service.update(archived.id, archived=True)
+    service.create(title="Pasta night")  # the same title twice must not clash
+
+    data = service.export_zip()
+
+    archive = zipfilelib.ZipFile(io.BytesIO(data))
+    names = archive.namelist()
+    assert names[0] == "notes.json"
+    assert len(names) == 1 + 5 and len(set(names)) == len(names)
+    exported = jsonlib.loads(archive.read("notes.json"))
+    assert exported["count"] == 5
+    by_title = {note["title"]: note for note in exported["notes"] if note["title"]}
+    assert by_title["Shopping"]["checklist"] == [
+        {"text": "milk", "done": True},
+        {"text": "eggs", "done": False},
+    ]
+    assert by_title["Pasta night"]["tags"] in (["Recipes", "Dinner"], [])
+    assert by_title["Old plans"]["archived"] is True
+    markdown = {name: archive.read(name).decode() for name in names if name.endswith(".md")}
+    pasta = next(text for text in markdown.values() if "Boil water" in text)
+    assert pasta.startswith("---\ncreated: ")
+    assert 'tags: ["Recipes", "Dinner"]' in pasta and "pinned: true" in pasta
+    assert "# Pasta night\n\nBoil water\n" in pasta
+    shopping = next(text for text in markdown.values() if "# Shopping" in text)
+    assert shopping.rstrip().endswith("- [x] milk\n- [ ] eggs")
+    untitled = next(text for text in markdown.values() if "No title here" in text)
+    assert "# " not in untitled.split("---", 2)[2]
+    assert any(name.startswith("markdown/no-title-here-just-a-line-") for name in names)
+
+
+def test_the_export_endpoint_downloads_a_zip(client: TestClient) -> None:
+    import zipfile as zipfilelib
+
+    client.post("/notes", json={"title": "Ideas", "tags": ["Home"]})
+
+    response = client.get("/notes/export")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert response.headers["content-disposition"].startswith('attachment; filename="notes-20')
+    archive = zipfilelib.ZipFile(io.BytesIO(response.content))
+    assert "notes.json" in archive.namelist() and len(archive.namelist()) == 2
