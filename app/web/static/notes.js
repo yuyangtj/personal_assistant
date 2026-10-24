@@ -73,6 +73,7 @@ function noteEditor(note) {
     <textarea class="note-edit-list" rows="${Math.min(12, note.checklist.length + 2)}" aria-label="Checklist">${esc(checklistText(note.checklist))}</textarea>
     <label class="sub">Tags</label>
     <input class="note-edit-tags" value="${esc(note.tags.join(", "))}" placeholder="Tags, separated by commas" aria-label="Tags">
+    <div class="sub note-edit-dates">Edited ${esc(noteTime(note.updated_at))} · Created ${esc(noteTime(note.created_at))}</div>
     <div class="row wrap">
       <button type="button" class="quiet" data-note-action="pin">${note.pinned ? "Unpin" : "Pin"}</button>
       <button type="button" class="quiet" data-note-action="archive">${note.archived ? "Unarchive" : "Archive"}</button>
@@ -92,6 +93,15 @@ const NOTE_ICONS = {
 };
 const noteIcon = (name) => `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NOTE_ICONS[name]}</svg>`;
+// "Oct 24" this year, "Oct 24, 2018" before; hovering gives the exact time.
+function noteDate(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const options = { month: "short", day: "numeric" };
+  if (date.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  return date.toLocaleDateString(undefined, options);
+}
+const noteTime = (iso) => { const date = new Date(iso); return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(); };
 const noteTool = (action, label, icon, extra = "") =>
   `<button type="button" class="note-tool ${extra}" data-note-action="${action}" aria-label="${label}" title="${label}">${icon}</button>`;
 
@@ -115,18 +125,20 @@ function noteCard(note) {
   const tags = tagging ? noteTagger(note) : note.tags.length ? `<div class="note-meta">${note.tags.map((tag) =>
     `<button type="button" class="note-tag" data-note-filter="${esc(tag)}">${esc(tag)}</button>`).join("")}</div>` : "";
   return `<div class="note ${tagging ? "tagging" : ""}" data-note="${esc(note.id)}" tabindex="0"
-      aria-label="Note ${esc(note.title || note.body.slice(0, 40))}" title="Changed ${esc(String(note.updated_at).slice(0, 10))}">
+      aria-label="Note ${esc(note.title || note.body.slice(0, 40))}">
     ${noteTool("pin", note.pinned ? "Unpin" : "Pin", noteIcon("pin"), "note-pin" + (note.pinned ? " on" : ""))}
     ${note.title ? `<div class="note-title">${esc(note.title)}</div>` : ""}
     ${note.body ? `<div class="note-body">${esc(note.body)}</div>` : ""}
     ${list}
     ${tags}
-    <div class="note-tools">
+    <div class="note-foot">
+      <span class="note-date" title="Edited ${esc(noteTime(note.updated_at))}&#10;Created ${esc(noteTime(note.created_at))}">Edited ${esc(noteDate(note.updated_at))}</span>
+      <div class="note-tools">
       ${noteTool("tag", tagging ? "Done with tags" : "Tags", noteIcon("tag"), tagging ? "on" : "")}
       ${noteTool("archive", note.archived ? "Unarchive" : "Archive", noteIcon(note.archived ? "unarchive" : "archive"))}
       ${armed ? `<button type="button" class="note-tool danger-armed" data-note-action="delete" aria-label="Tap again to delete">Delete?</button>`
         : noteTool("delete", "Delete", noteIcon("delete"))}
-    </div></div>`;
+      </div></div></div>`;
 }
 
 function renderNotes() {
