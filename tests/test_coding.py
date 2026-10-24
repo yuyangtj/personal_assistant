@@ -456,7 +456,7 @@ def test_kimi_runner_configures_its_model_through_the_environment(
     assert call["command"][0] == "kimi"
     assert "--model" not in call["command"]
     environment = call["environment"]
-    assert environment["KIMI_MODEL_NAME"] == "kimi-for-coding"
+    assert environment["KIMI_MODEL_NAME"] == "k3.1-pro"
     assert environment["KIMI_MODEL_API_KEY"] == "kimi-secret"
     assert environment["KIMI_MODEL_BASE_URL"] == "https://api.kimi.com/coding/v1"
     assert "KIMI_API_KEY" not in environment

@@ -45,6 +45,10 @@ from app.coding.reports import coding_prompt, text_report
 from app.execution.fake import ExecutionCancelled
 from app.providers import InMemoryProviderStateStore, ProviderStateStore
 
+#: Kimi Code's model when ASSISTANT_KIMI_CODE_MODEL is empty. K3.1 Pro was slower than
+#: kimi-for-coding (K2.8 Preview) on a small task (89 s vs 14 s) but more careful.
+DEFAULT_KIMI_CODE_MODEL = "k3.1-pro"
+
 
 class CodexCliRunner:
     """Runs Codex non-interactively with workspace-only write access."""
@@ -143,7 +147,7 @@ class KimiCodeCliRunner:
         api_key: str,
         base_url: str,
         executable: str = "kimi",
-        model: str = "kimi-for-coding",
+        model: str = DEFAULT_KIMI_CODE_MODEL,
     ):
         if not api_key:
             raise ValueError("A Kimi API key is required for Kimi Code")

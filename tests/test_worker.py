@@ -584,7 +584,7 @@ def test_kimi_code_runner_gets_model_endpoint_and_is_skipped_without_a_key() -> 
     )
     assert [runner.provider for runner in configured] == ["kimi-code", "minimax-claude-code"]
     kimi = configured[0]
-    assert (kimi.model, kimi.base_url) == ("kimi-for-coding", "https://api.kimi.com/coding/v1")
+    assert (kimi.model, kimi.base_url) == ("k3.1-pro", "https://api.kimi.com/coding/v1")
 
     without_kimi = _build_code_agent_runners(
         Settings(code_agent_providers="kimi,minimax-claude", minimax_api_key="minimax-secret")

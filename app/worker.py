@@ -21,6 +21,7 @@ from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecu
 from app.coding.reconcile import PullRequestReconciler
 from app.coding.review import DiffReviewer
 from app.coding.runners import (
+    DEFAULT_KIMI_CODE_MODEL,
     ClaudeCodeMiniMaxRunner,
     CodexCliRunner,
     FallbackCodeAgentRunner,
@@ -280,7 +281,7 @@ def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
                         api_key=settings.kimi_api_key,
                         base_url=settings.kimi_base_url,
                         executable=settings.kimi_code_executable,
-                        model=settings.kimi_code_model or "kimi-for-coding",
+                        model=settings.kimi_code_model or DEFAULT_KIMI_CODE_MODEL,
                     )
                 )
             else:

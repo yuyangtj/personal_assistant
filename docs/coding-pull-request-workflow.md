@@ -117,7 +117,7 @@ The coding runner settings are:
 | --- | --- |
 | `ASSISTANT_CODE_AGENT_PROVIDERS` | `kimi,minimax-claude,codex` |
 | `ASSISTANT_KIMI_CODE_EXECUTABLE` | `kimi` |
-| `ASSISTANT_KIMI_CODE_MODEL` | `kimi-for-coding` |
+| `ASSISTANT_KIMI_CODE_MODEL` | `k3.1-pro` |
 | `ASSISTANT_CLAUDE_CODE_EXECUTABLE` | `claude` |
 | `ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL` | `https://api.minimaxi.com/anthropic` |
 | `ASSISTANT_MINIMAX_CODE_MODEL` | Claude Code/provider default |
