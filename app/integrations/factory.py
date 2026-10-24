@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from app.config import Settings
 from app.integrations.chat import ChatClient
+from app.integrations.deepseek import DeepSeekChatClient
 from app.integrations.fallback import FallbackChatClient
 from app.integrations.kimi import KimiChatClient
 from app.integrations.minimax import MiniMaxChatClient
 
+#: Chat providers. "auto" falls back from Kimi to MiniMax, and from the others to Kimi.
+CHAT_PROVIDERS = frozenset({"kimi", "minimax", "deepseek"})
 
-def provider_order(primary: str, fallback: str | None) -> tuple[str, ...]:
+
+def provider_order(
+    primary: str, fallback: str | None, *, supported: frozenset[str] = CHAT_PROVIDERS
+) -> tuple[str, ...]:
     normalized_primary = primary.strip().lower()
-    supported = {"kimi", "minimax"}
     if normalized_primary not in supported:
         raise ValueError(f"Unsupported model provider: {normalized_primary}")
     if fallback is None or fallback.strip().lower() in {"", "none", "off", "disabled"}:
@@ -44,6 +49,20 @@ def build_chat_client(
                 timeout_seconds
                 or settings.conversation_model_timeout_seconds
                 or settings.kimi_timeout_seconds
+            ),
+        )
+    if provider == "deepseek":
+        if not settings.deepseek_api_key:
+            return None
+        return DeepSeekChatClient(
+            api_key=settings.deepseek_api_key,
+            base_url=base_url_override or settings.deepseek_base_url,
+            model=model_override or settings.deepseek_model,
+            thinking=settings.deepseek_thinking,
+            timeout_seconds=(
+                timeout_seconds
+                or settings.conversation_model_timeout_seconds
+                or settings.deepseek_timeout_seconds
             ),
         )
     if not settings.minimax_api_key:

@@ -86,8 +86,16 @@ class Toolbox:
         lines += [f"- {t.name} {t.arguments}: {t.does}" for t in self._tools.values()]
         return "\n".join(lines)
 
+    def _find(self, name: str) -> AssistantTool | None:
+        """The tool by name; models sometimes drop the underscore ("listadd")."""
+        if name in self._tools:
+            return self._tools[name]
+        squashed = name.replace("_", "").replace("-", "").lower()
+        matches = [t for n, t in self._tools.items() if n.replace("_", "") == squashed]
+        return matches[0] if len(matches) == 1 else None
+
     def shows(self, name: str, arguments: dict[str, Any]) -> str:
-        tool = self._tools.get(name)
+        tool = self._find(name)
         if tool is None or tool.shows is None:
             return "Looking something up"
         try:
@@ -96,7 +104,7 @@ class Toolbox:
             return "Looking something up"
 
     def run(self, name: str, arguments: dict[str, Any], context: ToolContext) -> ToolOutcome:
-        tool = self._tools.get(name)
+        tool = self._find(name)
         if tool is None:
             return ToolOutcome(f"error: there is no tool called {name!r}")
         try:

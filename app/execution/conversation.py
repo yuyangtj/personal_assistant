@@ -19,7 +19,11 @@ from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.execution.routine_context import notable, routine_prompt
 from app.integrations.chat import ChatClient, ChatMessage
-from app.integrations.model_json import extract_arrow_tool_call, extract_json_object
+from app.integrations.model_json import (
+    extract_arrow_tool_call,
+    extract_dsml_tool_calls,
+    extract_json_object,
+)
 from app.repositories.briefs import RepositoryBriefs
 
 logger = logging.getLogger(__name__)
@@ -32,6 +36,18 @@ MAX_TOOL_CALLS = 6
 MAX_TOKENS = 1200
 TOOLS_EXHAUSTED_REPLY = (
     "I tried a few things but couldn't finish that. Could you say more precisely what you need?"
+)
+#: A reply that says something was saved, added or set.
+_CLAIMS_DONE = re.compile(
+    r"\b(?:i've|i have)\s+(?:also\s+)?(?:added|saved|set|noted|created|started|put|"
+    r"remembered|scheduled)\b|\bi(?:'ll| will)\s+remember\b|"
+    r"\b(?:added|saved|noted)\s+(?:it|that|“|\"|to|on|in)\b|"
+    r"\breminder(?:'s| is)?\s+(?:is\s+)?(?:now\s+)?set\b|\bi've got it saved\b",
+    re.IGNORECASE,
+)
+DID_NOTHING = (
+    "You said that is done, but you made no tool call, so nothing happened. If the user "
+    "asked for it, make the tool calls now; otherwise answer again without claiming it."
 )
 INVALID_ACTION_REPLY = (
     "Sorry, I couldn't prepare that on your phone. Could you say it again with the day and time?"
@@ -136,10 +152,20 @@ class ConversationExecutor:
         # The agent may use its tools before it answers, a few calls at most.
         # One reply may hold several calls ("remember this, add that, remind me"); they run
         # in order and their results go back together.
-        while self.toolbox and (batch := requested_tools(completion.text)):
+        nudged = False
+        while self.toolbox and (
+            (batch := requested_tools(completion.text))
+            or (not nudged and not calls and _claims_done(completion.text, context or {}))
+        ):
             if is_cancelled():
                 raise ExecutionCancelled(f"Task {task_id} was cancelled")
             messages.append(ChatMessage("assistant", completion.text[:2000]))
+            if not batch:
+                # It said it saved or set something without calling a tool: ask once.
+                nudged = True
+                messages.append(ChatMessage("user", DID_NOTHING))
+                completion = self.client.complete(messages, max_tokens=MAX_TOKENS)
+                continue
             if calls >= MAX_TOOL_CALLS:
                 messages.append(
                     ChatMessage("user", "No more tool calls: answer now as the JSON reply.")
@@ -346,12 +372,20 @@ def tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
+def _claims_done(text: str, context: Mapping[str, Any]) -> bool:
+    """A plain answer (no phone action) saying something was saved, added or set."""
+    reply, _, action = parse_model_output(text, context=context)
+    return action is None and bool(_CLAIMS_DONE.search(reply))
+
+
 def requested_tools(text: str) -> list[tuple[str, dict[str, Any]]]:
     """Every tool call in a reply, in order; empty for a plain answer.
 
     Models sometimes write several {"tool": ...} objects back to back, which is not one
     JSON object: shown as is, the user would see raw JSON instead of an answer.
     """
+    if native := extract_dsml_tool_calls(text):  # DeepSeek's own syntax
+        return [(call["tool"], call["arguments"]) for call in native]
     if (single := tool_call(text)) is not None:
         return [single]
     cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)

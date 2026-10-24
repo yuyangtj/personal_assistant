@@ -43,3 +43,45 @@ def extract_arrow_tool_call(text: str) -> dict[str, Any] | None:
         "tool": tool.group("tool"),
         "arguments": arguments if isinstance(arguments, dict) else {},
     }
+
+
+_DSML_INVOKE = re.compile(r'invoke\s+name\s*=\s*"(?P<tool>[^"]+)"')
+_DSML_PARAMETER = re.compile(
+    r'parameter\s+name\s*=\s*"(?P<name>[^"]+)"(?:\s+string\s*=\s*"(?P<string>true|false)")?'
+    r"\s*>?(?P<value>.*?)(?=</|<\uff5c|\Z)",
+    re.DOTALL,
+)
+
+
+def extract_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Tool calls in DeepSeek's native syntax, in order; empty when there are none.
+
+    DeepSeek sometimes answers ``<｜DSML｜invoke name="x"> <｜DSML｜parameter name="k"
+    string="true">v</｜DSML｜parameter>`` (often mangled, with the ``>`` missing, or a
+    JSON object in place of the parameters) instead of the JSON it was asked for.
+    """
+    if "DSML" not in text:
+        return []
+    invokes = list(_DSML_INVOKE.finditer(text))
+    calls = []
+    for index, invoke in enumerate(invokes):
+        end = invokes[index + 1].start() if index + 1 < len(invokes) else len(text)
+        body = text[invoke.end() : end]
+        arguments: dict[str, Any] = {}
+        for parameter in _DSML_PARAMETER.finditer(body):
+            raw = parameter["value"].strip()
+            if parameter["string"] == "false":
+                try:
+                    arguments[parameter["name"]] = json.loads(raw)
+                    continue
+                except ValueError:
+                    pass
+            arguments[parameter["name"]] = raw
+        if not arguments and (start := body.find("{")) != -1:
+            try:
+                value, _ = json.JSONDecoder().raw_decode(body[start:])
+            except ValueError:
+                value = {}
+            arguments = value if isinstance(value, dict) else {}
+        calls.append({"tool": invoke["tool"], "arguments": arguments})
+    return calls
