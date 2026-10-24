@@ -1,0 +1,7 @@
+id: routines
+name: Routines
+summary: Do something for the user on a schedule and report back, such as summarising open work or checking offers.
+example: "every Monday at 8, summarize my open work"
+kind: job
+band: free
+order: 50

@@ -58,19 +58,6 @@ Curious, Excited, Concerned, Neutral>", "action": <one action object or null>,
 or omitted}."""
 
 
-#: What the assistant really does besides chatting. The agent once promised "an inspection
-#: workflow will start" for a request, though nothing of the kind exists; it may only
-#: mention what is listed here.
-ASSISTANT_CAPABILITIES = """
-What the assistant can do for the user besides chatting (offer these when they fit; never
-promise anything else, and never invent a workflow, tool or step):
-- Save a note ("note: ..."), remember a fact ("remember that ..."), keep lists and
-  reminders ("add milk to #groceries", "remind me tomorrow at 9 to call mum").
-- Track ongoing work as work items (#tag).
-- Start a coding workflow on one of the registered repositories; the user approves the pull
-  request before anything is merged."""
-
-
 #: Added when the web research agent is installed, instead of a flat "can't browse".
 RESEARCH_HANDOFF = """
 You cannot browse the web yourself, but the assistant's research agent can. If the user
@@ -95,6 +82,8 @@ class ConversationExecutor:
         self.research_available = research_available
         #: Tells the agent about the user's repositories (set where the worker is wired).
         self.repository_briefs: RepositoryBriefs | None = None
+        #: What the assistant can do, generated from abilities/*.yaml (set by the worker).
+        self.abilities_text: str | None = None
 
     def execute(
         self,
@@ -144,7 +133,7 @@ class ConversationExecutor:
     ) -> list[ChatMessage]:
         prompt = (
             SYSTEM_PROMPT
-            + ASSISTANT_CAPABILITIES
+            + (f"\n{self.abilities_text}" if self.abilities_text else "")
             + (RESEARCH_HANDOFF if self.research_available else "")
         )
         messages = [ChatMessage("system", f"{prompt}\n{self._clock(context)}")]

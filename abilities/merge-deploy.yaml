@@ -1,0 +1,6 @@
+id: merge-deploy
+name: Merging and deploying
+summary: Merging a pull request or deploying needs the user's own approval in the console; the assistant never does it.
+kind: job
+band: never
+order: 120

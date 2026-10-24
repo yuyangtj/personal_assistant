@@ -1,0 +1,7 @@
+id: notes
+name: Notes
+summary: Save a note to the user's Notes when they ask; notes are never read by a model.
+example: "note: call the dentist on Monday"
+kind: quick
+band: free
+order: 10
