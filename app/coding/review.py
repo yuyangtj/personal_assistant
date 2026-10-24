@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from app.coding.git import git
+from app.coding.git import git, stage_everything
 from app.integrations.chat import ChatClient, ChatMessage
 from app.integrations.model_json import extract_json_object
 
@@ -67,7 +67,7 @@ class DiffReviewer:
 
 def _review_input(reference: str, worktree: Path, validation: list[dict[str, Any]]) -> str:
     # Stage everything so new files show up; the executor commits all of it next anyway.
-    git(worktree, "add", "-A")
+    stage_everything(worktree)
     diff = git(worktree, "diff", "--cached", timeout=30)
     if len(diff) > MAX_DIFF_CHARS:
         diff = diff[:MAX_DIFF_CHARS] + "\n… diff truncated; judge only what is shown"

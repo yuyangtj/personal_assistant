@@ -17,7 +17,14 @@ from app.coding.base import (
     RunnerAttempt,
     safe_agent_environment,
 )
-from app.coding.git import delete_git_ref, git, git_ref_exists, safe_ref, share_repository
+from app.coding.git import (
+    delete_git_ref,
+    git,
+    git_ref_exists,
+    safe_ref,
+    share_repository,
+    stage_everything,
+)
 from app.coding.process import optional, report_milestone
 from app.coding.reports import (
     coding_output,
@@ -374,9 +381,10 @@ class CodingPullRequestExecutor:
             )
             if is_cancelled():
                 raise ExecutionCancelled("Coding task was cancelled")
-            if not git(worktree, "status", "--porcelain").strip():
+            stage_everything(worktree)  # without __pycache__ and the like
+            if not git(worktree, "diff", "--cached", "--name-only").strip():
                 raise CodingAgentError("Coding agent completed without repository changes")
-            git(worktree, "diff", "--check")
+            git(worktree, "diff", "--cached", "--check")
             report_milestone(progress, "Agent finished; running validation")
             validation, report, attempts = self._validate_with_repair(
                 task_id=task_id,
@@ -412,7 +420,7 @@ class CodingPullRequestExecutor:
                     report=report.model_dump(mode="json"),
                     runner_attempts=attempts,
                 )
-            git(worktree, "add", "-A")
+            stage_everything(worktree)
             git(
                 worktree,
                 "-c",
@@ -633,7 +641,7 @@ class CodingPullRequestExecutor:
         saved_branch = f"{branch}-validation-failed"
         step = failed_required_step(results).get("id", "unknown")
         try:
-            git(worktree, "add", "-A")
+            stage_everything(worktree)
             git(
                 worktree,
                 "-c",
