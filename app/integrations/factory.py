@@ -6,11 +6,12 @@ from app.config import Settings
 from app.integrations.chat import ChatClient
 from app.integrations.deepseek import DeepSeekChatClient
 from app.integrations.fallback import FallbackChatClient
+from app.integrations.gemini import GeminiChatClient
 from app.integrations.kimi import KimiChatClient
 from app.integrations.minimax import MiniMaxChatClient
 
 #: Chat providers. "auto" falls back from Kimi to MiniMax, and from the others to Kimi.
-CHAT_PROVIDERS = frozenset({"kimi", "minimax", "deepseek"})
+CHAT_PROVIDERS = frozenset({"kimi", "minimax", "deepseek", "gemini"})
 
 
 def provider_order(
@@ -63,6 +64,18 @@ def build_chat_client(
                 timeout_seconds
                 or settings.conversation_model_timeout_seconds
                 or settings.deepseek_timeout_seconds
+            ),
+        )
+    if provider == "gemini":
+        if not settings.gemini_api_key:
+            return None
+        return GeminiChatClient(
+            api_key=settings.gemini_api_key,
+            base_url=base_url_override or settings.gemini_base_url,
+            model=model_override or settings.gemini_model,
+            reasoning_effort=settings.gemini_reasoning_effort or None,
+            timeout_seconds=(
+                timeout_seconds or settings.conversation_model_timeout_seconds or 30.0
             ),
         )
     if not settings.minimax_api_key:

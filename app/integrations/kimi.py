@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import httpx
 
@@ -10,6 +11,9 @@ from app.integrations.chat import (
     ChatMessage,
     ProviderError,
     post_within,
+    read_tool_calls,
+    reasoning_extra,
+    wire_messages,
 )
 from app.manager.model.contracts import ManagerModelRequest, ModelInvocation
 
@@ -25,6 +29,8 @@ class KimiChatClient:
     """Minimal OpenAI-compatible chat client for the Kimi API."""
 
     provider = "kimi"
+    #: Takes ``tools`` and returns the model's calls (OpenAI-style tool calling).
+    supports_tools = True
 
     def __init__(
         self,
@@ -48,14 +54,20 @@ class KimiChatClient:
             transport=transport,
         )
 
-    def complete(self, messages: list[ChatMessage], *, max_tokens: int = 700) -> ChatCompletion:
+    def complete(
+        self,
+        messages: list[ChatMessage],
+        *,
+        max_tokens: int = 700,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> ChatCompletion:
         payload = {
             "model": self.model,
             "max_tokens": max_tokens,
-            "messages": [
-                {"role": message.role, "content": message.content} for message in messages
-            ],
+            "messages": wire_messages(messages),
         }
+        if tools:
+            payload["tools"] = tools
         try:
             response = post_within(
                 self._client,
@@ -69,7 +81,8 @@ class KimiChatClient:
             raise KimiError(f"Kimi returned HTTP {response.status_code}")
         try:
             body = response.json()
-            text = body["choices"][0]["message"].get("content") or ""
+            message = body["choices"][0]["message"]
+            text = message.get("content") or ""
         except (ValueError, KeyError, IndexError, TypeError) as error:
             raise KimiError("Kimi returned an unexpected response shape") from error
         usage = body.get("usage") or {}
@@ -79,6 +92,8 @@ class KimiChatClient:
             input_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("completion_tokens"),
             provider=self.provider,
+            tool_calls=read_tool_calls(message),
+            extra=reasoning_extra(message),
         )
 
     def close(self) -> None:
