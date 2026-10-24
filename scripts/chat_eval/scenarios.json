@@ -46,12 +46,20 @@
   },
   {
     "name": "several-things-at-once",
-    "about": "One message, three requests: the instant 'remember' rule once saved it all as one memory.",
-    "lists": ["Groceries"],
+    "about": "One message, three requests: the instant 'remember' rule once saved it all as one memory. No groceries list exists yet.",
     "turns": [
       {"say": "remember I like oat milk, add it to groceries, and remind me tomorrow at 9",
        "expect": {"route": "chat reply", "tools_all": ["remember", "list_add", "remind"]},
        "main_expect": {"route": "main agent", "tools_all": ["remember", "list_add", "remind"]}}
+    ]
+  },
+  {
+    "name": "start-a-list",
+    "about": "A list that doesn't exist yet: the agent starts it instead of asking the user to.",
+    "turns": [
+      {"say": "start a packing list for the trip: passport, charger and sunscreen",
+       "expect": {"route": "chat reply", "tools_all": ["list_create", "list_add"]},
+       "main_expect": {"route": "main agent", "tools_all": ["list_create", "list_add"]}}
     ]
   },
   {

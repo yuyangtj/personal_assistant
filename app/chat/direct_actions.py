@@ -15,7 +15,7 @@ from typing import Any
 
 from app.chat.routines import describe, find_routines, is_watch, start_routine
 from app.chat.triage import DirectAction
-from app.domain.work_items import WorkItemKind
+from app.domain.work_items import GROCERY_LIST, WorkItemKind, is_grocery_list
 from app.persistence.models import utc_now
 from app.schedules import Recurrence, ScheduleKind, ScheduleService, zone
 from app.work.items import RESUMABLE_STATUSES, WorkItemNotFoundError, WorkItemService
@@ -44,6 +44,22 @@ def _target_item(action: DirectAction, chat_session_id: str, items: WorkItemServ
     if len(lists) == 1:
         return lists[0]
     raise WorkItemNotFoundError("ambiguous")
+
+
+def _list_to_add_to(action: DirectAction, chat_session_id: str, items: WorkItemService):
+    """The list an entry goes on, and whether it was just created for it.
+
+    The shopping list is never missing: "add oat milk to groceries" starts it.
+    """
+    try:
+        return _target_item(action, chat_session_id, items), False
+    except WorkItemNotFoundError:
+        if not is_grocery_list(action.work_item):
+            raise
+    try:
+        return items.get(GROCERY_LIST), False
+    except WorkItemNotFoundError:
+        return items.create(title="Groceries", kind=WorkItemKind.LIST), True
 
 
 def _schedule(
@@ -200,8 +216,12 @@ def run_direct_action(
         return DirectActionResult(True, f"I'll remember that: {action.text}")
     if action.type == "forget":
         return _forget(action.text, memory)
+    created = False
     try:
-        item = _target_item(action, chat_session_id, items)
+        if action.type == "checklist_add":
+            item, created = _list_to_add_to(action, chat_session_id, items)
+        else:
+            item = _target_item(action, chat_session_id, items)
     except WorkItemNotFoundError:
         named = f"#{action.work_item.lstrip('#')}" if action.work_item else "which list"
         return DirectActionResult(
@@ -211,7 +231,11 @@ def run_direct_action(
         )
     if action.type == "checklist_add":
         items.add_checklist_entry(item.id, action.text)
-        return DirectActionResult(True, f"Added “{action.text}” to #{item.slug}.", item.slug)
+        if created:
+            reply = f"Started your #{item.slug} list with “{action.text}”."
+        else:
+            reply = f"Added “{action.text}” to #{item.slug}."
+        return DirectActionResult(True, reply, item.slug)
     wanted = action.text.lower()
     matches = [
         entry

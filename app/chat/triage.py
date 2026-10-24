@@ -19,6 +19,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.domain.proposals import propose_task
+from app.domain.work_items import GROCERY_LIST, is_grocery_list
 from app.integrations.chat import ChatClient, ChatMessage, correction_turns
 from app.integrations.model_json import extract_json_object
 from app.repositories import RepositoryRegistry
@@ -150,9 +151,12 @@ Decide what the message needs:
   routines or watches they have; {"type": "run_routine", "text": which one} to run a
   saved routine now; {"type": "cancel_routine", "text": which one} to stop a routine or
   watch (not a coding agent). Resolve relative dates from the user's local time. Use
-  tags from work_items; null when the list is not named. A direct_action is exactly one
-  of these: when the message asks for several things ("remember I like oat milk, add it
-  to groceries and remind me tomorrow at 9"), use "answer", whose agent can do them all.
+  tags from work_items; when the user names a list that isn't there ("a packing list"),
+  put that name in "work_item"; null only when no list is named. The shopping list is
+  "groceries" (also "shopping list", "inköpslista"), even before it is in work_items.
+  A direct_action is exactly one of these: when the message asks for several things
+  ("remember I like oat milk, add it to groceries and remind me tomorrow at 9"), use
+  "answer", whose agent can do them all.
 For propose_task, set "space" to the best-fitting slug from spaces (or null).
 Set "needs_grocery_tools": true when the message is about grocery offers, prices, receipts,
 purchases or grocery spending at the user's stores (Willys, Lidl), or about the user's
@@ -237,11 +241,36 @@ def asks_several(text: str) -> bool:
     return bool(_SEVERAL.search(" ".join(text.split())))
 
 
+def _unknown_list_to_agent(decision: TriageDecision, work_items: Sequence[dict]) -> TriageDecision:
+    """Adding to a list that doesn't exist yet goes to the reply agent, which can start it.
+
+    The instant action could only refuse ("start a packing list: passport, charger").
+    """
+    action = decision.action
+    if (
+        decision.intent != TriageIntent.DIRECT_ACTION
+        or action is None
+        or action.type != "checklist_add"
+        or not action.work_item
+        or _known_tag(action.work_item.lstrip("#"), work_items) is not None
+    ):
+        return decision
+    return decision.model_copy(
+        update={"intent": TriageIntent.ANSWER, "action": None, "reason": "A new list."}
+    )
+
+
 def _known_tag(name: str | None, work_items: Sequence[dict]) -> str | None:
     """The tag of an existing work item named by #tag or by title; never a guess."""
     if not name:
         return None
     wanted = " ".join(name.lower().replace("-", " ").split())
+    if is_grocery_list(name):
+        # An existing list by that exact name wins; otherwise it's the shopping list.
+        for item in work_items:
+            if wanted == str(item.get("slug") or "").replace("-", " "):
+                return str(item["slug"])
+        return GROCERY_LIST
     for item in work_items:
         slug, title = str(item.get("slug") or ""), str(item.get("title") or "")
         if wanted in (slug.replace("-", " "), " ".join(title.lower().split())):
@@ -329,6 +358,7 @@ class Triager:
                     screen=screen,
                 )
                 decision = self._apply_rules(suggestion, text, selected=selected)
+                decision = _unknown_list_to_agent(decision, work_items)
                 if suggestion.about_work and decision.intent != TriageIntent.DIRECT_ACTION:
                     decision = decision.model_copy(update={"about_work": True})
                 return self._groceries(

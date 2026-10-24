@@ -39,6 +39,42 @@ def test_list_entries_are_added_and_ticked_off_without_a_model(client: TestClien
     assert client.get(f"/chat-sessions/{chat}/tasks").json()["tasks"] == []
 
 
+def test_the_shopping_list_starts_with_its_first_entry(client: TestClient) -> None:
+    chat = _chat(client)
+
+    first = _say(client, chat, "add oat milk to groceries")
+    second = _say(client, chat, "add bread to my shopping list")
+
+    assert first["decision"]["result"] == "Started your #groceries list with “oat milk”."
+    assert second["decision"]["result"] == "Added “bread” to #groceries."
+    (groceries,) = client.get("/work-items?kind=list").json()["work_items"]
+    assert (groceries["slug"], groceries["title"]) == ("groceries", "Groceries")
+    entries = client.get(f"/work-items/{groceries['id']}").json()["checklist"]
+    assert [entry["text"] for entry in entries] == ["oat milk", "bread"]
+    assert client.get(f"/chat-sessions/{chat}/tasks").json()["tasks"] == []
+
+
+def test_a_list_of_your_own_called_shopping_is_used_as_it_is(client: TestClient) -> None:
+    shopping = client.post("/work-items", json={"title": "Shopping", "kind": "list"}).json()
+    chat = _chat(client)
+
+    added = _say(client, chat, "add soap to #shopping")
+
+    assert added["decision"]["result"] == "Added “soap” to #shopping."
+    assert len(client.get("/work-items?kind=list").json()["work_items"]) == 1
+    assert client.get(f"/work-items/{shopping['id']}").json()["checklist"][0]["text"] == "soap"
+
+
+def test_only_the_shopping_list_is_started_by_itself() -> None:
+    from app.domain.work_items import is_grocery_list
+
+    assert all(
+        is_grocery_list(name)
+        for name in ["groceries", "#groceries", "Shopping list", "the grocery list", "inköpslista"]
+    )
+    assert not any(is_grocery_list(name) for name in [None, "", "camping", "app", "grocery-run"])
+
+
 def test_remember_saves_an_inspectable_memory(client: TestClient) -> None:
     chat = _chat(client)
 
@@ -68,7 +104,8 @@ def test_unknown_lists_and_coding_requests_are_not_acted_on(client: TestClient) 
     unknown = _say(client, chat, "add bread to the nope list")
 
     assert coding["decision"]["intent"] != "direct_action"
-    assert unknown["decision"]["result"].startswith("I couldn't tell #nope you meant")
+    # Not refused and not guessed: the reply agent, which can start the list, answers.
+    assert unknown["decision"]["intent"] == "answer"
     assert client.get("/work-items").json()["work_items"] == []
 
 
@@ -87,6 +124,23 @@ def test_model_actions_need_confidence() -> None:
     decision = triager.decide("maybe remember this?")
 
     assert (decision.intent, decision.action) == (TriageIntent.ANSWER, None)
+
+
+def test_adding_to_a_list_that_doesnt_exist_goes_to_the_agent() -> None:
+    def decide(work_item: str, work_items=()) -> TriageIntent:
+        action = {"type": "checklist_add", "text": "passport", "work_item": work_item}
+        triager = Triager(
+            RepositoryRegistry.from_directory("repositories"),
+            ScriptedChat(suggestion(intent="direct_action", action=action)),
+        )
+        return triager.decide("start a packing list: passport", work_items=work_items).intent
+
+    packing = [{"slug": "packing", "title": "Packing", "kind": "list"}]
+    # The reply agent can start the list; the instant action could only refuse.
+    assert decide("packing") == TriageIntent.ANSWER
+    assert decide("packing", packing) == TriageIntent.DIRECT_ACTION
+    # The shopping list starts itself, so it stays instant.
+    assert decide("groceries") == TriageIntent.DIRECT_ACTION
 
 
 def test_model_sees_existing_work_items_for_actions() -> None:

@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from app.assistant.toolbox import AssistantTool, ToolContext, ToolError, ToolOutcome
 from app.chat.direct_actions import DirectActionResult, run_direct_action
 from app.chat.triage import DirectAction
-from app.domain.work_items import WorkItemKind
+from app.domain.work_items import WorkItemKind, slugify
 from app.work.items import RESUMABLE_STATUSES
 
 #: The most open work items listed, and open checklist entries shown per item.
@@ -112,6 +112,17 @@ def bookkeeping_tools(
                 lines.append(f"    ... and {len(entries) - MAX_ENTRIES} more")
         return "\n".join(lines)
 
+    def list_create(arguments: dict[str, Any], context: ToolContext) -> str:
+        title = _text(arguments, "name")
+        if len(title) > 80:
+            raise ToolError("name is at most 80 characters")
+        wanted = title.lower().lstrip("#")
+        for item in items.list(kind=WorkItemKind.LIST, limit=200):
+            if wanted in (item.title.lower(), item.slug) or slugify(title) == item.slug:
+                return f"#{item.slug} already exists; add to it with list_add"
+        item = items.create(title=title, kind=WorkItemKind.LIST)
+        return f"Created the list #{item.slug}."
+
     tools = [
         AssistantTool(
             "work_items",
@@ -143,11 +154,21 @@ def bookkeeping_tools(
             "list_add",
             "lists",
             '{"text": "<the entry>", "list": "<the list\'s #tag; optional if obvious>"}',
-            "add one entry to a list (call it once per entry)",
+            "add one entry to a list (call it once per entry); #groceries is the shopping "
+            "list, started by the first entry",
             lambda a, c: act(
                 {"type": "checklist_add", "text": _text(a), "work_item": on_list(a)}, c
             ),
             lambda a: f"Adding “{_short(str(a.get('text') or ''))}”",
+        ),
+        AssistantTool(
+            "list_create",
+            "lists",
+            '{"name": "<the new list\'s name>"}',
+            "start a new list the user asked for, or one an entry should go on but that "
+            "doesn't exist yet",
+            list_create,
+            lambda a: f"Starting the {_short(str(a.get('name') or ''))} list",
         ),
         AssistantTool(
             "list_check",

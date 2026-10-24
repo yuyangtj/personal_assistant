@@ -1,6 +1,6 @@
 id: lists
 name: Lists
-summary: Add entries to the user's lists and tick them off.
+summary: "Start lists, add entries to them and tick them off. The shopping list, #groceries, starts with its first entry."
 example: "add oat milk to #groceries"
 kind: quick
 band: free

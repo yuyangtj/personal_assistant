@@ -94,6 +94,72 @@ def test_one_message_can_remember_add_to_a_list_and_save_a_note(
     assert {"type": "link", "href": "#/notes", "label": "Open Notes"} in result.output["blocks"]
 
 
+def test_the_agent_starts_lists_and_the_shopping_list_starts_itself(
+    client: TestClient, chat_id: str
+) -> None:
+    executor, chat = agent(
+        client,
+        call("list_create", name="Camping"),
+        call("list_add", text="tent", list="#camping"),
+        call("list_create", name="camping"),
+        call("list_add", text="oat milk", list="#groceries"),
+        reply("Started #camping with a tent, and oat milk is on your groceries."),
+    )
+
+    result = run(executor, chat_id, "pack a tent for camping, and buy oat milk")
+
+    results = [request[-1].content for request in chat.requests[1:]]
+    assert "Created the list #camping." in results[0]
+    assert "#camping already exists" in results[2]
+    assert "Started your #groceries list with “oat milk”." in results[3]
+    assert all(c["ok"] for c in result.output["tool_calls"])
+    lists = {i["slug"]: i for i in client.get("/work-items?kind=list").json()["work_items"]}
+    assert sorted(lists) == ["camping", "groceries"]
+    entries = client.get(f"/work-items/{lists['camping']['id']}").json()["checklist"]
+    assert [e["text"] for e in entries] == ["tent"]
+
+
+def test_several_calls_in_one_reply_all_run_in_order(client: TestClient, chat_id: str) -> None:
+    client.post("/work-items", json={"title": "Groceries", "kind": "list"})
+    executor, chat = agent(
+        client,
+        # As MiniMax wrote it: three objects back to back, one misspelled, the last cut off.
+        call("remember", text="I like oat milk", kind="preference")
+        + "\n"
+        + call("listadd", text="oat milk")
+        + " "
+        + call("list_add", text="oat milk", list="#groceries")
+        + '\n{"tool": "remind", "argum',
+        reply("Remembered and added; when should I remind you?"),
+    )
+
+    result = run(executor, chat_id, "remember I like oat milk and add it to groceries")
+
+    assert result.output["reply"] == "Remembered and added; when should I remind you?"
+    assert [(c["tool"], c["ok"]) for c in result.output["tool_calls"]] == [
+        ("remember", True),
+        ("listadd", False),
+        ("list_add", True),
+    ]
+    # One round trip: the three results went back together.
+    assert len(chat.requests) == 2
+    results = chat.requests[1][-1].content
+    assert results.count("END TOOL RESULT") == 3 and "no tool called 'listadd'" in results
+
+
+def test_raw_tool_json_is_never_shown_as_the_answer(client: TestClient, chat_id: str) -> None:
+    from app.execution.conversation import MAX_TOOL_CALLS
+
+    many = "\n".join(call("list_add", text=f"item {n}") for n in range(MAX_TOOL_CALLS + 2))
+    executor, chat = agent(client, many, many, many)
+
+    result = run(executor, chat_id, "add lots")
+
+    assert '"tool"' not in result.output["reply"]
+    assert len(result.output["tool_calls"]) <= MAX_TOOL_CALLS
+    assert "this one was not made" in chat.requests[1][-1].content
+
+
 def test_the_same_call_is_never_carried_out_twice(client: TestClient, chat_id: str) -> None:
     groceries = client.post("/work-items", json={"title": "Groceries", "kind": "list"}).json()
     executor, chat = agent(
