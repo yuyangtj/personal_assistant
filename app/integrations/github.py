@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import quote
 
 import httpx
 
@@ -358,13 +359,62 @@ class GitHubClient:
 
     def list_top_level(self, *, repository: str) -> list[str]:
         """Names in the repository's root, folders with a trailing slash."""
+        return self.list_directory(repository=repository, path="")
+
+    def list_directory(self, *, repository: str, path: str) -> list[str]:
+        """Names in a folder, folders with a trailing slash; GitHubError if it isn't one."""
         owner, name = _repository_parts(repository)
-        entries = self._request_list("GET", f"/repos/{owner}/{name}/contents")
+        suffix = f"/{quote(path)}" if path else ""
+        body = self._request_value("GET", f"/repos/{owner}/{name}/contents{suffix}")
+        if not isinstance(body, list):
+            raise GitHubError("That is a file, not a folder")
         return [
             f"{entry.get('name')}{'/' if entry.get('type') == 'dir' else ''}"
-            for entry in entries
-            if isinstance(entry.get("name"), str)
+            for entry in body
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str)
         ]
+
+    def read_file(self, *, repository: str, path: str, limit: int = 200_000) -> str | None:
+        """A file's text, or None when there is no such file."""
+        owner, name = _repository_parts(repository)
+        try:
+            response = self._client.request(
+                "GET",
+                f"/repos/{owner}/{name}/contents/{quote(path)}",
+                headers={"Accept": "application/vnd.github.raw+json"},
+            )
+        except httpx.HTTPError as error:
+            raise GitHubError(f"GitHub request failed: {type(error).__name__}") from error
+        if response.status_code == 404:
+            return None
+        if response.status_code not in range(200, 300):
+            raise GitHubError(f"GitHub returned HTTP {response.status_code}")
+        if response.headers.get("content-type", "").startswith("application/json"):
+            raise GitHubError("That is a folder, not a file")
+        return response.text[:limit]
+
+    def search_code(
+        self, *, repository: str, query: str, limit: int = 10
+    ) -> list[tuple[str, list[str]]]:
+        """Files whose code matches the query, each with a few matching fragments."""
+        _repository_parts(repository)
+        body = self._request(
+            "GET",
+            "/search/code",
+            params={"q": f"{query} repo:{repository}", "per_page": limit},
+            headers={"Accept": "application/vnd.github.text-match+json"},
+        )
+        found: list[tuple[str, list[str]]] = []
+        for item in body.get("items") or []:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                continue
+            fragments = [
+                str(match.get("fragment"))
+                for match in item.get("text_matches") or []
+                if isinstance(match, dict) and match.get("fragment")
+            ]
+            found.append((item["path"], fragments))
+        return found[:limit]
 
     def close(self) -> None:
         self._client.close()
