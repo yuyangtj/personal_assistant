@@ -122,7 +122,13 @@
           <button type="submit">Add</button></div>
       </form>
       <input id="note-search" type="search" placeholder="Search notes…" aria-label="Search notes">
-      <div id="note-tags-bar" class="note-tags-bar" aria-label="Filter by tag"></div>
+      <div class="note-tags-wrap">
+        <div id="note-tags-bar" class="note-tags-bar" aria-label="Filter by tag"></div>
+        <div id="note-tag-panel" class="note-tag-panel" hidden>
+          <input id="note-tag-filter" type="search" placeholder="Find a tag…" aria-label="Find a tag" autocomplete="off">
+          <div id="note-tag-list" class="note-tag-list"></div>
+        </div>
+      </div>
       <div id="note-error" class="err" role="alert"></div>
       <div id="note-list" class="note-grid"></div>
       <div id="note-more" class="note-more" hidden><button type="button" class="quiet">Show more notes</button></div>
