@@ -293,7 +293,7 @@ button.danger { background: var(--danger); color: #fff; }
 .note-form.expanded { padding: 8px 12px 10px; }
 .note-form.expanded .note-form-more { display: flex; }
 .note-form.expanded input#note-title { display: block; }
-.note-form input, .note-form textarea, #note-search, .note.editing input, .note.editing textarea { width: 100%; box-sizing: border-box; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; font: inherit; }
+.note-form input, .note-form textarea, #note-search { width: 100%; box-sizing: border-box; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; font: inherit; }
 .note-form input#note-title { border: 0; font-weight: 600; padding: 6px 2px; }
 .note-form textarea { border: 0; padding: 8px 2px; resize: none; overflow: hidden; min-height: 22px; line-height: 1.45; }
 .note-form textarea:focus-visible, .note-form input#note-title:focus-visible { outline: none; }
@@ -339,7 +339,6 @@ button.danger { background: var(--danger); color: #fff; }
 /* The action bar on each card, and the pin in its corner. */
 .note-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 6px; margin-top: 4px; }
 .note-date { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
-.note-edit-dates { margin: 8px 0 0; }
 .note-tools { display: flex; gap: 2px; justify-content: flex-end; margin-left: auto; }
 .note-tool { display: inline-flex; align-items: center; justify-content: center; background: transparent; color: var(--muted); border-radius: 999px; padding: 5px; min-width: 30px; min-height: 30px; }
 .note-tool:hover { background: var(--raised); color: var(--text); }
@@ -353,9 +352,6 @@ button.danger { background: var(--danger); color: #fff; }
   .note:hover .note-tools, .note:focus-within .note-tools, .note.tagging .note-tools,
   .note:hover .note-pin, .note:focus-within .note-pin { opacity: 1; }
 }
-.note.editing label.sub { display: block; margin: 8px 0 2px; }
-.note.editing .row { margin-top: 8px; gap: 8px; }
-.note.editing .row button { padding: 5px 10px; font-size: 12.5px; }
 .note .danger-armed { background: var(--danger-bg); color: var(--danger); }
 .keep-import { margin: 12px auto; background: var(--raised); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; max-width: 600px; }
 .keep-import .row { margin-top: 8px; }
@@ -368,3 +364,25 @@ button.danger { background: var(--danger); color: #fff; }
 .note-more { display: flex; justify-content: center; padding: 8px 0 24px; }
 .note-more[hidden] { display: none; }
 .tag-name { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+/* The note editor: borderless fields on one card, tags as chips, icons and Done. */
+.note.editing { padding: 12px 14px 8px; }
+.note.editing input.note-edit-title { display: block; width: 100%; box-sizing: border-box; background: transparent; color: var(--text); border: 0; padding: 4px 0 6px; font: inherit; font-weight: 600; font-size: 1.05rem; }
+.note.editing textarea.note-edit-body { display: block; width: 100%; box-sizing: border-box; background: transparent; color: var(--text); border: 0; padding: 4px 0; font: inherit; line-height: 1.45; resize: none; min-height: 96px; max-height: 50vh; overflow-y: auto; }
+.note.editing input.note-edit-title:focus-visible, .note.editing textarea.note-edit-body:focus-visible, .note-edit-text:focus-visible { outline: none; }
+.note-edit-items { margin: 2px 0 4px; }
+.note-edit-item { display: flex; align-items: center; gap: 8px; padding: 1px 0; }
+.note-edit-item .note-untag { opacity: .5; }
+.note-edit-item:hover .note-untag, .note-edit-item:focus-within .note-untag { opacity: 1; }
+.note-edit-text { flex: 1; min-width: 0; background: transparent; color: var(--text); border: 0; border-bottom: 1px solid transparent; padding: 5px 2px; font: inherit; }
+.note-edit-text:focus { border-bottom-color: var(--border-strong); }
+.note-edit-text.done { text-decoration: line-through; color: var(--muted); }
+.note-add-item { background: transparent; color: var(--muted); padding: 5px 2px; font-size: 13px; }
+.note-add-item:hover { color: var(--text); }
+.note.editing .note-tagger { margin-top: 6px; }
+.note-edit-error { margin-top: 6px; }
+.note.editing .note-foot { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; flex-wrap: nowrap; }
+.note.editing .note-tools { opacity: 1; margin-left: 0; }
+.note.editing .note-date { flex: 1; text-align: center; }
+.note-tool.pinned.on svg { fill: currentColor; }
+.note-done { padding: 6px 16px; }
+@media (max-width: 420px) { .note.editing .note-date { display: none; } .note.editing .note-foot { justify-content: space-between; } }
