@@ -452,6 +452,7 @@ class KeepImportResponse(BaseModel):
     already_here: int
     trashed_skipped: int
     images_skipped: int
+    empty_skipped: int
     unreadable: int
 
 

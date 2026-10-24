@@ -13,7 +13,7 @@ import zipfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -42,6 +42,8 @@ class KeepImportResult:
     already_here: int = 0
     trashed_skipped: int = 0
     images_skipped: int = 0
+    #: Notes with no text, checklist or title (often just an image): nothing to keep.
+    empty_skipped: int = 0
     unreadable: int = 0
 
     def as_dict(self) -> dict[str, int]:
@@ -179,10 +181,13 @@ class NoteService:
                 except (ValueError, UnicodeDecodeError, KeyError, TypeError):
                     counts["unreadable"] += 1
                     continue
-                if note is None:
+                if note == "trashed":
                     counts["trashed_skipped"] += 1
                     continue
                 counts["images_skipped"] += len(raw.get("attachments") or [])
+                if note == "empty":
+                    counts["empty_skipped"] += 1
+                    continue
                 notes.append(note)
         with self.database.session() as session, session.begin():
             keys = [note.source_key for note in notes]
@@ -207,19 +212,29 @@ class NoteService:
         return KeepImportResult(**counts)
 
 
-def _keep_note(raw: Any) -> NoteModel | None:
-    """A note from one Keep JSON file; None for a trashed note. Raises on a broken file."""
+def _keep_note(raw: Any) -> NoteModel | Literal["trashed", "empty"]:
+    """A note from one Keep JSON file, or why there is none. Raises on a broken file."""
     if not isinstance(raw, dict):
         raise ValueError("not a Keep note")
     if raw.get("isTrashed"):
-        return None
-    title = str(raw.get("title") or "").strip()[:MAX_TITLE]
+        return "trashed"
+    original_title = str(raw.get("title") or "").strip()
+    title = " ".join(original_title.split())  # a title can span lines in Keep
     body = str(raw.get("textContent") or "")
+    if len(title) > MAX_TITLE:
+        # Pasted text ended up in the title: keep all of it, with the text.
+        body = original_title + ("\n\n" + body if body.strip() else "")
+        title = title[: MAX_TITLE - 1].rstrip() + "…"
+    # Keep lists every link as an annotation, usually also typed in the text: add the rest.
     links = [
-        str(annotation["url"])
+        url
         for annotation in raw.get("annotations") or []
-        if isinstance(annotation, dict) and annotation.get("url")
+        if isinstance(annotation, dict)
+        and (url := str(annotation.get("url") or "")).strip()
+        and url not in body
+        and url not in original_title
     ]
+    links = list(dict.fromkeys(links))
     if links:
         body = (body.rstrip() + "\n\n" if body.strip() else "") + "Links: " + " ".join(links)
     checklist = [
@@ -234,8 +249,8 @@ def _keep_note(raw: Any) -> NoteModel | None:
     if created is None:
         raise ValueError("a Keep note has a creation time")
     if not (title or body.strip() or checklist):
-        title = "(empty note)"  # e.g. an image-only note: keep it so its tags survive
-    digest = hashlib.sha1(title.encode()).hexdigest()[:8]
+        return "empty"
+    digest = hashlib.sha1(original_title.encode()).hexdigest()[:8]
     return NoteModel(
         id=str(uuid4()),
         title=title,
