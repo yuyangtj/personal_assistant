@@ -42,6 +42,11 @@ flowchart LR
   through tools. It can start a coding agent, message a running one (a new turn in the
   same session) or stop it. No tool can merge or deploy; those stay behind the approval
   token in the console.
+- **The reply agent knows the repositories.** Every chat reply is told which repositories
+  are registered and what the assistant can really do, and, for the repository selected in
+  the console or named in the message, the start of its README and its top-level files, read
+  from GitHub and cached for 15 minutes (`app/repositories/briefs.py`). Before this it knew
+  nothing about them and asked the user to paste the README.
 - **Replies carry blocks.** These are choices, links, workflow and work-item cards,
   rendered by pre-built console components. A choice is answered by clicking it or by
   saying "yes" or "no".
