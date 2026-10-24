@@ -33,6 +33,8 @@ class Settings:
     #: Messages about work go to the supervisor, which can start and inspect coding runs.
     supervisor_enabled: bool = True
     triage_model_enabled: bool = False
+    #: Every message goes to the chat agent and its tools, without triage.
+    main_agent_enabled: bool = False
     ntfy_topic_url: str | None = None
     tavily_api_key: str | None = None
     #: The mcp-tools gateway (Willys, Lidl); the grocery agent is installed when it is set.
@@ -187,6 +189,9 @@ class Settings:
             ),
             supervisor_enabled=_as_bool(
                 os.getenv("ASSISTANT_SUPERVISOR_ENABLED", str(defaults.supervisor_enabled))
+            ),
+            main_agent_enabled=_as_bool(
+                os.getenv("ASSISTANT_MAIN_AGENT_ENABLED", str(defaults.main_agent_enabled))
             ),
             brief_writeback_enabled=_as_bool(
                 os.getenv(

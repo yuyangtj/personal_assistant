@@ -234,7 +234,7 @@ def _known_tag(name: str | None, work_items: Sequence[dict]) -> str | None:
     return None
 
 
-def _rule_action(text: str, work_items: Sequence[dict] = ()) -> DirectAction | None:
+def rule_action(text: str, work_items: Sequence[dict] = ()) -> DirectAction | None:
     """Keyword fallback for the plainest bookkeeping phrasings.
 
     Checklist actions only fire for a list that exists, so "add a login page to the
@@ -568,7 +568,7 @@ class Triager:
         selected: RepositoryManifest | None,
         work_items: Sequence[dict] = (),
     ) -> TriageDecision:
-        if (action := _rule_action(text, work_items)) is not None:
+        if (action := rule_action(text, work_items)) is not None:
             return TriageDecision(
                 intent=TriageIntent.DIRECT_ACTION,
                 goal=_clip(text),

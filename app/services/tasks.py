@@ -37,6 +37,7 @@ class TaskOperations(ServiceBase):
         chat_session_id: str | None = None,
         origin_message_id: str | None = None,
         parent_task_id: str | None = None,
+        post_request: bool = True,
         external_source: str | None = None,
         external_key: str | None = None,
         work_item_id: str | None = None,
@@ -139,7 +140,9 @@ class TaskOperations(ServiceBase):
             if origin_message is not None:
                 origin_message.linked_task_id = task.id
                 task.origin_message_id = origin_message.id
-            elif chat_session is not None:
+            elif chat_session is not None and post_request:
+                # A hand-off from the chat agent (post_request=False) is not something the
+                # user said, so it adds no message; its answer still lands in the chat.
                 origin = ChatMessageRepository.append(
                     session,
                     chat_session_id=chat_session.id,

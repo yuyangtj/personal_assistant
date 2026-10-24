@@ -56,6 +56,7 @@ services:
       ASSISTANT_MCP_GATEWAY_URL: ${ASSISTANT_MCP_GATEWAY_URL:-}
       ASSISTANT_GITHUB_API_BASE_URL: ${ASSISTANT_GITHUB_API_BASE_URL:-https://api.github.com}
       ASSISTANT_APPROVAL_TOKEN: ${ASSISTANT_APPROVAL_TOKEN:-}
+      ASSISTANT_MAIN_AGENT_ENABLED: ${ASSISTANT_MAIN_AGENT_ENABLED:-false}
     ports:
       - "127.0.0.1:${ASSISTANT_API_PORT:-8000}:8000"
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

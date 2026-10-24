@@ -69,6 +69,8 @@ services:
       # Triage: a fast model call per chat message decides what it needs.
       ASSISTANT_TRIAGE_MODEL_ENABLED: ${ASSISTANT_TRIAGE_MODEL_ENABLED:-true}
       ASSISTANT_TRIAGE_PROVIDER: ${ASSISTANT_TRIAGE_PROVIDER:-kimi}
+      # On: every message goes straight to the chat agent and its tools, without triage.
+      ASSISTANT_MAIN_AGENT_ENABLED: ${ASSISTANT_MAIN_AGENT_ENABLED:-false}
       ASSISTANT_DEFAULT_TIMEZONE: ${ASSISTANT_DEFAULT_TIMEZONE:-Europe/Stockholm}
       # Presence enables "research on the web" proposals; searches run in the worker.
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}

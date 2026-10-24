@@ -254,12 +254,22 @@ def job_tools(tasks: Any, *, research: bool, shopping: bool) -> list[AssistantTo
         def run(arguments: dict[str, Any], context: ToolContext) -> str:
             if not context.chat_session_id:
                 raise ToolError("this only works inside a chat")
-            question = _text(arguments, "question")
+            # The user's own message, as they said it: the specialist sees the chat
+            # history too, and a rewritten request only grows (and slows it down).
+            question = (context.request or "").strip()
+            if not question:
+                raise ToolError("there is no message to hand off")
             tasks.create_task(
                 request=question,
                 required_capabilities=[capability],
                 chat_session_id=context.chat_session_id,
-                source_context={"timezone": context.timezone, "local_time": context.local_time},
+                post_request=False,
+                source_context={
+                    "timezone": context.timezone,
+                    "local_time": context.local_time,
+                    # The reply that handed it off (not parent_task_id: that means revision).
+                    "handed_off_by": context.task_id,
+                },
             )
             return (
                 f"started: the {label} is working on it and will post its answer in this chat "
@@ -274,7 +284,7 @@ def job_tools(tasks: Any, *, research: bool, shopping: bool) -> list[AssistantTo
             AssistantTool(
                 "research",
                 "research",
-                '{"question": "<the full question, with every detail the user gave>"}',
+                "{}",
                 "research it on the web in the background; the answer, with sources, is "
                 "posted in this chat",
                 start("web_research", "research agent"),
@@ -286,7 +296,7 @@ def job_tools(tasks: Any, *, research: bool, shopping: bool) -> list[AssistantTo
             AssistantTool(
                 "shopping",
                 "shopping",
-                '{"question": "<the full question>"}',
+                "{}",
                 "ask the shopping agent about Klarna purchases and spending (with charts), "
                 "or grocery offers and receipts; its answer is posted in this chat",
                 start("groceries", "shopping agent"),
@@ -320,6 +330,7 @@ def coding_tools(supervisor: Any) -> list[AssistantTool]:
             text, [{"type": "workflow", "workflow_run_id": result["workflow_run_id"]}]
         )
 
+    ids = ", ".join(entry["id"] for entry in supervisor.repository_catalog())
     return [
         AssistantTool(
             "coding_status",
@@ -340,7 +351,8 @@ def coding_tools(supervisor: Any) -> list[AssistantTool]:
         AssistantTool(
             "coding_start",
             "coding",
-            '{"repository": "<id>", "goal": "<complete instructions, with what the user said>"}',
+            f'{{"repository": "<one of: {ids}>", "goal": "<complete instructions, with what '
+            'the user said>"}',
             "start a coding agent: it works on a new branch and opens a draft pull request "
             "the user reviews. Only when the user asks for a code change and the repository "
             "is clear; at most once per message",

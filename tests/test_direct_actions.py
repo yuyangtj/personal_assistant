@@ -115,7 +115,7 @@ def test_a_note_said_in_chat_is_saved_to_notes(client: TestClient) -> None:
 
 
 def test_note_phrasings_and_what_is_not_a_note() -> None:
-    from app.chat.triage import _rule_action
+    from app.chat.triage import rule_action
 
     for text, expected in [
         ("Note: buy oat milk", "buy oat milk"),
@@ -129,7 +129,7 @@ def test_note_phrasings_and_what_is_not_a_note() -> None:
         ("ny anteckning: ring tandläkaren", "ring tandläkaren"),
         ("note: first line\nsecond line", "first line\nsecond line"),
     ]:
-        action = _rule_action(text)
+        action = rule_action(text)
         assert action is not None and action.type == "note_add", text
         assert action.text == expected
 
@@ -139,7 +139,7 @@ def test_note_phrasings_and_what_is_not_a_note() -> None:
         "notes on the meeting were shared",
         "I wrote a note about it",
     ]:
-        assert _rule_action(text) is None, text
+        assert rule_action(text) is None, text
 
 
 def test_only_a_note_may_be_longer_than_300_characters() -> None:
