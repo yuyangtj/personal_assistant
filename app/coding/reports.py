@@ -54,6 +54,30 @@ def repair_agent_request(request: str, results: list[dict[str, Any]]) -> str:
     )
 
 
+def review_fix_request(request: str, problems: list[str]) -> str:
+    listed = "\n".join(f"- {problem}" for problem in problems)
+    return (
+        f"{request}\n\n"
+        "REVIEW FIX PASS: your changes are still in the worktree and validation passed, but "
+        "an independent reviewer found that they don't yet meet the spec. Fix these problems "
+        "while keeping the rest of the change; if one is wrong, leave the code and say why in "
+        "your notes.\n"
+        "REVIEW PROBLEMS (from another model; check each against the code)\n"
+        f"{listed}\n"
+        "END REVIEW PROBLEMS"
+    )
+
+
+def with_spec(request: str, rendered_spec: str) -> str:
+    return (
+        "SPEC (follow the acceptance criteria and stay inside the scope; the request below "
+        "is the source of truth if they disagree)\n"
+        f"{rendered_spec}\n"
+        "END SPEC\n\n"
+        f"{request}"
+    )
+
+
 def validation_failure_reply(
     failed: dict[str, Any],
     saved_branch: str | None,
@@ -182,6 +206,7 @@ def coding_output(
     agent_provider: str,
     decision: CodingDecision | None = None,
     validation: list[dict[str, Any]] | None = None,
+    review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     artifact = {
         "type": "github_pull_request",
@@ -218,4 +243,10 @@ def coding_output(
     }
     if decision is not None:
         output["agent_decision"] = decision.model_dump(mode="json")
+    if review is not None:
+        output["review"] = review
+        if review.get("outcome") == "unresolved":
+            output["reply"] += (
+                " The independent reviewer still has concerns; they're listed in the PR notes."
+            )
     return output

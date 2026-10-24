@@ -80,6 +80,9 @@ class Settings:
     code_agent_quota_cooldown_seconds: int = 3600
     code_agent_timeout_seconds: int = 1800
     code_agent_preflight_enabled: bool = True
+    coding_spec_enabled: bool = True
+    coding_review_enabled: bool = True
+    coding_planner_timeout_seconds: float = 90.0
     github_token: str | None = None
     github_api_base_url: str = "https://api.github.com"
     github_repository: str | None = None
@@ -325,6 +328,18 @@ class Settings:
                 os.getenv(
                     "ASSISTANT_CODE_AGENT_PREFLIGHT_ENABLED",
                     str(defaults.code_agent_preflight_enabled),
+                )
+            ),
+            coding_spec_enabled=_as_bool(
+                os.getenv("ASSISTANT_CODING_SPEC_ENABLED", str(defaults.coding_spec_enabled))
+            ),
+            coding_review_enabled=_as_bool(
+                os.getenv("ASSISTANT_CODING_REVIEW_ENABLED", str(defaults.coding_review_enabled))
+            ),
+            coding_planner_timeout_seconds=float(
+                os.getenv(
+                    "ASSISTANT_CODING_PLANNER_TIMEOUT_SECONDS",
+                    str(defaults.coding_planner_timeout_seconds),
                 )
             ),
             github_token=os.getenv("ASSISTANT_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or None,

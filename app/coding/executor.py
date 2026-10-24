@@ -7,7 +7,7 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from app.coding.agent_session import GuidanceSource, ProgressCallback
 from app.coding.base import (
@@ -25,17 +25,24 @@ from app.coding.reports import (
     pull_request_body,
     pull_request_title,
     repair_agent_request,
+    review_fix_request,
     revision_agent_request,
     validation_failure_reply,
+    with_spec,
     with_work_item_context,
 )
+from app.coding.review import DiffReviewer
 from app.coding.runs import CodingRunPhase, CodingRunStore
+from app.coding.spec import SpecWriter, render_spec
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.integrations.github import GitHubClient, GitHubPullRequest
 from app.validation import ValidationProfile
 
 logger = logging.getLogger(__name__)
+
+#: How many times a rejected review sends the agent back before the PR opens anyway.
+REVIEW_ROUNDS = 2
 
 
 class RepositoryCodingExecutor:
@@ -130,6 +137,8 @@ class CodingPullRequestExecutor:
         validation_profile: ValidationProfile | None = None,
         repository_id: str = "default",
         checkpoint_store: CodingRunStore | None = None,
+        spec_writer: SpecWriter | None = None,
+        reviewer: DiffReviewer | None = None,
     ):
         self.repository_path = repository_path.resolve()
         share_repository(self.repository_path)
@@ -144,6 +153,8 @@ class CodingPullRequestExecutor:
         self.validation_profile = validation_profile
         self.repository_id = repository_id
         self.checkpoint_store = checkpoint_store
+        self.spec_writer = spec_writer
+        self.reviewer = reviewer
 
     def execute(
         self,
@@ -341,6 +352,15 @@ class CodingPullRequestExecutor:
                 revision_agent_request(request, revision),
                 (context or {}).get("work_items"),
             )
+            spec_text = None
+            if self.spec_writer is not None and not revision:
+                report_milestone(progress, "Writing a short spec for the change")
+                spec = self.spec_writer.write(request, worktree)
+                if spec is not None:
+                    spec_text = render_spec(spec)
+                    if progress is not None:
+                        _report(progress, spec_text, "plan")
+                    agent_request = with_spec(agent_request, spec_text)
             # Instructions sent while the run was queued belong in the first prompt.
             early = guidance() if guidance is not None else None
             if early:
@@ -368,6 +388,22 @@ class CodingPullRequestExecutor:
                 progress=progress,
                 guidance=guidance,
             )
+            review = None
+            if self.reviewer is not None:
+                validation, report, attempts, review = self._review_with_fixes(
+                    task_id=task_id,
+                    branch=branch,
+                    worktree=worktree,
+                    agent_request=agent_request,
+                    reference=spec_text or request,
+                    report=report,
+                    validation=validation,
+                    attempts=attempts,
+                    is_cancelled=is_cancelled,
+                    progress=progress,
+                    guidance=guidance,
+                )
+            report = _with_review_notes(report, spec_text, review)
             if self.checkpoint_store is not None:
                 self.checkpoint_store.update(
                     task_id,
@@ -434,6 +470,7 @@ class CodingPullRequestExecutor:
                     self.agent.provider,
                     decision=getattr(self.agent, "last_decision", None),
                     validation=validation,
+                    review=review,
                 )
             )
         finally:
@@ -489,6 +526,18 @@ class CodingPullRequestExecutor:
                 results = error.details.get("validation", results)
             else:
                 logger.warning("Repair pass for task %s failed: %s", task_id, error)
+        self._fail_validation(task_id, branch, worktree, results, report, attempts)
+
+    def _fail_validation(
+        self,
+        task_id: str,
+        branch: str,
+        worktree: Path,
+        results: list[dict[str, Any]],
+        report: CodeAgentReport,
+        attempts: list[dict[str, Any]],
+    ) -> NoReturn:
+        """Keep the failed work on its own branch and fail the task with a clear reply."""
         saved_branch = self._save_failed_work(task_id, branch, worktree, results)
         failed = failed_required_step(results)
         if self.checkpoint_store is not None:
@@ -509,6 +558,70 @@ class CodingPullRequestExecutor:
                 failed, saved_branch, self.github_repository, self.base_branch
             ),
         )
+
+    def _review_with_fixes(
+        self,
+        *,
+        task_id: str,
+        branch: str,
+        worktree: Path,
+        agent_request: str,
+        reference: str,
+        report: CodeAgentReport,
+        validation: list[dict[str, Any]],
+        attempts: list[dict[str, Any]],
+        is_cancelled: Callable[[], bool],
+        progress: ProgressCallback | None = None,
+        guidance: GuidanceSource | None = None,
+    ) -> tuple[list[dict[str, Any]], CodeAgentReport, list[dict[str, Any]], dict[str, Any]]:
+        """Have another model check the diff against the spec; let the agent fix what it finds.
+
+        A rejection sends the agent back at most REVIEW_ROUNDS times. Concerns that remain
+        don't block the draft PR: they are recorded for the person who reviews it.
+        """
+        assert self.reviewer is not None
+        problems: list[str] = []
+        for round_number in range(REVIEW_ROUNDS + 1):
+            if is_cancelled():
+                raise ExecutionCancelled("Coding task was cancelled")
+            report_milestone(progress, "Reviewing the change against the spec")
+            verdict = self.reviewer.review(reference, worktree, validation)
+            if is_cancelled():  # a review can take a while
+                raise ExecutionCancelled("Coding task was cancelled")
+            if verdict is None:
+                report_milestone(progress, "Review skipped: the reviewer didn't answer")
+                return validation, report, attempts, {"outcome": "skipped", "problems": []}
+            if verdict.approved:
+                report_milestone(progress, "Review: approved")
+                return validation, report, attempts, {"outcome": "approved", "problems": []}
+            problems = verdict.problems
+            if round_number == REVIEW_ROUNDS:
+                break
+            report_milestone(
+                progress,
+                f"Review found {len(problems)} problem{'s' if len(problems) != 1 else ''}; "
+                "the agent is fixing them",
+            )
+            logger.info("Review rejected task %s (round %d)", task_id, round_number + 1)
+            report = self.agent.run(
+                worktree=worktree,
+                request=review_fix_request(agent_request, problems),
+                timeout_seconds=self.timeout_seconds,
+                is_cancelled=is_cancelled,
+                **optional(on_progress=progress, next_guidance=guidance),
+            )
+            if is_cancelled():
+                raise ExecutionCancelled("Coding task was cancelled")
+            attempts = attempts + _runner_attempt_payload(self.agent)
+            try:
+                validation = self._validate(worktree, is_cancelled)
+            except CodingAgentError as error:
+                if error.category != "validation_failed":
+                    raise
+                results = error.details.get("validation", [])
+                self._fail_validation(task_id, branch, worktree, results, report, attempts)
+        report_milestone(progress, "Review: concerns remain; opening the PR with them noted")
+        return validation, report, attempts, {"outcome": "unresolved", "problems": problems}
 
     def _save_failed_work(
         self,
@@ -591,6 +704,28 @@ class CodingPullRequestExecutor:
                     details={"validation": results},
                 )
         return results
+
+
+def _report(progress: ProgressCallback, text: str, kind: str) -> None:
+    try:
+        progress(text, kind)
+    except Exception:  # progress is best effort
+        logger.exception("Progress callback failed")
+
+
+def _with_review_notes(
+    report: CodeAgentReport, spec_text: str | None, review: dict[str, Any] | None
+) -> CodeAgentReport:
+    """Add the spec and review outcome to the notes, which the PR body and checkpoint keep."""
+    notes: list[str] = []
+    if spec_text:
+        notes.append(("Spec: " + " ".join(spec_text.split()))[:500])
+    if review is not None:
+        notes.append(f"Review: {review['outcome']}")
+        notes += [f"Review concern: {problem}"[:500] for problem in review["problems"]]
+    if not notes:
+        return report
+    return report.model_copy(update={"notes": (report.notes + notes)[-50:]})
 
 
 def _require_expected_pull_request(
