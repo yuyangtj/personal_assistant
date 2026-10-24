@@ -13,7 +13,7 @@ const state = { chats: [], archivedChats: [], showArchived: false, chatMenu: nul
 // Every view has its own address: #/chats/<id>, #/items/<slug>; ?task=<id> or
 // ?workflow=<id> opens a drawer over either, so back/forward, reload and push links work.
 // Each section has a view (#<section>-view, chats: #chat-view) and a nav link (#nav-<section>).
-const SECTIONS = ["chats", "items", "memories", "notes"];
+const SECTIONS = ["chats", "items", "memories", "notes", "stats"];
 const sectionView = (section) => $(section === "chats" ? "chat-view" : `${section}-view`);
 
 function parseRoute() {
@@ -54,6 +54,8 @@ async function render() {
     loadMemories();
   } else if (route.section === "notes") {
     loadNotes();
+  } else if (route.section === "stats") {
+    loadStats();
   } else if (items) {
     if (route.id !== state.itemRef || returning) {
       state.itemRef = route.id;

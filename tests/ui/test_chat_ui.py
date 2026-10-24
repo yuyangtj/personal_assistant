@@ -141,3 +141,22 @@ def test_saying_note_in_chat_saves_a_note_and_links_to_it(
     link.click()
     expect(page.locator("#notes-view")).to_be_visible()
     expect(page.locator("#note-list .note")).to_contain_text("call the dentist on Monday")
+
+
+def test_the_stats_page_shows_the_work_done(page: Page, live_server: str) -> None:
+    page.goto(f"{live_server}/ui#/stats")
+    expect(page.locator("#stats-view")).to_be_visible()
+    expect(page.locator("#stats-body")).to_contain_text("No work in this period")
+    expect(page.locator("#stats-body")).to_contain_text("Disk")
+
+    new_chat(page, live_server)
+    say(page, "hello there")  # queues a reply (no worker runs here)
+    expect(page.locator("#transcript .taskcard")).to_be_visible()
+
+    page.click("#nav-stats")
+    row = page.locator("#stats-body tbody tr").first
+    expect(row.locator("th")).to_have_text("chat reply")
+    expect(row.locator("td").first).to_have_text("1")  # one task
+    expect(row.locator("td").nth(3)).to_have_text("1")  # not finished: nothing runs it here
+    page.select_option("#stats-days", "30")
+    expect(page.locator("#stats-body tbody tr")).to_have_count(1)

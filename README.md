@@ -23,6 +23,8 @@ server.
   and only you can merge or deploy, with the approval token.
 - **Work items** (goals, lists, routines) hold a brief that later chats and runs build on.
   Mention one with `#tag`.
+- **Stats** (`#/stats`) show reply times, failures and sizes by kind of work, computed from
+  what is already stored (`GET /stats`).
 - **Notes** are a private, Keep-like pile of notes with tags and checklists, with an import
   from Google Keep. No model ever sees them: [`docs/notes.md`](docs/notes.md).
 
@@ -40,7 +42,7 @@ What is built and what is next:
 | `app/assistant` | The supervisor and its overview of the work |
 | `app/coding` | Coding runs and agents: runners, live sessions, git, reports, PR executor |
 | `app/services` | The task service: chat, tasks, executions, approvals, progress |
-| `app/work` | Work items, briefs, spaces, memory, notes |
+| `app/work` | Work items, briefs, spaces, memory, notes, stats |
 | `app/execution` | Chat model and research agent executors |
 | `app/web` | The console (`index.html`, `static/`) and its PWA files |
 | `app/worker.py`, `app/main.py` | Worker and API entry points |
