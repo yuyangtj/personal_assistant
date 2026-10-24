@@ -325,7 +325,10 @@ button.danger { background: var(--danger); color: #fff; }
 .note-untag { background: transparent; color: var(--muted); padding: 0 5px; font-size: 14px; line-height: 1; }
 .note-tag-input { flex: 1 1 120px; min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12.5px; }
 /* The action bar on each card, and the pin in its corner. */
-.note-tools { display: flex; gap: 2px; justify-content: flex-end; margin-top: 4px; }
+.note-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 6px; margin-top: 4px; }
+.note-date { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.note-edit-dates { margin: 8px 0 0; }
+.note-tools { display: flex; gap: 2px; justify-content: flex-end; margin-left: auto; }
 .note-tool { display: inline-flex; align-items: center; justify-content: center; background: transparent; color: var(--muted); border-radius: 999px; padding: 5px; min-width: 30px; min-height: 30px; }
 .note-tool:hover { background: var(--raised); color: var(--text); }
 .note-tool.on { color: var(--accent); }
