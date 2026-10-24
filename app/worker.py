@@ -409,6 +409,7 @@ def build_manager(settings: Settings, registry: CapabilityRegistry) -> TaskManag
     order = _provider_order(
         settings.manager_model_provider,
         settings.manager_model_fallback_provider,
+        supported=frozenset({"kimi", "minimax"}),
     )
     clients = [
         client

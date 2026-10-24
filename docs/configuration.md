@@ -99,7 +99,8 @@ selected (`CapabilityRegistry.restricted_to_adapters`).
 
 | Variable | Default |
 | --- | --- |
-| `ASSISTANT_CONVERSATION_MODEL_PROVIDER` | `minimax` (`kimi` or `minimax`) |
+| `ASSISTANT_CONVERSATION_MODEL_PROVIDER` | `minimax` (`kimi`, `minimax` or `deepseek`) |
+| `ASSISTANT_DEEPSEEK_MODEL` / `ASSISTANT_DEEPSEEK_THINKING` | `deepseek-flash` / `false` (DeepSeek answers with `DEEPSEEK_API_KEY`; thinking costs seconds per reply) |
 | `ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER` | `auto` (the other routine provider) |
 | `ASSISTANT_CONVERSATION_MODEL_BASE_URL` | unset; use the selected provider's URL |
 | `ASSISTANT_CONVERSATION_MODEL` | unset; use the selected provider's model |

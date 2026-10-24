@@ -61,6 +61,11 @@ class Settings:
     minimax_base_url: str = "https://api.minimax.chat/v1"
     minimax_model: str = "MiniMax-M3"
     minimax_timeout_seconds: float = 30.0
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-flash"
+    #: Off for chat: DeepSeek thinks by default, which costs seconds per reply.
+    deepseek_thinking: bool = False
+    deepseek_timeout_seconds: float = 30.0
     gemini_tts_api_key: str | None = None
     gemini_tts_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_tts_model: str = "gemini-3.1-flash-tts-preview"
@@ -209,6 +214,16 @@ class Settings:
             ),
             ntfy_topic_url=os.getenv("ASSISTANT_NTFY_TOPIC_URL") or None,
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
+            deepseek_base_url=os.getenv("ASSISTANT_DEEPSEEK_BASE_URL", defaults.deepseek_base_url),
+            deepseek_model=os.getenv("ASSISTANT_DEEPSEEK_MODEL", defaults.deepseek_model),
+            deepseek_thinking=_as_bool(
+                os.getenv("ASSISTANT_DEEPSEEK_THINKING", str(defaults.deepseek_thinking))
+            ),
+            deepseek_timeout_seconds=float(
+                os.getenv(
+                    "ASSISTANT_DEEPSEEK_TIMEOUT_SECONDS", str(defaults.deepseek_timeout_seconds)
+                )
+            ),
             tavily_api_key=os.getenv("TAVILY_API_KEY") or None,
             mcp_gateway_url=os.getenv("ASSISTANT_MCP_GATEWAY_URL") or None,
             mcp_gateway_token=os.getenv("ASSISTANT_MCP_GATEWAY_TOKEN") or None,

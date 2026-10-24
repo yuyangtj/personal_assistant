@@ -123,10 +123,10 @@ def test_several_calls_in_one_reply_all_run_in_order(client: TestClient, chat_id
     client.post("/work-items", json={"title": "Groceries", "kind": "list"})
     executor, chat = agent(
         client,
-        # As MiniMax wrote it: three objects back to back, one misspelled, the last cut off.
+        # As MiniMax wrote it: objects back to back, one misspelled, the last cut off.
         call("remember", text="I like oat milk", kind="preference")
         + "\n"
-        + call("listadd", text="oat milk")
+        + call("list_ad", text="oat milk")
         + " "
         + call("list_add", text="oat milk", list="#groceries")
         + '\n{"tool": "remind", "argum',
@@ -138,13 +138,13 @@ def test_several_calls_in_one_reply_all_run_in_order(client: TestClient, chat_id
     assert result.output["reply"] == "Remembered and added; when should I remind you?"
     assert [(c["tool"], c["ok"]) for c in result.output["tool_calls"]] == [
         ("remember", True),
-        ("listadd", False),
+        ("list_ad", False),
         ("list_add", True),
     ]
     # One round trip: the three results went back together.
     assert len(chat.requests) == 2
     results = chat.requests[1][-1].content
-    assert results.count("END TOOL RESULT") == 3 and "no tool called 'listadd'" in results
+    assert results.count("END TOOL RESULT") == 3 and "no tool called 'list_ad'" in results
 
 
 def test_raw_tool_json_is_never_shown_as_the_answer(client: TestClient, chat_id: str) -> None:
@@ -158,6 +158,56 @@ def test_raw_tool_json_is_never_shown_as_the_answer(client: TestClient, chat_id:
     assert '"tool"' not in result.output["reply"]
     assert len(result.output["tool_calls"]) <= MAX_TOOL_CALLS
     assert "this one was not made" in chat.requests[1][-1].content
+
+
+def test_deepseeks_own_tool_syntax_and_squashed_names_work(
+    client: TestClient, chat_id: str
+) -> None:
+    dsml = (
+        '<｜DSML｜function_calls>\n<｜DSML｜invoke name="listcreate">\n'
+        '<｜DSML｜parameter name="name" string="true">Packing</｜DSML｜parameter>\n'
+        '</｜DSML｜invoke>\n<｜DSML｜invoke name="list_add">\n'
+        '<｜DSML｜parameter name="text" string="true">passport</｜DSML｜parameter>\n'
+        '<｜DSML｜parameter name="list" string="true">#packing</｜DSML｜parameter>\n'
+        "</｜DSML｜invoke>\n</｜DSML｜function_calls>"
+    )
+    executor, _ = agent(client, dsml, reply("Started the packing list with your passport."))
+
+    result = run(executor, chat_id, "start a packing list with my passport")
+
+    assert result.output["reply"] == "Started the packing list with your passport."
+    assert [(c["tool"], c["ok"]) for c in result.output["tool_calls"]] == [
+        ("listcreate", True),
+        ("list_add", True),
+    ]
+    (packing,) = client.get("/work-items?kind=list").json()["work_items"]
+    entries = client.get(f"/work-items/{packing['id']}").json()["checklist"]
+    assert [e["text"] for e in entries] == ["passport"]
+
+
+def test_saying_it_is_done_without_a_tool_call_gets_one_nudge(
+    client: TestClient, chat_id: str
+) -> None:
+    executor, chat = agent(
+        client,
+        reply("I'll remember that you like oat milk."),
+        call("remember", text="I like oat milk", kind="preference"),
+        reply("Got it, I'll remember that."),
+    )
+
+    result = run(executor, chat_id, "remember I like oat milk and remind me to buy it")
+
+    assert "made no tool call" in chat.requests[1][-1].content
+    assert [c["tool"] for c in result.output["tool_calls"]] == ["remember"]
+    assert len(client.get("/memories").json()["memories"]) == 1
+    # Asked once only: a second claim without a call is the answer.
+    executor, chat = agent(client, reply("Added it."), reply("Added it."))
+    assert run(executor, chat_id, "add it").output["reply"] == "Added it."
+    assert len(chat.requests) == 2
+    # A plain answer is never questioned.
+    executor, chat = agent(client, reply("Good morning!"))
+    run(executor, chat_id, "good morning")
+    assert len(chat.requests) == 1
 
 
 def test_the_same_call_is_never_carried_out_twice(client: TestClient, chat_id: str) -> None:
