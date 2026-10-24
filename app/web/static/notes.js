@@ -48,7 +48,11 @@ function shownNotes() {
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.updated_at).localeCompare(String(a.updated_at)));
 }
 
-function renderNoteTags() {
+// A slim row, not every tag: All, the most-used tags, "All tags" (a searchable list) and Archived.
+const TOP_TAGS = 5;
+state.tagPanelOpen = false;
+
+function noteTagCounts() {
   const counts = new Map();
   for (const note of state.notes) {
     if (note.archived) continue;
@@ -59,13 +63,49 @@ function renderNoteTags() {
       counts.set(key, entry);
     }
   }
-  const tags = [...counts.values()].sort((a, b) => a.tag.localeCompare(b.tag));
+  return [...counts.values()];
+}
+
+const tagChip = (value, label, extra = "") => `<button type="button" data-note-filter="${esc(value)}" title="${esc(value)}"
+  class="${extra} ${state.noteFilter.toLowerCase() === value.toLowerCase() ? "active" : ""}">${label}</button>`;
+// A long tag name is cut with "…" (the full name is the tooltip); the count always shows.
+const tagLabel = ({ tag, count }) => `<span class="tag-name">${esc(tag)}</span> <span class="sub">${count}</span>`;
+
+function renderNoteTags() {
+  const all = noteTagCounts();
+  const byCount = [...all].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  const top = byCount.slice(0, TOP_TAGS);
+  const active = state.noteFilter && state.noteFilter !== ARCHIVED
+    ? all.find((entry) => entry.tag.toLowerCase() === state.noteFilter.toLowerCase()) : null;
+  const shown = active && !top.includes(active) ? [...top, active] : top;
   const archivedCount = state.notes.filter((note) => note.archived).length;
-  const chip = (value, label) => `<button type="button" data-note-filter="${esc(value)}"
-    class="${state.noteFilter.toLowerCase() === value.toLowerCase() ? "active" : ""}">${label}</button>`;
-  $("note-tags-bar").innerHTML = chip("", "All")
-    + tags.map(({ tag, count }) => chip(tag, `${esc(tag)} <span class="sub">${count}</span>`)).join("")
-    + (archivedCount ? chip(ARCHIVED, `Archived <span class="sub">${archivedCount}</span>`) : "");
+  $("note-tags-bar").innerHTML = tagChip("", "All")
+    + shown.map((entry) => tagChip(entry.tag, tagLabel(entry))).join("")
+    + (all.length > shown.length
+      ? `<button type="button" class="note-tags-more" data-note-tags-open aria-expanded="${state.tagPanelOpen}">All tags (${all.length}) ▾</button>` : "")
+    + (archivedCount ? tagChip(ARCHIVED, `Archived <span class="sub">${archivedCount}</span>`) : "");
+  if (state.tagPanelOpen) renderTagPanel(all);
+}
+
+function renderTagPanel(all = noteTagCounts()) {
+  const query = $("note-tag-filter").value.trim().toLowerCase();
+  const list = all.filter(({ tag }) => !query || tag.toLowerCase().includes(query))
+    .sort((a, b) => a.tag.localeCompare(b.tag, undefined, { sensitivity: "base" }));
+  $("note-tag-list").innerHTML = list.length ? list.map((entry) => tagChip(entry.tag, tagLabel(entry))).join("")
+    : `<div class="sub">No tag matches.</div>`;
+  $("note-tag-panel").hidden = false;
+}
+
+function setTagPanel(open) {
+  state.tagPanelOpen = open;
+  if (open) {
+    $("note-tag-filter").value = "";
+    renderNoteTags();
+    $("note-tag-filter").focus();
+  } else {
+    $("note-tag-panel").hidden = true;
+    for (const button of document.querySelectorAll("[data-note-tags-open]")) button.setAttribute("aria-expanded", "false");
+  }
 }
 
 function noteEditor(note) {
@@ -222,6 +262,7 @@ function noteColumnCount() {
 
 // Escape closes an open note without saving, wherever the focus is.
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.tagPanelOpen) { setTagPanel(false); return; }
   if (event.key === "Escape" && state.noteEditing && !$("notes-view").hidden) {
     state.noteEditing = null;
     renderNotes();
@@ -282,13 +323,34 @@ $("note-close").onclick = () => {
 
 $("note-search").oninput = showFirstNotes;
 
-$("note-tags-bar").onclick = (event) => {
-  const chip = event.target.closest("[data-note-filter]");
-  if (!chip) return;
+function pickTag(chip) {
   state.noteFilter = chip.dataset.noteFilter;
   state.noteEditing = null;
+  setTagPanel(false);
   showFirstNotes();
+}
+
+$("note-tags-bar").onclick = (event) => {
+  if (event.target.closest("[data-note-tags-open]")) { setTagPanel(!state.tagPanelOpen); return; }
+  const chip = event.target.closest("[data-note-filter]");
+  if (chip) pickTag(chip);
 };
+$("note-tag-list").onclick = (event) => {
+  const chip = event.target.closest("[data-note-filter]");
+  if (chip) pickTag(chip);
+};
+$("note-tag-filter").oninput = () => renderTagPanel();
+// Pressing Enter picks the only tag left in the list.
+$("note-tag-filter").onkeydown = (event) => {
+  const chips = $("note-tag-list").querySelectorAll("[data-note-filter]");
+  if (event.key === "Enter" && chips.length === 1) { event.preventDefault(); pickTag(chips[0]); }
+};
+// A click outside the tag row and list closes the list. The path is taken from the event,
+// because the row is redrawn by the click itself and its button is gone by now.
+document.addEventListener("click", (event) => {
+  const inside = event.composedPath().includes(document.querySelector(".note-tags-wrap"));
+  if (state.tagPanelOpen && !inside) setTagPanel(false);
+});
 
 async function addTag(id, input) {
   const note = state.notes.find((item) => item.id === id);

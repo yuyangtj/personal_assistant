@@ -300,7 +300,19 @@ button.danger { background: var(--danger); color: #fff; }
 .note-form .row { margin-top: 6px; gap: 8px; }
 .note-form #note-tags { width: auto; min-width: 140px; }
 #note-search { display: block; max-width: 600px; margin: 0 auto; }
-.note-tags-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 10px auto; max-width: 900px; }
+/* One slim row: it scrolls sideways on a narrow screen instead of wrapping. */
+.note-tags-wrap { position: relative; max-width: 1000px; margin: 10px auto; }
+.note-tags-bar { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px 0; }
+.note-tags-bar::-webkit-scrollbar { display: none; }
+.note-tags-bar > :first-child { margin-left: auto; }
+.note-tags-bar > :last-child { margin-right: auto; }
+.note-tags-bar button { flex: none; white-space: nowrap; }
+.note-tags-bar button.note-tags-more { background: transparent; color: var(--accent); }
+.note-tag-panel { position: absolute; z-index: 25; top: calc(100% + 4px); left: 50%; transform: translateX(-50%); width: min(460px, calc(100vw - 24px)); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow); padding: 10px; }
+.note-tag-panel input { width: 100%; box-sizing: border-box; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; font: inherit; }
+.note-tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-height: min(50vh, 340px); overflow-y: auto; }
+.note-tag-list button { background: var(--raised); color: var(--text); border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+.note-tag-list button.active { background: var(--button-bg); color: #fff; border-color: transparent; }
 .note-tags-bar button, .note-tag { background: var(--raised); color: var(--text); border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
 .note-tags-bar button.active { background: var(--button-bg); color: #fff; border-color: transparent; }
 /* Columns built by notes.js: as many as fit, two on a phone, like Keep. */
@@ -355,3 +367,4 @@ button.danger { background: var(--danger); color: #fff; }
 }
 .note-more { display: flex; justify-content: center; padding: 8px 0 24px; }
 .note-more[hidden] { display: none; }
+.tag-name { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
