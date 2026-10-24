@@ -4,9 +4,11 @@
     "about": "The chat behind the '(no reply)' bug: a Klarna question, then a follow-up that never names Klarna.",
     "turns": [
       {"say": "How has my Klarna spending changed over the last months?",
-       "expect": {"capability": "groceries", "tool": "klarna.spending", "tool_args": {"group_by": "month"}, "chart": true}},
+       "expect": {"capability": "groceries", "tool": "klarna.spending", "tool_args": {"group_by": "month"}, "chart": true},
+       "main_expect": {"tool": "klarna.spending", "tool_args": {"group_by": "month"}, "chart": true}},
       {"say": "Can you do it for the last 4 months by week",
-       "expect": {"no_offer": true, "capability": "groceries", "tool": "klarna.spending", "tool_args": {"group_by": "week"}, "chart": true}}
+       "expect": {"no_offer": true, "capability": "groceries", "tool": "klarna.spending", "tool_args": {"group_by": "week"}, "chart": true},
+       "main_expect": {"no_offer": true, "tool": "klarna.spending", "tool_args": {"group_by": "week"}, "chart": true}}
     ]
   },
   {
@@ -14,9 +16,11 @@
     "about": "The assistant offers something; the user just says 'pls do'.",
     "turns": [
       {"say": "What did I spend with Klarna in September? Should I look at it per merchant too?",
-       "expect": {"capability": "groceries", "tool": "klarna.spending"}},
+       "expect": {"capability": "groceries", "tool": "klarna.spending"},
+       "main_expect": {"tool": "klarna.spending"}},
       {"say": "pls do",
-       "expect": {"no_offer": true, "capability": "groceries", "tool": "klarna.spending", "tool_args": {"group_by": "merchant"}}}
+       "expect": {"no_offer": true, "capability": "groceries", "tool": "klarna.spending", "tool_args": {"group_by": "merchant"}},
+       "main_expect": {"no_offer": true, "tool": "klarna.spending", "tool_args": {"group_by": "merchant"}}}
     ]
   },
   {
@@ -24,7 +28,8 @@
     "about": "A bookkeeping action in the middle of a Klarna conversation must not go to the shopping agent.",
     "turns": [
       {"say": "How much have I spent at Lidl with Klarna?",
-       "expect": {"capability": "groceries", "tool": "klarna.spending", "reply_any": ["Lidl"]}},
+       "expect": {"capability": "groceries", "tool": "klarna.spending", "reply_any": ["Lidl"]},
+       "main_expect": {"tool": "klarna.spending", "reply_any": ["Lidl"]}},
       {"say": "remind me tomorrow at 9 to pay the Klarna invoice",
        "expect": {"route": "action: remind"},
        "main_expect": {"route_or_tool": ["action: remind", "remind"]}}
@@ -86,7 +91,8 @@
     "name": "swedish-klarna",
     "turns": [
       {"say": "Hur mycket har jag handlat för med Klarna i augusti?",
-       "expect": {"capability": "groceries", "tool": "klarna.spending"}}
+       "expect": {"capability": "groceries", "tool": "klarna.spending"},
+       "main_expect": {"tool": "klarna.spending"}}
     ]
   },
   {

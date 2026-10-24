@@ -14,7 +14,13 @@ from time import monotonic
 from app.abilities import AbilityRegistry, abilities_prompt
 from app.assistant.supervisor import SupervisorExecutor, SupervisorTools
 from app.assistant.toolbox import Toolbox
-from app.assistant.tools import bookkeeping_tools, coding_tools, job_tools, repository_tools
+from app.assistant.tools import (
+    bookkeeping_tools,
+    coding_tools,
+    job_tools,
+    repository_tools,
+    store_tools,
+)
 from app.capabilities import CapabilityRegistry
 from app.chat.routines import routine_capabilities
 from app.chat.routines import start_routine as run_routine
@@ -793,6 +799,19 @@ class TaskWorker:
         self._stop_event.set()
 
 
+def shopping_tools(settings: Settings, database: Database) -> tuple[ToolGateway, Toolset]:
+    """Klarna purchases from the database, and the stores through the MCP gateway if set."""
+    stores = (
+        McpGateway(settings.mcp_gateway_url, settings.mcp_gateway_token)
+        if settings.mcp_gateway_url
+        else None
+    )
+    return (
+        ToolGateway(KlarnaTools(PurchaseService(database)), stores),
+        Toolset.load(settings.toolsets_directory / "groceries.yaml"),
+    )
+
+
 def build_toolbox(
     settings: Settings,
     database: Database,
@@ -824,11 +843,16 @@ def build_toolbox(
     )
     if github is not None:
         tools += repository_tools(RepositoryReader(repositories, github))
+    # The shopping tools themselves (Klarna, the stores); not on coding-only workers.
+    shopping = (
+        [] if settings.worker_coding_only else store_tools(*shopping_tools(settings, database))
+    )
+    tools += shopping
     tools += job_tools(
         task_service,
         research=settings.web_search_available,
-        # The shopping agent isn't installed on coding-only workers.
-        shopping=not settings.worker_coding_only,
+        # Without the tools themselves, shopping questions go to the shopping agent.
+        shopping=not settings.worker_coding_only and not shopping,
     )
     if not settings.worker_coding_only:
         tools += coding_tools(
@@ -884,20 +908,12 @@ def add_chat_executors(
         logger.info("Web research agent enabled with %s search", search.name)
     # Not on coding-only workers: they never run it, and their image has no toolsets.
     if conversation_executor is not None and not settings.worker_coding_only:
-        # Klarna purchases come from the database; the stores need the MCP gateway.
-        stores = (
-            McpGateway(settings.mcp_gateway_url, settings.mcp_gateway_token)
-            if settings.mcp_gateway_url
-            else None
-        )
         executors[GroceryAgentExecutor.id] = GroceryAgentExecutor(
-            conversation_executor.client,
-            ToolGateway(KlarnaTools(PurchaseService(database)), stores),
-            Toolset.load(settings.toolsets_directory / "groceries.yaml"),
+            conversation_executor.client, *shopping_tools(settings, database)
         )
         logger.info(
             "Shopping agent enabled: Klarna%s",
-            f", stores through {settings.mcp_gateway_url}" if stores else " only",
+            f", stores through {settings.mcp_gateway_url}" if settings.mcp_gateway_url else " only",
         )
     if conversation_executor is not None and not settings.worker_coding_only:
         executors[SupervisorExecutor.id] = SupervisorExecutor(

@@ -94,6 +94,17 @@ you start with coding_start; it opens a draft pull request the user reviews, so 
 without them. Never say you cannot work on their projects. """
 
 
+#: With the shopping tools: what the shopping agent's own prompt used to say.
+SHOPPING_WITH_TOOLS = """Shopping: for purchases, receipts, spending, prices and offers use the
+klarna_, willys_ and lidl_ tools, and never guess a figure or what the user bought. Dates are
+YYYY-MM-DD; prices are in kr. Totals per merchant, month or week are one klarna_spending
+call with group_by, not a call per merchant. Klarna data comes from exports the user uploads: when a
+question reaches past what it covers ("data_covers"), say how far it goes, and use
+klarna_upload_export only when the user wants to add or update their purchases. A chart a
+tool builds is shown with your reply, so describe the trend, the high and low points and
+anything odd instead of reading out every number. If a tool says an account isn't
+connected, say so."""
+
 #: Added when the web research agent is installed, instead of a flat "can't browse".
 RESEARCH_HANDOFF = """
 You cannot browse the web yourself, but the assistant's research agent can. If the user
@@ -312,6 +323,10 @@ class ConversationExecutor:
                 messages.append(ChatMessage("system", repositories))
         if self.toolbox:
             messages.append(ChatMessage("system", self.toolbox.describe(native=native)))
+            if "shopping" in self.toolbox.abilities and any(
+                name.startswith("klarna_") for name in self.toolbox.names
+            ):
+                messages.append(ChatMessage("system", SHOPPING_WITH_TOOLS))
         memories = context.get("memories")
         if isinstance(memories, list) and memories:
             lines = [str(item) for item in memories if str(item).strip()]
