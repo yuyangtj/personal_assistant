@@ -10,7 +10,7 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from app.coding.agent_session import (
     GUIDANCE_INTERVAL,
@@ -23,6 +23,18 @@ from app.coding.git import git
 from app.execution.fake import ExecutionCancelled
 
 logger = logging.getLogger(__name__)
+
+#: Seconds without any output or worktree change before a streaming agent is reported
+#: as quiet. It is only a notice: silence doesn't prove the agent is stuck or gone.
+QUIET_AFTER = 180.0
+
+
+class OutputListener(Protocol):
+    """Reads an agent's stdout line by line while it runs."""
+
+    last_step: str
+
+    def feed(self, line: str) -> None: ...
 
 
 class _Redirected(Exception):
@@ -42,11 +54,15 @@ def run_code_agent_process(
     on_progress: ProgressCallback | None = None,
     next_guidance: GuidanceSource | None = None,
     redirected_command: Callable[[Sequence[str]], list[str]] | None = None,
+    output_listener: Callable[[], OutputListener] | None = None,
 ) -> str:
     """Run a one-shot agent. New user instructions restart it in the same worktree.
 
     A one-shot agent can't take input while it runs, so a redirect stops it and starts
     it again with the instructions added; its partial changes stay in the worktree.
+
+    ``output_listener`` makes a fresh listener for each start of the agent. It gets each
+    stdout line as it is written, and enables the quiet-agent notice.
     """
     deadline = time.monotonic() + timeout_seconds
     notes: list[str] = []
@@ -62,6 +78,7 @@ def run_code_agent_process(
                 display_name=display_name,
                 on_progress=on_progress,
                 next_guidance=steerable if len(notes) < MAX_REDIRECTS else None,
+                listener=output_listener() if output_listener is not None else None,
             )
         except _Redirected as redirect:
             notes.append(redirect.guidance)
@@ -80,8 +97,10 @@ def _run_agent_once(
     display_name: str,
     on_progress: ProgressCallback | None,
     next_guidance: GuidanceSource | None,
+    listener: OutputListener | None = None,
 ) -> str:
     watcher = WorktreeWatcher(worktree, on_progress)
+    quiet = _QuietNotice(on_progress, listener) if listener is not None else None
     next_check = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="assistant-code-agent-") as temporary:
         temporary_path = Path(temporary)
@@ -96,6 +115,7 @@ def _run_agent_once(
                     stderr=stderr,
                     env=dict(environment),
                 )
+                reader = _LineReader(stdout_path) if listener is not None else None
                 while process.poll() is None:
                     if is_cancelled():
                         process.terminate()
@@ -112,8 +132,14 @@ def _run_agent_once(
                             process.terminate()
                             wait_or_kill(process)
                             raise _Redirected(guidance)
-                    watcher.poll()
+                    changed = watcher.poll()
+                    if reader is not None and listener is not None and quiet is not None:
+                        if _deliver(reader.read_lines(), listener) or changed:
+                            quiet.activity()
+                        quiet.check()
                     time.sleep(0.2)
+                if reader is not None and listener is not None:
+                    _deliver(reader.read_lines(final=True), listener)
         except FileNotFoundError as error:
             raise CodingAgentError(
                 f"{display_name} executable was not found", category="unavailable"
@@ -162,17 +188,77 @@ class WorktreeWatcher:
         self._next = time.monotonic() + interval
         self._last = ""
 
-    def poll(self) -> None:
+    def poll(self) -> bool:
+        """Report a new worktree summary when one is due; True when it changed."""
         if self.on_progress is None or time.monotonic() < self._next:
-            return
+            return False
         self._next = time.monotonic() + self.interval
         try:
             summary = worktree_summary(self.worktree)
         except (CodingAgentError, OSError):
-            return
+            return False
         if summary and summary != self._last:
             self._last = summary
             _report_kind(self.on_progress, summary, "worktree")
+            return True
+        return False
+
+
+class _LineReader:
+    """Reads the complete lines an agent has appended to its stdout file so far."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self._offset = 0
+        self._partial = b""
+
+    def read_lines(self, *, final: bool = False) -> list[str]:
+        try:
+            with self.path.open("rb") as stream:
+                stream.seek(self._offset)
+                chunk = stream.read()
+        except OSError:
+            return []
+        self._offset += len(chunk)
+        *lines, self._partial = (self._partial + chunk).split(b"\n")
+        if final and self._partial:
+            lines.append(self._partial)
+            self._partial = b""
+        return [line.decode("utf-8", errors="replace") for line in lines]
+
+
+def _deliver(lines: list[str], listener: OutputListener) -> bool:
+    for line in lines:
+        try:
+            listener.feed(line)
+        except Exception:  # progress is best effort; never fail the agent over it
+            logger.exception("Output listener failed")
+    return bool(lines)
+
+
+class _QuietNotice:
+    """Says once when a streaming agent has gone quiet, and again after it resumes."""
+
+    def __init__(self, on_progress: ProgressCallback | None, listener: OutputListener):
+        self.on_progress = on_progress
+        self.listener = listener
+        self._last_activity = time.monotonic()
+        self._reported = False
+
+    def activity(self) -> None:
+        self._last_activity = time.monotonic()
+        self._reported = False
+
+    def check(self) -> None:
+        quiet_for = time.monotonic() - self._last_activity
+        if self._reported or quiet_for < QUIET_AFTER:
+            return
+        self._reported = True
+        minutes = max(1, round(quiet_for / 60))
+        text = f"No activity for {minutes} min"
+        if self.listener.last_step:
+            text += f" (last step: {self.listener.last_step})"
+        report_milestone(self.on_progress, text)
 
 
 def _report_kind(progress: ProgressCallback, text: str, kind: str) -> None:
