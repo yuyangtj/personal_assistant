@@ -353,3 +353,5 @@ button.danger { background: var(--danger); color: #fff; }
   .note-modal { padding: 12px 8px; }
   .note { margin-bottom: 8px; padding: 9px 10px 2px; }
 }
+.note-more { display: flex; justify-content: center; padding: 8px 0 24px; }
+.note-more[hidden] { display: none; }
