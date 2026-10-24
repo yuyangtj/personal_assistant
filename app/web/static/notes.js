@@ -5,6 +5,7 @@ state.noteFilter = "";          // "" for all, a tag, or ARCHIVED
 state.noteEditing = null;
 state.noteDeleteArmed = null;
 state.keepFile = null;
+state.noteTagging = null;       // the note whose tags are being edited on its card
 // No tag can start with "#" (the server strips it), so this never clashes with one.
 const ARCHIVED = "#archived";
 
@@ -81,8 +82,27 @@ function noteEditor(note) {
       <button type="button" data-note-action="save">Save</button></div></div>`;
 }
 
+// Small line icons for the card's action bar (24×24 viewBox, drawn with currentColor).
+const NOTE_ICONS = {
+  pin: '<path d="M12 17v5"/><path d="M9 10.76V6h6v4.76l2 3.24H7z"/><path d="M8 2h8"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  archive: '<rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  unarchive: '<rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="m9 15 3-3 3 3"/><path d="M12 12v6"/>',
+  delete: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/>',
+};
+const noteIcon = (name) => `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NOTE_ICONS[name]}</svg>`;
+const noteTool = (action, label, icon, extra = "") =>
+  `<button type="button" class="note-tool ${extra}" data-note-action="${action}" aria-label="${label}" title="${label}">${icon}</button>`;
+
+function noteTagger(note) {
+  return `<div class="note-tagger">${note.tags.map((tag) =>
+    `<span class="note-tag">${esc(tag)}<button type="button" class="note-untag" data-note-untag="${esc(tag)}"
+      aria-label="Remove tag ${esc(tag)}" title="Remove">×</button></span>`).join("")}
+    <input class="note-tag-input" placeholder="Add a tag, then Enter" aria-label="Add a tag" maxlength="50"></div>`;
+}
+
 function noteCard(note) {
-  if (state.noteEditing === note.id) return noteEditor(note);
   const items = [...note.checklist.map((item, index) => ({ ...item, index }))]
     .sort((a, b) => Number(a.done) - Number(b.done));
   const shown = items.slice(0, 10);
@@ -90,13 +110,23 @@ function noteCard(note) {
     `<li class="${item.done ? "done" : ""}"><input type="checkbox" data-note-check="${item.index}"
       ${item.done ? "checked" : ""} aria-label="${esc(item.text)}"><span>${esc(item.text)}</span></li>`).join("")}
     ${items.length > shown.length ? `<li class="sub">+ ${items.length - shown.length} more</li>` : ""}</ul>` : "";
-  return `<div class="note" data-note="${esc(note.id)}" tabindex="0" role="button" aria-label="Edit note ${esc(note.title)}">
-    ${note.title ? `<div class="note-title">${note.pinned ? "📌 " : ""}${esc(note.title)}</div>` : ""}
-    ${note.body ? `<div class="note-body">${!note.title && note.pinned ? "📌 " : ""}${esc(note.body)}</div>` : ""}
+  const tagging = state.noteTagging === note.id;
+  const armed = state.noteDeleteArmed === note.id;
+  const tags = tagging ? noteTagger(note) : note.tags.length ? `<div class="note-meta">${note.tags.map((tag) =>
+    `<button type="button" class="note-tag" data-note-filter="${esc(tag)}">${esc(tag)}</button>`).join("")}</div>` : "";
+  return `<div class="note ${tagging ? "tagging" : ""}" data-note="${esc(note.id)}" tabindex="0"
+      aria-label="Note ${esc(note.title || note.body.slice(0, 40))}" title="Changed ${esc(String(note.updated_at).slice(0, 10))}">
+    ${noteTool("pin", note.pinned ? "Unpin" : "Pin", noteIcon("pin"), "note-pin" + (note.pinned ? " on" : ""))}
+    ${note.title ? `<div class="note-title">${esc(note.title)}</div>` : ""}
+    ${note.body ? `<div class="note-body">${esc(note.body)}</div>` : ""}
     ${list}
-    <div class="note-meta">${note.tags.map((tag) =>
-      `<button type="button" class="note-tag" data-note-filter="${esc(tag)}">${esc(tag)}</button>`).join("")}
-      <span class="sub">${esc(String(note.updated_at).slice(0, 10))}</span></div></div>`;
+    ${tags}
+    <div class="note-tools">
+      ${noteTool("tag", tagging ? "Done with tags" : "Tags", noteIcon("tag"), tagging ? "on" : "")}
+      ${noteTool("archive", note.archived ? "Unarchive" : "Archive", noteIcon(note.archived ? "unarchive" : "archive"))}
+      ${armed ? `<button type="button" class="note-tool danger-armed" data-note-action="delete" aria-label="Tap again to delete">Delete?</button>`
+        : noteTool("delete", "Delete", noteIcon("delete"))}
+    </div></div>`;
 }
 
 function renderNotes() {
@@ -106,8 +136,44 @@ function renderNotes() {
   const empty = state.notes.length
     ? (state.noteFilter === ARCHIVED ? "No archived notes match." : "No note matches.")
     : "No notes yet. Add one above, or import your Google Keep notes.";
-  $("note-list").innerHTML = notes.length ? notes.map(noteCard).join("") : `<div class="empty">${empty}</div>`;
+  const list = $("note-list");
+  if (!notes.length) {
+    list.innerHTML = `<div class="empty">${empty}</div>`;
+  } else {
+    // Keep-style masonry: cards go left to right, each into the shortest column.
+    const count = noteColumnCount();
+    list.innerHTML = Array.from({ length: count }, () => `<div class="note-col"></div>`).join("");
+    const columns = [...list.children];
+    for (const note of notes) {
+      const shortest = columns.reduce((best, column) => (column.offsetHeight < best.offsetHeight ? column : best));
+      shortest.insertAdjacentHTML("beforeend", noteCard(note));
+    }
+    state.noteColumns = count;
+  }
+  // A note being edited opens over the page, so it has room even on a phone.
+  const editing = state.notes.find((note) => note.id === state.noteEditing);
+  if (editing) list.insertAdjacentHTML("beforeend", `<div class="note-modal" data-note-backdrop>${noteEditor(editing)}</div>`);
 }
+
+function noteColumnCount() {
+  const width = $("note-list").clientWidth || window.innerWidth;
+  if (width < 300) return 1;
+  if (window.matchMedia("(max-width: 720px)").matches) return 2;
+  return Math.max(1, Math.min(8, Math.floor((width + 12) / (240 + 12))));
+}
+
+// Escape closes an open note without saving, wherever the focus is.
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.noteEditing && !$("notes-view").hidden) {
+    state.noteEditing = null;
+    renderNotes();
+  }
+});
+
+// Re-flow the columns when the window gets wider or narrower.
+window.addEventListener("resize", () => {
+  if (!$("notes-view").hidden && state.noteColumns && noteColumnCount() !== state.noteColumns) renderNotes();
+});
 
 async function saveNote(id, fields) {
   const note = await api(`/notes/${id}`, { method: "PATCH", body: JSON.stringify(fields) });
@@ -130,8 +196,30 @@ $("note-form").onsubmit = async (event) => {
     for (const id of ["note-title", "note-body", "note-tags"]) $(id).value = "";
     $("note-as-list").checked = false;
     $("note-error").textContent = "";
+    growNoteBody();
     renderNotes();
+    $("note-body").focus();
   } catch (error) { noteError(error); }
+};
+
+// The composer is one slim line ("Take a note…") until it's used, as in Keep.
+const composerEmpty = () => !["note-title", "note-body", "note-tags"].some((id) => $(id).value.trim());
+function growNoteBody() {
+  const body = $("note-body");
+  body.style.height = "auto";
+  body.style.height = Math.min(body.scrollHeight, 360) + "px";
+}
+$("note-form").addEventListener("focusin", () => $("note-form").classList.add("expanded"));
+$("note-body").addEventListener("input", growNoteBody);
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#note-form") && composerEmpty()) $("note-form").classList.remove("expanded");
+});
+$("note-close").onclick = () => {
+  for (const id of ["note-title", "note-body", "note-tags"]) $(id).value = "";
+  $("note-as-list").checked = false;
+  growNoteBody();
+  $("note-form").classList.remove("expanded");
+  document.activeElement.blur();
 };
 
 $("note-search").oninput = renderNotes;
@@ -144,16 +232,38 @@ $("note-tags-bar").onclick = (event) => {
   renderNotes();
 };
 
+async function addTag(id, input) {
+  const note = state.notes.find((item) => item.id === id);
+  const added = splitTags(input.value);
+  if (!added.length) return;
+  await saveNote(id, { tags: [...note.tags, ...added] });
+  renderNotes();
+  const again = document.querySelector(`[data-note="${CSS.escape(id)}"] .note-tag-input`);
+  if (again) again.focus();
+}
+
 $("note-list").onclick = async (event) => {
+  if (event.target.dataset && "noteBackdrop" in event.target.dataset) {
+    const editor = event.target.querySelector(".note.editing [data-note-action=save]");
+    if (editor) editor.click();
+    return;
+  }
   const card = event.target.closest("[data-note]");
   if (!card) return;
   const id = card.dataset.note;
   const note = state.notes.find((item) => item.id === id);
   const tag = event.target.closest("[data-note-filter]");
+  const untag = event.target.closest("[data-note-untag]");
   const check = event.target.dataset && event.target.dataset.noteCheck;
-  const action = event.target.dataset && event.target.dataset.noteAction;
+  const button = event.target.closest("[data-note-action]");
+  const action = button && button.dataset.noteAction;
   try {
-    if (tag) {
+    if (untag) {
+      const gone = untag.dataset.noteUntag.toLowerCase();
+      await saveNote(id, { tags: note.tags.filter((item) => item.toLowerCase() !== gone) });
+    } else if (event.target.closest(".note-tagger")) {
+      return;  // typing a tag: don't open the note
+    } else if (tag) {
       state.noteFilter = tag.dataset.noteFilter;
     } else if (check !== undefined) {
       const checklist = note.checklist.map((item, index) =>
@@ -169,6 +279,14 @@ $("note-list").onclick = async (event) => {
       state.noteEditing = null;
     } else if (action === "cancel") {
       state.noteEditing = null;
+    } else if (action === "tag") {
+      const input = card.querySelector(".note-tag-input");
+      if (input && input.value.trim()) await saveNote(id, { tags: [...note.tags, ...splitTags(input.value)] });
+      state.noteTagging = state.noteTagging === id ? null : id;
+      renderNotes();
+      const opened = document.querySelector(`[data-note="${CSS.escape(id)}"] .note-tag-input`);
+      if (opened) opened.focus();
+      return;
     } else if (action === "pin") {
       await saveNote(id, { pinned: !note.pinned });
     } else if (action === "archive") {
@@ -181,6 +299,11 @@ $("note-list").onclick = async (event) => {
       state.noteEditing = null;
     } else if (!card.classList.contains("editing")) {
       state.noteEditing = id;
+      state.noteTagging = null;
+      renderNotes();
+      const title = document.querySelector(".note-modal .note-edit-title");
+      if (title) title.focus();
+      return;
     } else {
       return;
     }
@@ -191,6 +314,13 @@ $("note-list").onclick = async (event) => {
 };
 
 $("note-list").onkeydown = (event) => {
+  const tagInput = event.target.closest(".note-tag-input");
+  if (tagInput) {
+    const id = tagInput.closest("[data-note]").dataset.note;
+    if (event.key === "Enter") { event.preventDefault(); addTag(id, tagInput).catch(noteError); }
+    else if (event.key === "Escape") { state.noteTagging = null; renderNotes(); }
+    return;
+  }
   const card = event.target.closest(".note:not(.editing)");
   if (card && event.target === card && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();

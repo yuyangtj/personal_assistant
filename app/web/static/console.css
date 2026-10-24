@@ -283,34 +283,70 @@ button.danger { background: var(--danger); color: #fff; }
 .block-table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; }
 .block-table caption { text-align: left; color: var(--muted); padding-bottom: 4px; }
 .block-table th, .block-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--border); }
-.notes-page { max-width: 1100px; margin: 0 auto; padding: 18px 16px 40px; }
+/* Notes: a Keep-like page. The page fills the width (it's a flex item, so it needs width). */
+.notes-page { width: 100%; max-width: 1600px; margin: 0 auto; padding: 18px 16px 40px; box-sizing: border-box; }
 .notes-page h1 { margin: 0; }
 .notes-import-button { margin-top: 0; font-size: 13px; }
-.note-form { display: block; margin: 14px 0 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px; max-width: 640px; }
-.note-form input, .note-form textarea, #note-search, .note.editing input, .note.editing textarea { width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; font: inherit; }
-.note-form input#note-title { border: 0; font-weight: 600; padding-left: 4px; }
-.note-form textarea { border: 0; padding-left: 4px; resize: vertical; }
-.note-form .row, .note .row { margin-top: 8px; gap: 8px; }
-.note-form #note-tags { width: auto; min-width: 160px; }
-#note-search { max-width: 640px; }
-.note-tags-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+/* The composer: one slim, wide line until it's used, then title, tags and buttons appear. */
+.note-form { display: block; max-width: 600px; margin: 14px auto 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; padding: 4px 12px; box-shadow: 0 1px 3px #0003; }
+.note-form .note-form-more { display: none; }
+.note-form.expanded { padding: 8px 12px 10px; }
+.note-form.expanded .note-form-more { display: flex; }
+.note-form.expanded input#note-title { display: block; }
+.note-form input, .note-form textarea, #note-search, .note.editing input, .note.editing textarea { width: 100%; box-sizing: border-box; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; font: inherit; }
+.note-form input#note-title { border: 0; font-weight: 600; padding: 6px 2px; }
+.note-form textarea { border: 0; padding: 8px 2px; resize: none; overflow: hidden; min-height: 22px; line-height: 1.45; }
+.note-form textarea:focus-visible, .note-form input#note-title:focus-visible { outline: none; }
+.note-form .row { margin-top: 6px; gap: 8px; }
+.note-form #note-tags { width: auto; min-width: 140px; }
+#note-search { display: block; max-width: 600px; margin: 0 auto; }
+.note-tags-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 10px auto; max-width: 900px; }
 .note-tags-bar button, .note-tag { background: var(--raised); color: var(--text); border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
 .note-tags-bar button.active { background: var(--button-bg); color: #fff; border-color: transparent; }
-.note-grid { columns: 260px; column-gap: 10px; margin-top: 6px; }
-.note { break-inside: avoid; display: block; width: 100%; text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; cursor: pointer; }
-.note:hover { border-color: var(--border-strong); }
-.note.editing { cursor: default; border-color: var(--accent); }
-.note-title { font-weight: 600; margin-bottom: 4px; overflow-wrap: anywhere; }
+/* Columns built by notes.js: as many as fit, two on a phone, like Keep. */
+.note-grid { display: flex; gap: 12px; align-items: flex-start; margin-top: 8px; }
+.note-col { flex: 1 1 0; min-width: 0; }
+.note-grid > .empty { flex: 1; }
+.note { position: relative; break-inside: avoid; display: block; width: 100%; box-sizing: border-box; text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px 4px; margin-bottom: 12px; cursor: pointer; }
+.note:hover { border-color: var(--border-strong); box-shadow: 0 1px 4px #0003; }
+.note.editing { cursor: default; border-color: var(--accent); padding-bottom: 10px; }
+.note-modal { position: fixed; inset: 0; z-index: 30; background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding: 8vh 16px 16px; overflow-y: auto; }
+.note-modal .note.editing { max-width: 600px; margin: 0; box-shadow: var(--shadow); }
+.note-title { font-weight: 600; margin: 0 26px 4px 0; overflow-wrap: anywhere; }
 .note-body { white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 10; -webkit-box-orient: vertical; overflow: hidden; }
+.note-title + .note-body { margin-top: 2px; }
+.note > .note-body:first-of-type { margin-right: 26px; }
 .note-items { list-style: none; margin: 4px 0 0; padding: 0; }
 .note-items li { display: flex; gap: 6px; align-items: flex-start; padding: 1px 0; overflow-wrap: anywhere; }
 .note-items li.done span { text-decoration: line-through; color: var(--muted); }
 .note-items .sub { margin: 2px 0 0; }
-.note-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; align-items: center; }
-.note-meta .sub { margin: 0 0 0 auto; }
+.note-meta, .note-tagger { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; align-items: center; }
+.note-tagger .note-tag { display: inline-flex; align-items: center; padding-right: 2px; }
+.note-untag { background: transparent; color: var(--muted); padding: 0 5px; font-size: 14px; line-height: 1; }
+.note-tag-input { flex: 1 1 120px; min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12.5px; }
+/* The action bar on each card, and the pin in its corner. */
+.note-tools { display: flex; gap: 2px; justify-content: flex-end; margin-top: 4px; }
+.note-tool { display: inline-flex; align-items: center; justify-content: center; background: transparent; color: var(--muted); border-radius: 999px; padding: 5px; min-width: 30px; min-height: 30px; }
+.note-tool:hover { background: var(--raised); color: var(--text); }
+.note-tool.on { color: var(--accent); }
+.note-tool.danger-armed { background: var(--danger-bg); color: var(--danger); font-size: 12px; padding: 4px 10px; }
+.note-pin { position: absolute; top: 4px; right: 4px; }
+.note-pin.on svg { fill: currentColor; }
+@media (hover: hover) {
+  /* With a mouse the tools show on hover; on a phone they're always there. */
+  .note .note-tools, .note .note-pin:not(.on) { opacity: 0; transition: opacity .12s; }
+  .note:hover .note-tools, .note:focus-within .note-tools, .note.tagging .note-tools,
+  .note:hover .note-pin, .note:focus-within .note-pin { opacity: 1; }
+}
 .note.editing label.sub { display: block; margin: 8px 0 2px; }
+.note.editing .row { margin-top: 8px; gap: 8px; }
 .note.editing .row button { padding: 5px 10px; font-size: 12.5px; }
 .note .danger-armed { background: var(--danger-bg); color: var(--danger); }
-.keep-import { margin: 12px 0; background: var(--raised); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; max-width: 640px; }
+.keep-import { margin: 12px auto; background: var(--raised); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; max-width: 600px; }
 .keep-import .row { margin-top: 8px; }
-@media (max-width: 720px) { .note-grid { columns: 1; } }
+@media (max-width: 720px) {
+  .notes-page { padding: 12px 8px 32px; }
+  .note-grid { gap: 8px; }
+  .note-modal { padding: 12px 8px; }
+  .note { margin-bottom: 8px; padding: 9px 10px 2px; }
+}

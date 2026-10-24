@@ -113,11 +113,12 @@
       <div class="sub">Quick notes with tags and checklists. They stay here: no AI model sees them.</div>
       <div id="keep-import" class="keep-import" hidden></div>
       <form id="note-form" class="note-form">
-        <input id="note-title" maxlength="300" placeholder="Title" aria-label="Title">
-        <textarea id="note-body" rows="2" maxlength="20000" placeholder="Take a note…" aria-label="Note"></textarea>
-        <div class="row wrap">
+        <input id="note-title" class="note-form-more" maxlength="300" placeholder="Title" aria-label="Title">
+        <textarea id="note-body" rows="1" maxlength="20000" placeholder="Take a note…" aria-label="Note"></textarea>
+        <div class="row wrap note-form-more">
           <input id="note-tags" class="grow" placeholder="Tags, separated by commas" aria-label="Tags">
           <label class="check" title="Each line becomes a checklist item"><input type="checkbox" id="note-as-list"> Checklist</label>
+          <button type="button" class="quiet" id="note-close">Close</button>
           <button type="submit">Add</button></div>
       </form>
       <input id="note-search" type="search" placeholder="Search notes…" aria-label="Search notes">
