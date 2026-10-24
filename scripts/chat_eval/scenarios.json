@@ -26,28 +26,33 @@
       {"say": "How much have I spent at Lidl with Klarna?",
        "expect": {"capability": "groceries", "tool": "klarna.spending", "reply_any": ["Lidl"]}},
       {"say": "remind me tomorrow at 9 to pay the Klarna invoice",
-       "expect": {"route": "action: remind"}}
+       "expect": {"route": "action: remind"},
+       "main_expect": {"route_or_tool": ["action: remind", "remind"]}}
     ]
   },
   {
     "name": "small-talk",
     "turns": [
-      {"say": "good morning!", "expect": {"route": "chat reply", "no_offer": true}}
+      {"say": "good morning!", "expect": {"route": "chat reply", "no_offer": true},
+        "main_expect": {"route": "main agent"}}
     ]
   },
   {
     "name": "remember-a-preference",
     "turns": [
-      {"say": "remember that I prefer oat milk", "expect": {"route": "action: remember"}}
+      {"say": "remember that I prefer oat milk", "expect": {"route": "action: remember"},
+        "main_expect": {"route_or_tool": ["action: remember", "remember"]}}
     ]
   },
   {
     "name": "general-question-then-follow-up",
     "turns": [
       {"say": "How long should I bake a salmon fillet in the oven?",
-       "expect": {"route": "chat reply", "no_offer": true, "reply_any": ["min", "°"]}},
+       "expect": {"route": "chat reply", "no_offer": true, "reply_any": ["min", "°"]},
+       "main_expect": {"route": "main agent", "reply_any": ["min", "°"]}},
       {"say": "and at what temperature?",
-       "expect": {"route": "chat reply", "no_offer": true, "reply_any": ["°", "degree"]}}
+       "expect": {"route": "chat reply", "no_offer": true, "reply_any": ["°", "degree"]},
+       "main_expect": {"route": "main agent", "reply_any": ["°", "degree"]}}
     ]
   },
   {
@@ -55,7 +60,8 @@
     "about": "A change to the assistant's own code is offered or handed to the supervisor, never done silently.",
     "turns": [
       {"say": "Add a dark mode toggle to the personal assistant settings page",
-       "expect": {"route": ["offer (propose_coding)", "supervisor"]}}
+       "expect": {"route": ["offer (propose_coding)", "supervisor"]},
+       "main_expect": {"tool": "coding_start"}}
     ]
   },
   {

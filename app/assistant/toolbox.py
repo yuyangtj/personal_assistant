@@ -22,6 +22,10 @@ class ToolContext:
 
     chat_session_id: str | None = None
     origin_message_id: str | None = None
+    #: The reply's own task, which hand-offs record as where they came from.
+    task_id: str | None = None
+    #: The user's message this turn answers.
+    request: str | None = None
     timezone: str = "UTC"
     local_time: str | None = None
 

@@ -12,7 +12,7 @@ from app.api.schemas import AppendChatMessageRequest, TriageDecisionResponse
 from app.chat.direct_actions import run_direct_action
 from app.chat.offers import match_choice, offer_for, pending_choices, settle
 from app.chat.routines import routine_capabilities
-from app.chat.triage import TriageIntent
+from app.chat.triage import DirectAction, TriageIntent, rule_action
 from app.coding.flow import start_coding_run
 from app.schedules import zone
 
@@ -198,14 +198,16 @@ def _route_message(
         if option is not None and option["action"] != "reply":
             return resolve_choice(request, chat_session_id, option, body)
     work_items = request.app.state.work_item_service
-    focused = work_items.focused(chat_session_id)
-    spaces = work_items.space_slugs(focused)
-    history = messages[-13:-1]
     open_items = [
         {"slug": item.slug, "title": item.title, "kind": item.kind}
         for item in work_items.list(limit=50)
         if item.status != "done"
     ]
+    if request.app.state.settings.main_agent_enabled:
+        return _main_agent_route(request, chat_session_id, body, open_items)
+    focused = work_items.focused(chat_session_id)
+    spaces = work_items.space_slugs(focused)
+    history = messages[-13:-1]
     follow_up = _last_turn_was_groceries(service, history)
     decision = request.app.state.triager.decide(
         body.content,
@@ -228,34 +230,7 @@ def _route_message(
     response = TriageDecisionResponse.model_validate(decision.model_dump(mode="json"))
     response.follow_up = follow_up
     if decision.action is not None:
-        # T0: done now, without a chat model; the reply lands in the transcript.
-        timezone = body.timezone or request.app.state.settings.default_timezone
-        try:
-            zone(timezone)
-        except ValueError:
-            timezone = request.app.state.settings.default_timezone
-        result = run_direct_action(
-            decision.action,
-            chat_session_id=chat_session_id,
-            items=work_items,
-            memory=request.app.state.memory_service,
-            notes=request.app.state.note_service,
-            schedules=request.app.state.schedule_service,
-            timezone=timezone,
-            tasks=service,
-            route=lambda instruction: routine_capabilities(
-                request.app.state.triager,
-                instruction,
-                supervision=request.app.state.settings.supervisor_enabled,
-            ),
-        )
-        service.append_chat_message(
-            chat_session_id, content=result.reply, role="assistant", blocks=result.blocks or None
-        )
-        response.result = result.reply
-        response.handled = True
-        response.route = f"action: {decision.action.type}"
-        return response
+        return _run_instantly(request, chat_session_id, body, decision.action, response)
     # Questions about the user's grocery stores run the grocery agent right away: it only
     # reads offers, receipts and purchases, so there is nothing to confirm.
     if "groceries" in decision.capabilities:
@@ -313,4 +288,65 @@ def _route_message(
     else:
         # The client queues an ordinary chat reply for it.
         response.route = "chat reply"
+    return response
+
+
+def _main_agent_route(
+    request: Request,
+    chat_session_id: str,
+    body: AppendChatMessageRequest,
+    open_items: list[dict[str, Any]],
+) -> TriageDecisionResponse:
+    """The one-assistant path: no triage model, no offers; the chat agent and its tools
+    handle the message. Only the plainest bookkeeping phrasings are still done at once."""
+    action = rule_action(body.content, open_items)
+    response = TriageDecisionResponse(
+        intent="direct_action" if action else "answer",
+        goal=body.content[:500],
+        reason="A plain bookkeeping request." if action else "The main agent answers.",
+        confidence=1.0,
+        source="rules" if action else "main-agent",
+    )
+    if action is not None:
+        return _run_instantly(request, chat_session_id, body, action, response)
+    # The client queues the chat reply; the agent decides what it needs.
+    response.route = "main agent"
+    return response
+
+
+def _run_instantly(
+    request: Request,
+    chat_session_id: str,
+    body: AppendChatMessageRequest,
+    action: DirectAction,
+    response: TriageDecisionResponse,
+) -> TriageDecisionResponse:
+    """T0: done now, without a chat model; the reply lands in the transcript."""
+    service = request.app.state.task_service
+    timezone = body.timezone or request.app.state.settings.default_timezone
+    try:
+        zone(timezone)
+    except ValueError:
+        timezone = request.app.state.settings.default_timezone
+    result = run_direct_action(
+        action,
+        chat_session_id=chat_session_id,
+        items=request.app.state.work_item_service,
+        memory=request.app.state.memory_service,
+        notes=request.app.state.note_service,
+        schedules=request.app.state.schedule_service,
+        timezone=timezone,
+        tasks=service,
+        route=lambda instruction: routine_capabilities(
+            request.app.state.triager,
+            instruction,
+            supervision=request.app.state.settings.supervisor_enabled,
+        ),
+    )
+    service.append_chat_message(
+        chat_session_id, content=result.reply, role="assistant", blocks=result.blocks or None
+    )
+    response.result = result.reply
+    response.handled = True
+    response.route = f"action: {action.type}"
     return response

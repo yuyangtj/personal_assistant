@@ -9,6 +9,7 @@ Newer settings, all optional:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `ASSISTANT_SUPERVISOR_ENABLED` | `true` | Messages about coding work go to the supervisor |
+| `ASSISTANT_MAIN_AGENT_ENABLED` | `false` | Every message goes to the chat agent and its tools, without triage; plain list, memory and reminder phrasings are still done instantly |
 | `ASSISTANT_CODING_CONCURRENCY` | `2` | Coding agents running at once in the coding worker |
 | `ASSISTANT_KIMI_CODE_PROTOCOL` | `acp` | `acp` runs Kimi Code as a live session; `prompt` is the one-shot fallback |
 | `ASSISTANT_KIMI_CODE_MODEL` | `k3.1-pro` | The model Kimi Code runs on (`kimi-for-coding` is K2.8 Preview) |

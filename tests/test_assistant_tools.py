@@ -148,23 +148,20 @@ def test_a_refusal_says_not_done_so_the_model_cant_claim_it(
     assert client.app.state.schedule_service.list() == []
 
 
-def test_research_and_shopping_post_their_answers_in_the_chat_later(
-    client: TestClient, chat_id: str
-) -> None:
-    executor, _ = agent(
-        client,
-        call("research", question="cheapest trains to Copenhagen next week"),
-        call("shopping", question="how much did I spend at Lidl last month?"),
-        reply("I've started both; the answers will show up here."),
-    )
-
-    run(executor, chat_id, "find trains and check my Lidl spending")
+def test_research_and_shopping_get_the_users_own_message(client: TestClient, chat_id: str) -> None:
+    executor, _ = agent(client, call("shopping"), reply("Checking your Lidl spending."))
+    run(executor, chat_id, "how much did I spend at Lidl last month?")
+    executor, _ = agent(client, call("research"), reply("Looking it up."))
+    run(executor, chat_id, "cheapest trains to Copenhagen next week")
 
     tasks = client.get(f"/chat-sessions/{chat_id}/tasks").json()["tasks"]
     assert sorted((t["original_request"], t["required_capabilities"]) for t in tasks) == [
         ("cheapest trains to Copenhagen next week", ["web_research"]),
         ("how much did I spend at Lidl last month?", ["groceries"]),
     ]
+    # A hand-off is not something the user said: no message is posted in their name.
+    assert client.get(f"/chat-sessions/{chat_id}/messages").json()["messages"] == []
+    assert {t["source_context"].get("handed_off_by") for t in tasks} == {"t"}
 
 
 def test_coding_tools_report_runs_and_refuse_an_unknown_repository(
@@ -198,6 +195,7 @@ def test_the_prompt_lists_the_tools_and_lets_the_agent_start_coding(
     for name in ("remember", "list_add", "note_add", "remind", "research", "coding_start"):
         assert f"- {name} " in system
     assert "coding agent\nyou start with coding_start" in system
+    assert '"repository": "<one of: analytics-agent-playground, personal-assistant>"' in system
     assert "set up a coding workflow" not in system
     assert "offer to research it" not in system
 

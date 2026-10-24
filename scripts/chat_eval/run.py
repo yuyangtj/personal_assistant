@@ -11,6 +11,9 @@ is a real reply.
     python scripts/chat_eval/run.py                  # every scenario
     python scripts/chat_eval/run.py klarna-by-week   # only the named ones
     python scripts/chat_eval/run.py --json out.json  # also save every turn
+    python scripts/chat_eval/run.py --main-agent     # the one-assistant path, no triage
+
+With --main-agent, a turn's "main_expect" (when it has one) replaces its "expect".
 
 Models and keys come from the environment like the server (ASSISTANT_*, KIMI_API_KEY,
 MINIMAX_API_KEY). Unset choices default to production's: Kimi triage on, MiniMax answers.
@@ -27,9 +30,10 @@ import sys
 import tempfile
 import time
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -56,7 +60,11 @@ from app.work.purchases import PurchaseService  # noqa: E402
 from app.worker import TaskWorker, add_chat_executors, build_manager  # noqa: E402
 
 SCENARIOS = Path(__file__).with_name("scenarios.json")
-CLOCK = {"local_time": "2026-10-11T18:00:00", "timezone": "Europe/Stockholm"}
+#: The phone's clock, now: reminders are checked against the real time ("tomorrow at 9").
+CLOCK = {
+    "local_time": datetime.now(ZoneInfo("Europe/Stockholm")).strftime("%Y-%m-%dT%H:%M:%S"),
+    "timezone": "Europe/Stockholm",
+}
 TURN_TIMEOUT_SECONDS = 180
 MERCHANTS = [("Lidl", 180), ("Willys", 420), ("Apotea", 210), ("SJ", 388), ("Uniqlo", 499)]
 
@@ -79,7 +87,7 @@ def klarna_export() -> str:
 class Harness:
     """The API and a worker on one fresh database, driven like the console drives them."""
 
-    def __init__(self, directory: Path):
+    def __init__(self, directory: Path, *, main_agent: bool = False):
         self.settings = replace(
             Settings.from_env(),
             database_url=f"sqlite+pysqlite:///{directory / 'eval.sqlite3'}",
@@ -88,6 +96,7 @@ class Harness:
             github_token=None,
             ntfy_topic_url=None,
             brief_writeback_enabled=False,
+            main_agent_enabled=main_agent,
         )
         self.app = create_app(self.settings)
         self.client = TestClient(self.app).__enter__()
@@ -186,6 +195,12 @@ def check(turn: dict, expect: dict) -> list[str]:
     route = turn["routing"].get("route") or ""
     if "route" in expect and not any(route.startswith(r) for r in _list(expect["route"])):
         problems.append(f"routed to {route!r}, expected {expect['route']}")
+    if "route_or_tool" in expect:
+        # Done either instantly (that route) or by the agent with that tool.
+        wanted_route, wanted_tool = expect["route_or_tool"]
+        called = {call.get("tool") for call in turn["tool_calls"]}
+        if not route.startswith(wanted_route) and wanted_tool not in called:
+            problems.append(f"neither routed to {wanted_route!r} nor called {wanted_tool}")
     if expect.get("no_offer") and route.startswith("offer"):
         problems.append(f"asked instead of answering ({route})")
     capabilities = {c for task in turn["tasks"] for c in task["capabilities"]}
@@ -222,14 +237,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("names", nargs="*", help="scenarios to run (default: all)")
     parser.add_argument("--json", type=Path, help="save every turn here")
+    parser.add_argument(
+        "--main-agent", action="store_true", help="every message to the chat agent, no triage"
+    )
     args = parser.parse_args()
     scenarios = json.loads(SCENARIOS.read_text())
     if args.names:
         scenarios = [s for s in scenarios if s["name"] in args.names]
     with tempfile.TemporaryDirectory() as directory:
-        harness = Harness(Path(directory))
+        harness = Harness(Path(directory), main_agent=args.main_agent)
         settings = harness.settings
         triage = settings.triage_provider if settings.triage_model_enabled else "rules"
+        if args.main_agent:
+            triage = "none (main agent)"
         print(
             f"triage: {triage}, "
             f"answers: {harness.settings.conversation_model_provider}, "
@@ -246,7 +266,10 @@ def main() -> None:
                 print(f"- {scenario['name']}")
                 for step in scenario["turns"]:
                     turn = harness.say(chat, step["say"])
-                    problems = check(turn, step.get("expect") or {})
+                    expect = step.get("expect") or {}
+                    if args.main_agent and "main_expect" in step:
+                        expect = step["main_expect"]
+                    problems = check(turn, expect)
                     ok &= not problems
                     seconds.append(turn["seconds"])
                     results.append({"scenario": scenario["name"], **turn, "problems": problems})
