@@ -808,3 +808,49 @@ def test_a_pull_request_revision_gets_no_new_spec(tmp_path: Path) -> None:
     assert writer.requests == []
     assert reviewer.references == ["Use a rocket icon"]
     assert result.output["review"]["outcome"] == "approved"
+
+
+def test_generated_files_are_never_staged_or_committed(tmp_path: Path) -> None:
+    from app.coding.git import stage_everything
+
+    repository, _remote = _repository(tmp_path)
+    (repository / "feature.py").write_text("x = 1\n", encoding="utf-8")
+    for junk in ("__pycache__/feature.cpython-313.pyc", "pkg/sub/__pycache__/y.pyc", "stray.pyc"):
+        path = repository / junk
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\x00compiled")
+    (repository / "pkg" / "real.py").write_text("y = 2\n", encoding="utf-8")
+
+    stage_everything(repository)
+
+    assert git(repository, "diff", "--cached", "--name-only").splitlines() == [
+        "feature.py",
+        "pkg/real.py",
+    ]
+
+
+def test_a_run_that_only_leaves_generated_files_changed_nothing(tmp_path: Path) -> None:
+    repository, _remote = _repository(tmp_path)
+
+    class Agent:
+        provider = "test-agent"
+
+        def run(self, *, worktree: Path, **_kwargs) -> CodeAgentReport:
+            (worktree / "__pycache__").mkdir()
+            (worktree / "__pycache__" / "x.pyc").write_bytes(b"\x00")
+            return CodeAgentReport(summary="Ran the tests")
+
+    executor = CodingPullRequestExecutor(
+        repository_path=repository,
+        worktree_root=tmp_path / "worktrees",
+        github_repository="acme/widget",
+        github=object(),  # type: ignore[arg-type]
+        agent=Agent(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(CodingAgentError, match="without repository changes"):
+        executor.execute(
+            task_id="12345678-1234-1234-1234-123456789abc",
+            request="Do nothing",
+            is_cancelled=lambda: False,
+        )

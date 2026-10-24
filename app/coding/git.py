@@ -25,6 +25,16 @@ def delete_git_ref(repository: Path, ref: str) -> None:
         git(repository, "update-ref", "-d", ref)
 
 
+#: What an interpreter or a test run leaves behind. These are never part of a change, and
+#: a repository without a .gitignore for them would otherwise get them committed.
+GENERATED_FILES = (":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/*.pyc")
+
+
+def stage_everything(worktree: Path) -> None:
+    """Stage every change in the worktree except generated files such as __pycache__."""
+    git(worktree, "add", "-A", "--", ".", *GENERATED_FILES)
+
+
 def restore_clean_worktree(worktree: Path) -> None:
     git(worktree, "reset", "--hard", "HEAD")
     git(worktree, "clean", "-fd")
