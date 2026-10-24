@@ -17,6 +17,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "playwright>=1.49,<2",
     "pytest>=8.4.0,<10",
     "ruff>=0.12.0,<1",
 ]
@@ -30,7 +31,9 @@ packages = ["app"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# The browser tests (tests/ui) need Chromium and run in their own CI job: pytest -m ui
+addopts = "-q -m 'not ui'"
+markers = ["ui: browser tests of the console; need Chromium (uv run playwright install chromium)"]
 
 [tool.ruff]
 target-version = "py312"
