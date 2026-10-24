@@ -76,10 +76,14 @@ Providers, models and other settings are described in
 ```bash
 uv run pytest
 uv run ruff check . && uv run ruff format --check .
+uv run playwright install chromium && uv run pytest -m ui   # the console, in a browser
 ```
 
-Tests use a temporary SQLite database; PostgreSQL is used in Docker and production. CI
-runs the same checks on every pull request.
+Tests use a temporary SQLite database; PostgreSQL is used in Docker and production. The
+browser tests (`tests/ui`) start the app on a free port and drive the real console in
+Chromium; they are left out of the plain `pytest` run (set `UI_BROWSER_CHANNEL=chrome` to
+use the Chrome you already have). CI runs everything on every pull request, the browser
+tests as their own `ui` job.
 
 ## Deploy
 

@@ -34,3 +34,22 @@ jobs:
         run: uv run pytest
       - name: Validate Compose configuration
         run: docker compose config --quiet
+
+  # The console's JavaScript, in a real browser against a real server (tests/ui).
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install locked dependencies
+        run: |
+          python -m pip install uv
+          uv sync --locked --all-groups
+      - name: Install Chromium
+        run: uv run playwright install --with-deps chromium
+      - name: Browser tests
+        run: uv run pytest -m ui
