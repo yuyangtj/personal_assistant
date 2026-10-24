@@ -2,6 +2,10 @@
 
 state.notes = [];
 state.noteFilter = "";          // "" for all, a tag, or ARCHIVED
+// A big collection is drawn a screenful at a time: this many cards, then more on scroll.
+const NOTE_BATCH = 48;
+state.noteLimit = NOTE_BATCH;
+state.noteRendered = 0;
 state.noteEditing = null;
 state.noteDeleteArmed = null;
 state.keepFile = null;
@@ -14,6 +18,7 @@ async function loadNotes() {
     state.notes = (await api("/notes?include_archived=true")).notes;
     $("note-error").textContent = "";
   } catch (error) { $("note-error").textContent = error.message || String(error); }
+  state.noteLimit = NOTE_BATCH;  // coming back to the tab starts at the top
   renderNotes();
 }
 
@@ -141,6 +146,42 @@ function noteCard(note) {
       </div></div></div>`;
 }
 
+// Keep-style masonry: each card goes into the shortest column, left to right.
+function placeNotes(notes) {
+  const columns = [...$("note-list").querySelectorAll(":scope > .note-col")];
+  for (const note of notes) {
+    const shortest = columns.reduce((best, column) => (column.offsetHeight < best.offsetHeight ? column : best));
+    shortest.insertAdjacentHTML("beforeend", noteCard(note));
+  }
+}
+
+function updateMoreNotes(total) {
+  const more = $("note-more");
+  const left = total - state.noteRendered;
+  more.hidden = left <= 0;
+  if (left > 0) {
+    more.firstElementChild.textContent = `Show more notes (${left.toLocaleString()} more)`;
+    // Look again: if the button is still near the screen after a batch, load the next one.
+    noteMoreObserver.unobserve(more);
+    noteMoreObserver.observe(more);
+  }
+}
+
+function showMoreNotes() {
+  const notes = shownNotes();
+  if (state.noteRendered >= notes.length) return;
+  const batch = notes.slice(state.noteRendered, state.noteRendered + NOTE_BATCH);
+  placeNotes(batch);
+  state.noteRendered += batch.length;
+  state.noteLimit = state.noteRendered;  // a redraw keeps showing what is on screen
+  updateMoreNotes(notes.length);
+}
+
+const noteMoreObserver = new IntersectionObserver((entries) => {
+  if (entries.some((entry) => entry.isIntersecting)) showMoreNotes();
+}, { rootMargin: "900px" });
+$("note-more").onclick = showMoreNotes;
+
 function renderNotes() {
   if (state.noteFilter === ARCHIVED && !state.notes.some((note) => note.archived)) state.noteFilter = "";
   renderNoteTags();
@@ -151,20 +192,25 @@ function renderNotes() {
   const list = $("note-list");
   if (!notes.length) {
     list.innerHTML = `<div class="empty">${empty}</div>`;
+    state.noteRendered = 0;
   } else {
-    // Keep-style masonry: cards go left to right, each into the shortest column.
     const count = noteColumnCount();
     list.innerHTML = Array.from({ length: count }, () => `<div class="note-col"></div>`).join("");
-    const columns = [...list.children];
-    for (const note of notes) {
-      const shortest = columns.reduce((best, column) => (column.offsetHeight < best.offsetHeight ? column : best));
-      shortest.insertAdjacentHTML("beforeend", noteCard(note));
-    }
+    const visible = notes.slice(0, Math.max(state.noteLimit, NOTE_BATCH));
+    placeNotes(visible);
+    state.noteRendered = visible.length;
     state.noteColumns = count;
   }
+  updateMoreNotes(notes.length);
   // A note being edited opens over the page, so it has room even on a phone.
   const editing = state.notes.find((note) => note.id === state.noteEditing);
   if (editing) list.insertAdjacentHTML("beforeend", `<div class="note-modal" data-note-backdrop>${noteEditor(editing)}</div>`);
+}
+
+// Searching or filtering starts again from the first screenful, over all notes.
+function showFirstNotes() {
+  state.noteLimit = NOTE_BATCH;
+  renderNotes();
 }
 
 function noteColumnCount() {
@@ -234,14 +280,14 @@ $("note-close").onclick = () => {
   document.activeElement.blur();
 };
 
-$("note-search").oninput = renderNotes;
+$("note-search").oninput = showFirstNotes;
 
 $("note-tags-bar").onclick = (event) => {
   const chip = event.target.closest("[data-note-filter]");
   if (!chip) return;
   state.noteFilter = chip.dataset.noteFilter;
   state.noteEditing = null;
-  renderNotes();
+  showFirstNotes();
 };
 
 async function addTag(id, input) {
@@ -277,6 +323,7 @@ $("note-list").onclick = async (event) => {
       return;  // typing a tag: don't open the note
     } else if (tag) {
       state.noteFilter = tag.dataset.noteFilter;
+      state.noteLimit = NOTE_BATCH;
     } else if (check !== undefined) {
       const checklist = note.checklist.map((item, index) =>
         (index === Number(check) ? { ...item, done: event.target.checked } : item));
