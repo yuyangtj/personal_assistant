@@ -807,7 +807,7 @@ def build_toolbox(
         repositories,
         triage_client(settings) if settings.triage_model_enabled else None,
         min_confidence=settings.triage_min_confidence,
-        research_available=bool(settings.tavily_api_key or settings.brave_search_api_key),
+        research_available=settings.web_search_available,
         groceries_available=True,
     )
     tools = bookkeeping_tools(
@@ -825,7 +825,7 @@ def build_toolbox(
         tools += repository_tools(RepositoryReader(repositories, github))
     tools += job_tools(
         task_service,
-        research=bool(settings.tavily_api_key or settings.brave_search_api_key),
+        research=settings.web_search_available,
         # The shopping agent isn't installed on coding-only workers.
         shopping=not settings.worker_coding_only,
     )
@@ -850,9 +850,7 @@ def add_chat_executors(
     """
     conversation_executor = build_conversation_executor(settings)
     if conversation_executor is not None:
-        conversation_executor.research_available = bool(
-            settings.tavily_api_key or settings.brave_search_api_key
-        )
+        conversation_executor.research_available = settings.web_search_available
         abilities = AbilityRegistry.from_directory(settings.abilities_directory).available(settings)
         conversation_executor.abilities_text = abilities_prompt(abilities)
         conversation_executor.default_timezone = settings.default_timezone
@@ -879,9 +877,7 @@ def add_chat_executors(
             "%s conversation credentials are not set; conversation falls back to fake",
             settings.conversation_model_provider,
         )
-    search = build_search(
-        tavily_api_key=settings.tavily_api_key, brave_api_key=settings.brave_search_api_key
-    )
+    search = build_search(settings)
     if search is not None and conversation_executor is not None:
         executors[ToolAgentExecutor.id] = ToolAgentExecutor(conversation_executor.client, search)
         logger.info("Web research agent enabled with %s search", search.name)

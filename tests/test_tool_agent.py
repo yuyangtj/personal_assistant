@@ -7,9 +7,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.chat.triage import Triager
+from app.config import Settings
 from app.execution.tool_agent import ToolAgentExecutor
 from app.repositories import RepositoryRegistry
-from app.tools.search import BraveSearch, SearchError, SearchResult, TavilySearch
+from app.tools.search import (
+    BraveSearch,
+    DeepSeekSearch,
+    SearchError,
+    SearchResult,
+    TavilySearch,
+    build_search,
+)
 from tests.test_triage import ScriptedChat, suggestion
 
 
@@ -108,6 +116,45 @@ def test_tavily_and_brave_clients_normalize_results() -> None:
     assert brave.search("q") == [SearchResult("B", "https://b", "d")]
     with pytest.raises(SearchError, match="401"):
         failing.search("q")
+
+
+def test_deepseek_search_sends_a_short_query_and_prefers_the_summary() -> None:
+    sent = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"title": "A", "url": "https://a", "snippet": "s", "summary": "long"},
+                    {"title": "B", "url": "https://b", "snippet": "only snippet"},
+                ]
+            },
+        )
+
+    search = DeepSeekSearch("ds", transport=httpx.MockTransport(handler))
+
+    assert search.search("x" * 200) == [
+        SearchResult("A", "https://a", "long"),
+        SearchResult("B", "https://b", "only snippet"),
+    ]
+    (request,) = sent
+    assert request.url == "https://api.deepseek.com/v1/tools/search"
+    assert request.headers["authorization"] == "Bearer ds"
+    assert json.loads(request.content) == {"query": "x" * 128, "count": 5}
+
+
+def test_the_first_search_key_set_wins() -> None:
+    def name(**keys) -> str | None:
+        search = build_search(Settings(**keys))
+        return search.name if search else None
+
+    assert name() is None
+    assert name(brave_search_api_key="b") == "brave"
+    assert name(tavily_api_key="t", brave_search_api_key="b") == "tavily"
+    assert name(deepseek_api_key="d", tavily_api_key="t") == "deepseek"
+    assert Settings(deepseek_api_key="d").web_search_available
 
 
 def test_triage_routes_research_to_the_agent_only_when_available() -> None:

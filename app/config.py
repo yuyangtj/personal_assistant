@@ -36,6 +36,8 @@ class Settings:
     #: Every message goes to the chat agent and its tools, without triage.
     main_agent_enabled: bool = False
     ntfy_topic_url: str | None = None
+    #: Web search for the research agent: DeepSeek, Tavily or Brave, the first key set wins.
+    deepseek_api_key: str | None = None
     tavily_api_key: str | None = None
     #: The mcp-tools gateway (Willys, Lidl); the grocery agent is installed when it is set.
     mcp_gateway_url: str | None = None
@@ -107,6 +109,10 @@ class Settings:
     manager_model_minimum_confidence: float = 0.5
     slack_signing_secret: str | None = None
     slack_bot_token: str | None = None
+
+    @property
+    def web_search_available(self) -> bool:
+        return bool(self.deepseek_api_key or self.tavily_api_key or self.brave_search_api_key)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -202,6 +208,7 @@ class Settings:
                 os.getenv("ASSISTANT_TRIAGE_MODEL_ENABLED", str(defaults.triage_model_enabled))
             ),
             ntfy_topic_url=os.getenv("ASSISTANT_NTFY_TOPIC_URL") or None,
+            deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
             tavily_api_key=os.getenv("TAVILY_API_KEY") or None,
             mcp_gateway_url=os.getenv("ASSISTANT_MCP_GATEWAY_URL") or None,
             mcp_gateway_token=os.getenv("ASSISTANT_MCP_GATEWAY_TOKEN") or None,
