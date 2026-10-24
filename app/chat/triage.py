@@ -19,7 +19,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.domain.proposals import propose_task
-from app.integrations.chat import ChatClient, ChatMessage
+from app.integrations.chat import ChatClient, ChatMessage, correction_turns
 from app.integrations.model_json import extract_json_object
 from app.repositories import RepositoryRegistry
 from app.repositories.models import RepositoryManifest
@@ -382,18 +382,21 @@ class Triager:
             ChatMessage("user", json.dumps(request, ensure_ascii=False)),
         ]
         reason = "no attempt made"
+        # Room for models that think before answering; the reply itself is small.
+        max_tokens = 800
         for _attempt in range(self.max_attempts):
-            # Room for models that think before answering; the reply itself is small.
-            completion = client.complete(messages, max_tokens=800)
+            completion = client.complete(messages, max_tokens=max_tokens)
+            if not completion.text.strip():
+                # It spent the whole budget thinking: give the next try twice the room.
+                max_tokens *= 2
             try:
                 return ModelSuggestion.model_validate(extract_json_object(completion.text))
             except (ValueError, ValidationError) as error:
                 reason = str(error).splitlines()[0][:200]
                 messages.extend(
-                    [
-                        ChatMessage("assistant", completion.text[:1000]),
-                        ChatMessage("user", f"Invalid ({reason}). Return only the JSON object."),
-                    ]
+                    correction_turns(
+                        completion.text, f"Invalid ({reason}). Return only the JSON object."
+                    )
                 )
         raise ValueError(f"No valid triage after {self.max_attempts} attempts: {reason}")
 

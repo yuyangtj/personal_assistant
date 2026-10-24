@@ -22,7 +22,7 @@ from app.execution.attachments import attachments_prompt
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
 from app.execution.routine_context import routine_prompt
-from app.integrations.chat import ChatClient, ChatMessage
+from app.integrations.chat import ChatClient, ChatMessage, correction_turns
 from app.integrations.model_json import extract_arrow_tool_call, extract_json_object
 from app.tools.mcp import McpError, McpGateway, Toolset, condense
 
@@ -202,13 +202,10 @@ class GroceryAgentExecutor:
             try:
                 step = _step(completion.text)
             except (ValueError, ValidationError):
-                messages += [
-                    ChatMessage("assistant", completion.text[:1000]),
-                    ChatMessage(
-                        "user",
-                        f"Still answering: {request[:300]!r}. Reply with exactly one JSON object.",
-                    ),
-                ]
+                messages += correction_turns(
+                    completion.text,
+                    f"Still answering: {request[:300]!r}. Reply with exactly one JSON object.",
+                )
                 continue
             messages.append(ChatMessage("assistant", step.model_dump_json(exclude_defaults=True)))
             if step.action == "finish" and step.answer and step.answer.strip():

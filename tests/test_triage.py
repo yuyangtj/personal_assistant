@@ -248,3 +248,39 @@ def test_a_follow_up_the_model_reads_as_a_task_still_stays_with_the_shopping_age
 
     assert (followed.intent, followed.capabilities) == (TriageIntent.ANSWER, ("groceries",))
     assert fresh.intent == TriageIntent.PROPOSE_TASK and fresh.capabilities == ()
+
+
+def test_an_empty_reply_is_retried_with_more_room_and_not_sent_back(
+    repositories: RepositoryRegistry,
+) -> None:
+    # A thinking model can spend its whole budget thinking and answer nothing. Sending that
+    # empty answer back as an assistant message makes Kimi refuse the retry (HTTP 400).
+    class BudgetedChat(ScriptedChat):
+        def __init__(self, *replies):
+            super().__init__(*replies)
+            self.budgets: list[int] = []
+
+        def complete(self, messages, *, max_tokens: int = 700) -> ChatCompletion:
+            self.budgets.append(max_tokens)
+            return super().complete(messages, max_tokens=max_tokens)
+
+    chat = BudgetedChat("", suggestion(intent="answer", confidence=0.9))
+
+    decision = Triager(repositories, chat).decide("how much did I spend at Lidl?")
+
+    assert (decision.intent, decision.source) == (TriageIntent.ANSWER, "model")
+    assert chat.budgets == [800, 1600]
+    retry = chat.requests[1]
+    assert all(message.content.strip() for message in retry)
+    assert [message.role for message in retry] == ["system", "user", "user"]
+
+
+def test_a_non_empty_invalid_reply_is_still_shown_to_the_model() -> None:
+    from app.integrations.chat import correction_turns
+
+    assert correction_turns("not json", "Fix it") == [
+        ChatMessage("assistant", "not json"),
+        ChatMessage("user", "Fix it"),
+    ]
+    assert correction_turns("  \n", "Fix it") == [ChatMessage("user", "Fix it")]
+    assert correction_turns("x" * 50, "Fix it", limit=10)[0].content == "x" * 10
