@@ -28,7 +28,7 @@ from app.domain.enums import EventType, TaskStatus
 from app.domain.work_items import render_work_item_context
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
-from app.integrations.chat import ChatClient, ChatMessage
+from app.integrations.chat import ChatClient, ChatMessage, correction_turns
 from app.integrations.model_json import extract_json_object
 from app.persistence.database import Database
 from app.persistence.models import TaskEventModel
@@ -307,15 +307,12 @@ class SupervisorExecutor:
             except (ValueError, ValidationError):
                 # Restate the question: a bare format reminder gets answered as if the user
                 # had said it.
-                messages += [
-                    ChatMessage("assistant", completion.text[:1000]),
-                    ChatMessage(
-                        "user",
-                        "That step was not valid JSON for this protocol. Still answering the "
-                        f"user's message: {request[:300]!r}. Reply with exactly one JSON "
-                        "object from the instructions.",
-                    ),
-                ]
+                messages += correction_turns(
+                    completion.text,
+                    "That step was not valid JSON for this protocol. Still answering the "
+                    f"user's message: {request[:300]!r}. Reply with exactly one JSON "
+                    "object from the instructions.",
+                )
                 continue
             messages.append(ChatMessage("assistant", step.model_dump_json(exclude_defaults=True)))
             if step.action == "reply" and step.reply and step.reply.strip():

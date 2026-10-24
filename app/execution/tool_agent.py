@@ -17,7 +17,7 @@ from app.domain.work_items import render_work_item_context
 from app.execution.attachments import attachments_prompt
 from app.execution.base import ConversationTurn, ExecutionResult
 from app.execution.fake import ExecutionCancelled
-from app.integrations.chat import ChatClient, ChatMessage
+from app.integrations.chat import ChatClient, ChatMessage, correction_turns
 from app.integrations.model_json import extract_json_object
 from app.tools.search import SearchError
 
@@ -84,10 +84,9 @@ class ToolAgentExecutor:
                 step = AgentStep.model_validate(extract_json_object(completion.text))
             except (ValueError, ValidationError):
                 messages.extend(
-                    [
-                        ChatMessage("assistant", completion.text[:1000]),
-                        ChatMessage("user", "Reply with exactly one JSON object as instructed."),
-                    ]
+                    correction_turns(
+                        completion.text, "Reply with exactly one JSON object as instructed."
+                    )
                 )
                 continue
             messages.append(ChatMessage("assistant", json.dumps(step.model_dump())))

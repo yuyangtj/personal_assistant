@@ -29,6 +29,16 @@ class ChatCompletion:
     provider: str | None = None
 
 
+def correction_turns(reply: str, correction: str, *, limit: int = 1000) -> list[ChatMessage]:
+    """The model's unusable reply and what to fix, to append before asking again.
+
+    An empty reply (a thinking model that spent its whole budget thinking) is left out:
+    providers reject an empty assistant message (Kimi answers HTTP 400).
+    """
+    turns = [ChatMessage("assistant", reply[:limit])] if reply.strip() else []
+    return [*turns, ChatMessage("user", correction)]
+
+
 class ChatClient(Protocol):
     provider: str
     model: str

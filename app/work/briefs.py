@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.domain.work_items import Brief, WorkItemStatus
-from app.integrations.chat import ChatClient, ChatMessage
+from app.integrations.chat import ChatClient, ChatMessage, correction_turns
 from app.integrations.model_json import extract_json_object
 from app.persistence.database import Database
 from app.persistence.models import WorkItemModel, utc_now
@@ -68,13 +68,11 @@ class BriefWriter:
             except (ValueError, ValidationError) as error:
                 reason = str(error).splitlines()[0][:300]
                 messages.extend(
-                    [
-                        ChatMessage("assistant", completion.text[:2000]),
-                        ChatMessage(
-                            "user",
-                            f"That reply was invalid ({reason}). Return only the JSON object.",
-                        ),
-                    ]
+                    correction_turns(
+                        completion.text,
+                        f"That reply was invalid ({reason}). Return only the JSON object.",
+                        limit=2000,
+                    )
                 )
         raise BriefWriterError(f"No valid brief after {self.max_attempts} attempts: {reason}")
 
