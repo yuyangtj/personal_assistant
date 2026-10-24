@@ -28,6 +28,7 @@ server.
 - **Notes** are a private, Keep-like pile of notes with tags and checklists, with an import
   from Google Keep. No model ever sees them: [`docs/notes.md`](docs/notes.md).
 
+Where it is heading, and the rules for new features: [`docs/assistant-design.md`](docs/assistant-design.md).
 How a message flows through the code: [`docs/architecture.md`](docs/architecture.md).
 Chats, tasks and their API: [`docs/chats-and-tasks.md`](docs/chats-and-tasks.md).
 What is built and what is next:
