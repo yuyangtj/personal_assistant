@@ -13,10 +13,14 @@ DEPLOY_BRANCH="${ASSISTANT_DEPLOY_BRANCH:-main}"
 EXPECTED_SHA="${ASSISTANT_DEPLOY_EXPECTED_SHA:-}"
 SIMULATE_HEALTH_FAILURE="${ASSISTANT_DEPLOY_SIMULATE_HEALTH_FAILURE:-0}"
 CURRENT_TAG_FILE="${REPOSITORY_ROOT}/.deploy-current-tag"
-RELEASES_TO_KEEP=3
+RELEASES_TO_KEEP=2
 EXIT_ROLLED_BACK=3
 BACKUPS_TO_KEEP=20
+BACKUP_DAYS_TO_KEEP=30
 PROVIDER="${1:-}"
+
+# shellcheck source=scripts/housekeeping.sh
+source "${SCRIPT_DIRECTORY}/housekeeping.sh"
 
 usage() {
     echo "Usage: $0 [minimax|kimi]  (default: keep the provider set in .env.remote)" >&2
@@ -134,9 +138,9 @@ if "${compose[@]}" ps --status running --services 2>/dev/null | grep -qx postgre
     umask 077
     echo "Backing up PostgreSQL to ${backup_path}..."
     "${compose[@]}" exec -T postgres pg_dump -U assistant -d assistant -Fc > "${backup_path}"
-    # Timestamped names sort chronologically; keep only the newest dumps.
-    find "${backup_directory}" -maxdepth 1 -type f -name 'assistant-*.dump' \
-        | sort -r | tail -n +"$((BACKUPS_TO_KEEP + 1))" | xargs -r rm -f --
+    # The newest dumps, plus the last one of each of the last 30 days.
+    prune_backups "${backup_directory}" "${BACKUPS_TO_KEEP}" \
+        "$(date -u -d "${BACKUP_DAYS_TO_KEEP} days ago" +%Y%m%d)"
 fi
 
 release_tag="$(git rev-parse HEAD)"
@@ -178,6 +182,7 @@ fi
 
 printf '%s\n' "${release_tag}" > "${CURRENT_TAG_FILE}"
 prune_release_images
+prune_build_cache
 
 # `up -d` leaves Caddy running for a config-only change, and its single-file mount keeps
 # the old Caddyfile after a checkout replaces it: recreate it when the two differ.
