@@ -521,3 +521,290 @@ def test_repository_coding_executor_routes_by_trusted_repository_id() -> None:
 
     assert calls == ["analytics-agent-playground"]
     assert result.output["repository_id"] == "analytics-agent-playground"
+
+
+# The spec before coding and the independent review before the PR.
+
+
+class _SpecWriter:
+    def __init__(self, spec):
+        self.spec = spec
+        self.requests: list[str] = []
+
+    def write(self, request: str, worktree: Path):
+        self.requests.append(request)
+        return self.spec
+
+
+class _Reviewer:
+    def __init__(self, *verdicts):
+        self.verdicts = list(verdicts)
+        self.references: list[str] = []
+
+    def review(self, reference: str, worktree: Path, validation):
+        self.references.append(reference)
+        return self.verdicts.pop(0)
+
+
+class _RecordingAgent:
+    provider = "test-agent"
+
+    def __init__(self, contents: tuple[str, ...] = ("implemented\n",)):
+        self.contents = contents
+        self.requests: list[str] = []
+
+    def run(self, *, worktree: Path, request: str, **_kwargs) -> CodeAgentReport:
+        self.requests.append(request)
+        content = self.contents[min(len(self.requests), len(self.contents)) - 1]
+        (worktree / "feature.txt").write_text(content, encoding="utf-8")
+        return CodeAgentReport(summary=f"Attempt {len(self.requests)}")
+
+
+class _PullRequests:
+    def __init__(self, repository: Path):
+        self.repository = repository
+        self.bodies: list[str] = []
+
+    def _pull_request(self, branch: str) -> GitHubPullRequest:
+        return GitHubPullRequest(
+            repository="acme/widget",
+            number=9,
+            url="https://github.com/acme/widget/pull/9",
+            head_branch=branch,
+            head_sha=git(self.repository, "rev-parse", f"origin/{branch}"),
+            base_branch="main",
+            state="open",
+            draft=True,
+            merged=False,
+        )
+
+    def create_pull_request(self, **kwargs) -> GitHubPullRequest:
+        self.bodies.append(str(kwargs["body"]))
+        git(self.repository, "fetch", "origin")
+        return self._pull_request(str(kwargs["head"]))
+
+    def get_pull_request(self, *, repository: str, number: int) -> GitHubPullRequest:
+        git(self.repository, "fetch", "origin")
+        return self._pull_request("assistant/task-revision")
+
+
+def _spec_executor(tmp_path: Path, agent, *, spec_writer=None, reviewer=None, profile=None):
+    from app.coding.spec import CodingSpec
+
+    repository, remote = _repository(tmp_path)
+    github = _PullRequests(repository)
+    writer = spec_writer or _SpecWriter(
+        CodingSpec(goal="Add the feature", acceptance=["When run, feature.txt should exist"])
+    )
+    executor = CodingPullRequestExecutor(
+        repository_path=repository,
+        worktree_root=tmp_path / "worktrees",
+        github_repository="acme/widget",
+        github=github,  # type: ignore[arg-type]
+        agent=agent,
+        validation_profile=profile,
+        spec_writer=writer,  # type: ignore[arg-type]
+        reviewer=reviewer,  # type: ignore[arg-type]
+    )
+    return executor, github, repository, remote
+
+
+def _counting_profile(counter: Path, *, needs: str | None = None) -> ValidationProfile:
+    check = f"pathlib.Path({str(counter)!r}).open('a').write('x')\n"
+    if needs is not None:
+        check += f"sys.exit(0 if pathlib.Path('feature.txt').read_text() == {needs!r} else 1)\n"
+    return ValidationProfile(
+        id="count",
+        name="Count",
+        steps=(
+            ValidationStep(
+                id="tests",
+                command=(sys.executable, "-c", "import pathlib, sys\n" + check),
+                timeout_seconds=30,
+            ),
+        ),
+    )
+
+
+def test_the_spec_guides_the_agent_and_an_approved_review_opens_the_pr(tmp_path: Path) -> None:
+    from app.coding.review import ReviewVerdict
+
+    agent = _RecordingAgent()
+    reviewer = _Reviewer(ReviewVerdict(approved=True))
+    executor, github, _repo, _remote = _spec_executor(tmp_path, agent, reviewer=reviewer)
+    progress: list[tuple[str, str]] = []
+
+    result = executor.execute(
+        task_id="12345678-1234-1234-1234-123456789abc",
+        request="Implement feature",
+        is_cancelled=lambda: False,
+        context={"progress": lambda text, kind: progress.append((kind, text))},
+    )
+
+    assert len(agent.requests) == 1
+    assert agent.requests[0].startswith("SPEC (follow the acceptance criteria")
+    assert "1. When run, feature.txt should exist" in agent.requests[0]
+    assert "Implement feature" in agent.requests[0]
+    plans = [text for kind, text in progress if kind == "plan"]
+    assert plans and plans[0].startswith("Goal: Add the feature")
+    assert reviewer.references[0].startswith("Goal: Add the feature")
+    assert ("milestone", "Review: approved") in progress
+    assert result.output["review"] == {"outcome": "approved", "problems": []}
+    assert "Review: approved" in result.output["notes"]
+    assert "- Spec: Goal: Add the feature" in github.bodies[0]
+    assert "- Review: approved" in github.bodies[0]
+
+
+def test_a_rejected_review_sends_the_agent_back_and_validation_runs_again(
+    tmp_path: Path,
+) -> None:
+    from app.coding.review import ReviewVerdict
+
+    counter = tmp_path / "validation-runs"
+    agent = _RecordingAgent(("first\n", "second\n"))
+    reviewer = _Reviewer(
+        ReviewVerdict(approved=False, problems=["Criterion 1: feature.txt says first"]),
+        ReviewVerdict(approved=True),
+    )
+    executor, _github, _repo, remote = _spec_executor(
+        tmp_path, agent, reviewer=reviewer, profile=_counting_profile(counter)
+    )
+
+    result = executor.execute(
+        task_id="12345678-1234-1234-1234-123456789abc",
+        request="Implement feature",
+        is_cancelled=lambda: False,
+    )
+
+    assert len(agent.requests) == 2
+    assert "REVIEW FIX PASS" in agent.requests[1]
+    assert "- Criterion 1: feature.txt says first" in agent.requests[1]
+    assert counter.read_text() == "xx"  # validated after the agent's fix too
+    assert result.output["review"]["outcome"] == "approved"
+    assert git(remote, "show", "assistant/task-123456781234:feature.txt") == "second"
+
+
+def test_review_concerns_that_remain_do_not_block_the_pr(tmp_path: Path) -> None:
+    from app.coding.review import ReviewVerdict
+
+    still_wrong = ReviewVerdict(approved=False, problems=["Criterion 1 is not met"])
+    agent = _RecordingAgent()
+    reviewer = _Reviewer(still_wrong, still_wrong, still_wrong)
+    executor, github, _repo, _remote = _spec_executor(tmp_path, agent, reviewer=reviewer)
+
+    result = executor.execute(
+        task_id="12345678-1234-1234-1234-123456789abc",
+        request="Implement feature",
+        is_cancelled=lambda: False,
+    )
+
+    assert len(agent.requests) == 3  # the first run plus two review fixes
+    assert result.output["review"] == {
+        "outcome": "unresolved",
+        "problems": ["Criterion 1 is not met"],
+    }
+    assert "reviewer still has concerns" in result.output["reply"]
+    assert "- Review concern: Criterion 1 is not met" in github.bodies[0]
+
+
+def test_without_a_spec_or_review_answer_the_run_works_as_before(tmp_path: Path) -> None:
+    agent = _RecordingAgent()
+    executor, github, _repo, _remote = _spec_executor(
+        tmp_path, agent, spec_writer=_SpecWriter(None), reviewer=_Reviewer(None)
+    )
+
+    result = executor.execute(
+        task_id="12345678-1234-1234-1234-123456789abc",
+        request="Implement feature",
+        is_cancelled=lambda: False,
+    )
+
+    assert len(agent.requests) == 1
+    assert "SPEC" not in agent.requests[0]
+    assert result.output["review"] == {"outcome": "skipped", "problems": []}
+    assert not [note for note in result.output["notes"] if note.startswith("Spec:")]
+    assert result.output["approval_request"]["number"] == 9
+
+
+def test_a_review_fix_that_breaks_validation_keeps_the_work_on_a_branch(
+    tmp_path: Path,
+) -> None:
+    from app.coding.review import ReviewVerdict
+
+    agent = _RecordingAgent(("ok\n", "broken\n"))
+    reviewer = _Reviewer(ReviewVerdict(approved=False, problems=["Rename it"]))
+    executor, _github, _repo, remote = _spec_executor(
+        tmp_path,
+        agent,
+        reviewer=reviewer,
+        profile=_counting_profile(tmp_path / "runs", needs="ok\n"),
+    )
+
+    with pytest.raises(CodingAgentError) as raised:
+        executor.execute(
+            task_id="12345678-1234-1234-1234-123456789abc",
+            request="Implement feature",
+            is_cancelled=lambda: False,
+        )
+
+    saved = "assistant/task-123456781234-validation-failed"
+    assert raised.value.category == "validation_failed"
+    assert raised.value.details["saved_branch"] == saved
+    assert git(remote, "show", f"refs/heads/{saved}:feature.txt") == "broken"
+
+
+def test_a_task_cancelled_during_review_stops(tmp_path: Path) -> None:
+    from app.coding.review import ReviewVerdict
+    from app.execution.fake import ExecutionCancelled
+
+    cancelled = {"now": False}
+
+    class CancellingReviewer(_Reviewer):
+        def review(self, reference, worktree, validation):
+            cancelled["now"] = True
+            return ReviewVerdict(approved=False, problems=["Fix it"])
+
+    agent = _RecordingAgent()
+    executor, github, _repo, _remote = _spec_executor(
+        tmp_path, agent, reviewer=CancellingReviewer()
+    )
+
+    with pytest.raises(ExecutionCancelled):
+        executor.execute(
+            task_id="12345678-1234-1234-1234-123456789abc",
+            request="Implement feature",
+            is_cancelled=lambda: cancelled["now"],
+        )
+
+    assert len(agent.requests) == 1
+    assert github.bodies == []
+
+
+def test_a_pull_request_revision_gets_no_new_spec(tmp_path: Path) -> None:
+    from app.coding.review import ReviewVerdict
+
+    agent = _RecordingAgent()
+    writer = _SpecWriter(None)
+    reviewer = _Reviewer(ReviewVerdict(approved=True))
+    executor, _github, repository, _remote = _spec_executor(
+        tmp_path, agent, spec_writer=writer, reviewer=reviewer
+    )
+    git(repository, "push", "origin", "main:refs/heads/assistant/task-revision")
+    head = git(repository, "rev-parse", "HEAD")
+
+    result = executor.execute(
+        task_id="12345678-1234-1234-1234-123456789abc",
+        request="Use a rocket icon",
+        is_cancelled=lambda: False,
+        context={
+            "revision_pull_request": {
+                "number": 9,
+                "head_branch": "assistant/task-revision",
+                "expected_head_sha": head,
+            }
+        },
+    )
+
+    assert writer.requests == []
+    assert reviewer.references == ["Use a rocket icon"]
+    assert result.output["review"]["outcome"] == "approved"

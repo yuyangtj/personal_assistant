@@ -19,6 +19,7 @@ from app.coding.base import CodeAgentRunner
 from app.coding.decision import CodingDecisionEngine, CodingRunnerRegistry
 from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
 from app.coding.reconcile import PullRequestReconciler
+from app.coding.review import DiffReviewer
 from app.coding.runners import (
     ClaudeCodeMiniMaxRunner,
     CodexCliRunner,
@@ -27,6 +28,7 @@ from app.coding.runners import (
     KimiCodeCliRunner,
 )
 from app.coding.runs import CodingRunStore
+from app.coding.spec import SpecWriter
 from app.config import Settings
 from app.deployments import DeploymentRegistry, HostDeployerSpool
 from app.execution import ConversationExecutor, Executor, FakeExecutor
@@ -194,6 +196,13 @@ def build_coding_executor(
     validation_registry = ValidationProfileRegistry.from_directory(
         settings.validation_profiles_directory
     )
+    planner = (
+        chat_client_chain(settings, timeout_seconds=settings.coding_planner_timeout_seconds)
+        if settings.coding_spec_enabled or settings.coding_review_enabled
+        else None
+    )
+    spec_writer = SpecWriter(planner) if planner and settings.coding_spec_enabled else None
+    reviewer = DiffReviewer(planner) if planner and settings.coding_review_enabled else None
     executors: dict[str, CodingPullRequestExecutor] = {}
     for manifest in registry.list():
         configured_path = os.getenv(manifest.path_env)
@@ -231,10 +240,14 @@ def build_coding_executor(
             validation_profile=validation_registry.get(manifest.validation_profile),
             repository_id=manifest.id,
             checkpoint_store=checkpoint_store,
+            spec_writer=spec_writer,
+            reviewer=reviewer,
         )
     if not executors:
         expected = ", ".join(manifest.path_env for manifest in registry.list())
         github.close()
+        if planner is not None:
+            planner.close()
         raise ValueError("Coding agent requires a configured repository path: " + expected)
     configured_default = settings.default_repository_id
     if configured_default is None:
