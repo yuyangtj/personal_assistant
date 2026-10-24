@@ -35,7 +35,7 @@ class AbilityKind(StrEnum):
 #: What an ability needs from the server's configuration to be available.
 REQUIREMENTS: dict[str, Callable[[Any], bool]] = {
     "github_token": lambda settings: bool(settings.github_token),
-    "web_search": lambda settings: bool(settings.tavily_api_key or settings.brave_search_api_key),
+    "web_search": lambda settings: settings.web_search_available,
 }
 
 #: How each band is introduced to the model, in this order.

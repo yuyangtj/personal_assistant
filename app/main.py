@@ -75,9 +75,7 @@ def create_app(
         repository_registry,
         triage_client(resolved_settings) if resolved_settings.triage_model_enabled else None,
         min_confidence=resolved_settings.triage_min_confidence,
-        research_available=bool(
-            resolved_settings.tavily_api_key or resolved_settings.brave_search_api_key
-        ),
+        research_available=resolved_settings.web_search_available,
         # Klarna purchases are always there; the stores need the MCP gateway.
         groceries_available=True,
         spaces=space_registry,
