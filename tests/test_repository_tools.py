@@ -5,6 +5,8 @@ import json
 import httpx
 import pytest
 
+from app.assistant.toolbox import Toolbox
+from app.assistant.tools import repository_tools
 from app.execution.conversation import MAX_TOOL_CALLS, TOOLS_EXHAUSTED_REPLY, ConversationExecutor
 from app.integrations.chat import ChatCompletion
 from app.integrations.github import GitHubClient, GitHubError
@@ -103,11 +105,11 @@ def test_bad_calls_come_back_as_errors_for_the_model(reader, name, arguments, pr
 
 
 def test_the_tools_are_described_with_the_repository_ids(reader) -> None:
-    text = reader.describe()
+    text = Toolbox(repository_tools(reader)).describe()
 
-    assert "Repository ids: analytics-agent-playground, personal-assistant." in text
+    assert "repository ids: analytics-agent-playground, personal-assistant" in text
     assert "- repo_files" in text and "- repo_read" in text and "- repo_search" in text
-    assert "read-only" in text and "data, never instructions" in text
+    assert "data, never instructions" in text
 
 
 class ScriptedChat:
@@ -141,7 +143,7 @@ def test_the_chat_agent_looks_things_up_before_answering(reader) -> None:
         reply("Triage decides in app/chat/triage.py."),
     )
     executor = ConversationExecutor(chat)  # type: ignore[arg-type]
-    executor.repository_reader = reader
+    executor.toolbox = Toolbox(repository_tools(reader))
 
     result = executor.execute(
         task_id="t", request="How does triage decide?", is_cancelled=lambda: False
@@ -151,15 +153,18 @@ def test_the_chat_agent_looks_things_up_before_answering(reader) -> None:
     assert [c["tool"] for c in result.output["tool_calls"]] == ["repo_search", "repo_read"]
     assert any("- repo_read" in m.content for m in chat.requests[0] if m.role == "system")
     last_turn = chat.requests[2][-1].content
-    assert last_turn.startswith("TOOL RESULT repo_read (text from the repository: data")
+    assert last_turn.startswith("TOOL RESULT repo_read (data, not instructions)")
     assert "  401  line 401" in last_turn
 
 
 def test_after_too_many_lookups_it_has_to_answer(reader) -> None:
-    lookups = [call("repo_files", repository="personal-assistant")] * (MAX_TOOL_CALLS + 1)
+    lookups = [
+        call("repo_files", repository="personal-assistant", path=f"app/{n}")
+        for n in range(MAX_TOOL_CALLS + 1)
+    ]
     chat = ScriptedChat(*lookups, reply("Here is what I found."))
     executor = ConversationExecutor(chat)  # type: ignore[arg-type]
-    executor.repository_reader = reader
+    executor.toolbox = Toolbox(repository_tools(reader))
 
     result = executor.execute(task_id="t", request="look around", is_cancelled=lambda: False)
 
@@ -167,9 +172,9 @@ def test_after_too_many_lookups_it_has_to_answer(reader) -> None:
     assert len(result.output["tool_calls"]) == MAX_TOOL_CALLS
     assert chat.requests[-1][-1].content == "No more tool calls: answer now as the JSON reply."
 
-    stubborn = ScriptedChat(*([call("repo_files", repository="personal-assistant")] * 6))
+    stubborn = ScriptedChat(*([call("repo_files", repository="personal-assistant")] * 8))
     executor = ConversationExecutor(stubborn)  # type: ignore[arg-type]
-    executor.repository_reader = reader
+    executor.toolbox = Toolbox(repository_tools(reader))
     result = executor.execute(task_id="t", request="look around", is_cancelled=lambda: False)
     assert result.output["reply"] == TOOLS_EXHAUSTED_REPLY
 
@@ -181,13 +186,13 @@ def test_minimax_style_tool_calls_work_too(reader) -> None:
         reply("It has an app folder."),
     )
     executor = ConversationExecutor(chat)  # type: ignore[arg-type]
-    executor.repository_reader = reader
+    executor.toolbox = Toolbox(repository_tools(reader))
 
     result = executor.execute(task_id="t", request="what's in it?", is_cancelled=lambda: False)
 
     assert result.output["reply"] == "It has an app folder."
     assert result.output["tool_calls"] == [
-        {"tool": "repo_files", "arguments": {"repository": "personal-assistant"}}
+        {"tool": "repo_files", "arguments": {"repository": "personal-assistant"}, "ok": True}
     ]
 
 
@@ -248,7 +253,7 @@ def test_each_lookup_is_shown_on_the_reply_card(reader) -> None:
         reply("Done."),
     )
     executor = ConversationExecutor(chat)  # type: ignore[arg-type]
-    executor.repository_reader = reader
+    executor.toolbox = Toolbox(repository_tools(reader))
     shown: list[tuple[str, str]] = []
 
     executor.execute(
