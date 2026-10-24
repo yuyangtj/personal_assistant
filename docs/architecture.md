@@ -51,16 +51,23 @@ flowchart LR
   belongs to an ability in `abilities/`, and is offered only when that ability is available
   on the server:
   - bookkeeping, through the same code as the instant actions: `remember`, `forget`,
-    `list_add`, `list_check`, `work_items`, `note_add` (it can save notes, never read them),
+    `list_add`, `list_create`, `list_check`, `work_items`, `note_add` (it can save notes,
+    never read them),
     `remind`, and `routine_create`, `routines`, `routine_run`, `routine_stop`;
   - code, read-only and for registered repositories only (with a GitHub token):
     `repo_files`, `repo_read` (200 numbered lines at a time) and `repo_search`;
-  - hand-offs that run in the background and post their answer in the chat: `research`
-    (with a search key) and `shopping` (Klarna and the stores);
+  - shopping, read-only, from `toolsets/groceries.yaml`: `klarna_spending`,
+    `klarna_purchases`, `klarna_upload_export`, and the Willys and Lidl tools when the MCP
+    gateway is set (their schemas are asked for when first needed). A chart a tool builds
+    and an upload button it asks for go with the reply;
+  - a hand-off that runs in the background and posts its answer in the chat: `research`
+    (with a search key);
   - coding runs, through the supervisor's tools: `coding_status`, `coding_run`,
     `coding_start` (ends in a draft PR you review), `coding_message` and `coding_stop`.
 
-  It may make up to 6 calls before answering, never the same call twice, and each one
+  The tools go to the model through the provider's own tool calling (Kimi, MiniMax,
+  DeepSeek and Gemini all take the OpenAI format); calls a model still writes as text run
+  too. It may make up to 6 calls before answering, never the same call twice, and each one
   shows on the reply's card ("Reading app/chat/triage.py"). Results are wrapped as data,
   never instructions; a refused action comes back as "not done", so it can't claim it.
 - **Replies carry blocks.** These are choices, links, workflow and work-item cards,

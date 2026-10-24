@@ -208,7 +208,9 @@ def check(turn: dict, expect: dict) -> list[str]:
         problems.append(f"ran {sorted(capabilities) or 'no task'}, expected {expect['capability']}")
     tools = turn["tool_calls"]
     if "tool" in expect:
-        matching = [call for call in tools if call.get("tool") == expect["tool"]]
+        # "klarna.spending" in the shopping agent is klarna_spending in the chat agent.
+        wanted_tool = expect["tool"].replace(".", "_")
+        matching = [c for c in tools if str(c.get("tool")).replace(".", "_") == wanted_tool]
         wanted = expect.get("tool_args") or {}
         if not any(
             all((call.get("arguments") or {}).get(k) == v for k, v in wanted.items())

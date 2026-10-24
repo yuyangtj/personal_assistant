@@ -15,6 +15,7 @@ def test_the_worker_starts_with_a_gateway_and_no_search_key(
     monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     started: list[set[str]] = []
     monkeypatch.setattr(
         worker.TaskWorker,
