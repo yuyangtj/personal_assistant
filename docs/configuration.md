@@ -11,6 +11,10 @@ Newer settings, all optional:
 | `ASSISTANT_SUPERVISOR_ENABLED` | `true` | Messages about coding work go to the supervisor |
 | `ASSISTANT_CODING_CONCURRENCY` | `2` | Coding agents running at once in the coding worker |
 | `ASSISTANT_KIMI_CODE_PROTOCOL` | `acp` | `acp` runs Kimi Code as a live session; `prompt` is the one-shot fallback |
+| `ASSISTANT_KIMI_CODE_MODEL` | `k3.1-pro` | The model Kimi Code runs on (`kimi-for-coding` is K2.8 Preview) |
+| `ASSISTANT_CODING_SPEC_ENABLED` | `true` | A short spec (goal, acceptance criteria, scope) is written before a coding agent starts |
+| `ASSISTANT_CODING_REVIEW_ENABLED` | `true` | The diff is reviewed against the spec before the pull request opens |
+| `ASSISTANT_CODING_PLANNER_TIMEOUT_SECONDS` | `90` | How long the spec writer or reviewer may take; on a failure the task runs without them |
 | `TAVILY_API_KEY` / `BRAVE_SEARCH_API_KEY` | unset | Enables the web research agent |
 | `ASSISTANT_NTFY_TOPIC_URL` | unset | Push notifications through ntfy |
 

@@ -67,6 +67,33 @@ flowchart LR
 - `.github/workflows/ci.yml` runs lint, all backend tests, and Compose validation on each
   pull request. Configure that `backend` job as a required status check on the base branch.
 
+## Spec first, review before the pull request
+
+Two steps around the coding agent, both best effort (a failure, a timeout or an unusable
+reply leaves the task running as it would without them):
+
+1. **Spec.** For a new task (not a revision of an open PR) the conversation model reads the
+   request, the repository's file list and the start of its `AGENTS.md`, `CLAUDE.md` or
+   `README.md`, and writes a short spec: the goal, 1-8 testable acceptance criteria, what
+   is in and out of scope, and how to check it. The spec is shown as the task's plan, goes
+   at the top of the agent's prompt, and is kept in the pull request notes. Coding does not
+   wait for approval.
+2. **Review.** After validation passes, the same model reads the staged diff (new files
+   included, cut at 60,000 characters) and answers `APPROVED` or `REJECTED` with concrete
+   problems, judged only against the spec (or the request). A rejection gives the agent a
+   "review fix pass" with the problems, then validation runs again, at most twice. A fix
+   that breaks validation goes down the saved-branch path above. Concerns that remain
+   never block the draft PR; they appear in its notes, in the task output (`review`) and in
+   the chat reply.
+
+`ASSISTANT_CODING_SPEC_ENABLED`, `ASSISTANT_CODING_REVIEW_ENABLED` and
+`ASSISTANT_CODING_PLANNER_TIMEOUT_SECONDS` control them. The coding worker needs the same
+conversation-model settings as the API, because that model does both jobs.
+
+Claude Code on MiniMax runs with `--output-format stream-json`, so each tool step it takes
+appears live in the task view; a one-shot agent that has been silent for 3 minutes is
+reported once as quiet (it is not stopped).
+
 ## Configuration
 
 For local development, run the coding worker on a machine that has the configured
