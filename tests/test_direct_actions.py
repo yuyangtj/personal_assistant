@@ -98,3 +98,59 @@ def test_model_sees_existing_work_items_for_actions() -> None:
     request = json.loads(chat.requests[0][1].content)
     assert request["work_items"] == [{"tag": "groceries", "title": "Groceries", "kind": "list"}]
     assert "direct_action" in chat.requests[0][0].content
+
+
+def test_a_note_said_in_chat_is_saved_to_notes(client: TestClient) -> None:
+    chat = _chat(client)
+
+    response = _say(client, chat, "note: call the dentist on Monday")
+
+    assert response["decision"]["intent"] == "direct_action"
+    assert response["decision"]["result"] == "Saved to Notes: “call the dentist on Monday”"
+    notes = client.get("/notes").json()["notes"]
+    assert [(note["title"], note["body"]) for note in notes] == [("", "call the dentist on Monday")]
+    messages = client.get(f"/chat-sessions/{chat}/messages").json()["messages"]
+    assert messages[-1]["blocks"] == [{"type": "link", "href": "#/notes", "label": "Open Notes"}]
+    assert client.get(f"/chat-sessions/{chat}/tasks").json()["tasks"] == []  # no model involved
+
+
+def test_note_phrasings_and_what_is_not_a_note() -> None:
+    from app.chat.triage import _rule_action
+
+    for text, expected in [
+        ("Note: buy oat milk", "buy oat milk"),
+        (
+            "make a note: the router password is on the fridge",
+            "the router password is on the fridge",
+        ),
+        ("please add a note: renew passport", "renew passport"),
+        ("note to self: ask about the invoice", "ask about the invoice"),
+        ("anteckna: köp mjölk", "köp mjölk"),
+        ("ny anteckning: ring tandläkaren", "ring tandläkaren"),
+        ("note: first line\nsecond line", "first line\nsecond line"),
+    ]:
+        action = _rule_action(text)
+        assert action is not None and action.type == "note_add", text
+        assert action.text == expected
+
+    for text in [
+        "note that the build is slow",
+        "please note the deadline moved",
+        "notes on the meeting were shared",
+        "I wrote a note about it",
+    ]:
+        assert _rule_action(text) is None, text
+
+
+def test_only_a_note_may_be_longer_than_300_characters() -> None:
+    from pydantic import ValidationError
+
+    from app.chat.triage import DirectAction
+
+    assert DirectAction(type="note_add", text="x" * 4000).text
+    for kind in ("remember", "checklist_add"):
+        try:
+            DirectAction(type=kind, text="x" * 301)
+        except ValidationError:
+            continue
+        raise AssertionError(f"{kind} accepted 301 characters")

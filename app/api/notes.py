@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -26,6 +27,18 @@ MAX_IMPORT_BYTES = 1024 * 1024 * 1024
 def list_notes(request: Request, include_archived: bool = False) -> NoteListResponse:
     notes = request.app.state.note_service.list(include_archived=include_archived)
     return NoteListResponse(notes=[NoteResponse.model_validate(note) for note in notes])
+
+
+@router.get("/notes/export")
+def export_notes(request: Request) -> Response:
+    """All notes (archived too) as a zip: notes.json plus one Markdown file per note."""
+    data = request.app.state.note_service.export_zip()
+    filename = f"notes-{datetime.now(UTC).date().isoformat()}.zip"
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/notes", response_model=NoteResponse, status_code=status.HTTP_201_CREATED)

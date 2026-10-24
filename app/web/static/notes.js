@@ -13,12 +13,65 @@ state.noteTagging = null;       // the note whose tags are being edited on its c
 // No tag can start with "#" (the server strips it), so this never clashes with one.
 const ARCHIVED = "#archived";
 
-async function loadNotes() {
-  try {
-    state.notes = (await api("/notes?include_archived=true")).notes;
-    $("note-error").textContent = "";
-  } catch (error) { $("note-error").textContent = error.message || String(error); }
+// The notes are about 1 MB, so coming back to the tab within a minute reuses them (every
+// change made here updates them as it happens).
+const NOTES_FRESH_MS = 60_000;
+state.notesLoadedAt = 0;
+
+async function loadNotes({ force = false } = {}) {
+  if (force || Date.now() - state.notesLoadedAt >= NOTES_FRESH_MS) {
+    try {
+      const loaded = (await api("/notes?include_archived=true")).notes;
+      // A note just deleted (still undoable) must not come back with this reload.
+      state.notes = loaded.filter((note) => !(state.undo && note.id === state.undo.note.id));
+      state.notesLoadedAt = Date.now();
+      $("note-error").textContent = "";
+    } catch (error) { $("note-error").textContent = error.message || String(error); }
+  }
   state.noteLimit = NOTE_BATCH;  // coming back to the tab starts at the top
+  renderNotes();
+}
+
+// Deleting is final only after a few seconds, so a slip can be undone. The note is hidden
+// at once; if the page is closed in the meantime the note simply stays.
+const UNDO_MS = 6000;
+state.undo = null;  // { note, timer }
+
+function showNoteToast(text) {
+  $("note-toast-text").textContent = text;
+  $("note-toast").hidden = false;
+}
+
+async function commitDelete() {
+  const pending = state.undo;
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  state.undo = null;
+  $("note-toast").hidden = true;
+  try {
+    await api(`/notes/${pending.note.id}`, { method: "DELETE" });
+  } catch (error) {
+    state.notes = [pending.note, ...state.notes];
+    noteError(error);
+    renderNotes();
+  }
+}
+
+function deleteNote(note) {
+  commitDelete();  // an earlier deletion becomes final now
+  state.notes = state.notes.filter((item) => item.id !== note.id);
+  state.undo = { note, timer: setTimeout(commitDelete, UNDO_MS) };
+  showNoteToast("Note deleted");
+  renderNotes();
+}
+
+function undoDelete() {
+  const pending = state.undo;
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  state.undo = null;
+  $("note-toast").hidden = true;
+  state.notes = [pending.note, ...state.notes];
   renderNotes();
 }
 
@@ -265,12 +318,10 @@ async function editorClick(event, card, note) {
     return;
   } else if (action === "delete") {
     if (state.noteDeleteArmed !== note.id) { state.noteDeleteArmed = note.id; refreshEditor(); return; }
-    await api(`/notes/${note.id}`, { method: "DELETE" });
-    state.notes = state.notes.filter((item) => item.id !== note.id);
     state.noteEditing = null;
     state.noteDraft = null;
     state.noteDeleteArmed = null;
-    renderNotes();
+    deleteNote(note);
     return;
   } else if (action === "done") {
     await finishEditing(card);
@@ -683,8 +734,9 @@ $("note-list").onclick = async (event) => {
       await saveNote(id, { archived: !note.archived });
     } else if (action === "delete") {
       if (state.noteDeleteArmed !== id) { state.noteDeleteArmed = id; renderNotes(); return; }
-      await api(`/notes/${id}`, { method: "DELETE" });
-      state.notes = state.notes.filter((item) => item.id !== id);
+      state.noteDeleteArmed = null;
+      deleteNote(note);
+      return;
     } else {
       openEditor(note);
       renderNotes();
@@ -807,6 +859,25 @@ $("keep-import").onclick = async (event) => {
     state.keepFile = null;
     showKeepImport(`<div>Imported ${esc(keepSummary(result))}.</div>
       <div class="row"><button type="button" data-keep="cancel" class="quiet">Close</button></div>`);
-    await loadNotes();
+    await loadNotes({ force: true });
   } catch (error) { showKeepImport(`<div class="err">${esc(error.message)}</div>`); }
 };
+
+// Keyboard: "/" jumps to the search box and "n" to the new-note box, when no field has focus.
+document.addEventListener("keydown", (event) => {
+  if ($("notes-view").hidden || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (state.noteEditing || state.tagPanelOpen) return;
+  if (event.target.closest && event.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (event.key === "/") {
+    event.preventDefault();
+    $("note-search").focus();
+  } else if (event.key === "n") {
+    event.preventDefault();
+    $("note-body").focus();  // focusing it opens the box
+    $("note-body").scrollIntoView({ block: "nearest" });
+  }
+});
+
+$("note-toast-undo").onclick = undoDelete;
+// Exporting downloads a file, which the Android app's web view can't do; use a browser.
+if (window.AndroidAssistant) $("notes-export").hidden = true;

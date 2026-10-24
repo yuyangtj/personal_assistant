@@ -109,6 +109,8 @@
   <main>
     <div class="notes-page">
       <div class="row wrap"><h1 class="grow">Notes</h1>
+        <a id="notes-export" class="upload-button secondary notes-import-button" href="/notes/export" download
+          title="Download every note as a zip: one JSON file and a Markdown file per note">Export all</a>
         <label class="upload-button notes-import-button" title="The .zip from Google Takeout with Keep selected">
           <input type="file" id="keep-file" accept=".zip,application/zip" hidden>Import from Google Keep</label></div>
       <div class="sub">Quick notes with tags and checklists. They stay here: no AI model sees them.</div>
@@ -123,7 +125,7 @@
           <button type="submit">Add</button></div>
         <div id="note-tag-suggest" class="tag-suggest note-form-more"></div>
       </form>
-      <input id="note-search" type="search" placeholder="Search notes…" aria-label="Search notes">
+      <input id="note-search" type="search" placeholder="Search notes…" aria-label="Search notes" title="Press / to search">
       <div class="note-tags-wrap">
         <div id="note-tags-bar" class="note-tags-bar" aria-label="Filter by tag"></div>
         <div id="note-tag-panel" class="note-tag-panel" hidden>
@@ -133,6 +135,8 @@
       </div>
       <div id="note-error" class="err" role="alert"></div>
       <div id="note-list" class="note-grid"></div>
+      <div id="note-toast" class="note-toast" role="status" hidden>
+        <span id="note-toast-text"></span><button type="button" id="note-toast-undo" class="quiet">Undo</button></div>
       <div id="note-more" class="note-more" hidden><button type="button" class="quiet">Show more notes</button></div>
     </div>
   </main>

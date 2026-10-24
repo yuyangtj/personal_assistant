@@ -20,6 +20,7 @@ from app.persistence.models import utc_now
 from app.schedules import Recurrence, ScheduleKind, ScheduleService, zone
 from app.work.items import RESUMABLE_STATUSES, WorkItemNotFoundError, WorkItemService
 from app.work.memory import MemoryService
+from app.work.notes import NoteService
 
 
 @dataclass(frozen=True)
@@ -163,7 +164,19 @@ def run_direct_action(
     now: datetime | None = None,
     tasks: Any = None,
     route: Callable[[str], list[str]] | None = None,
+    notes: NoteService | None = None,
 ) -> DirectActionResult:
+    if action.type == "note_add":
+        if notes is None:
+            return DirectActionResult(False, "Notes aren't available here.")
+        notes.create(body=action.text)
+        first_line = action.text.strip().splitlines()[0]
+        shown = first_line if len(first_line) <= 60 else first_line[:59].rstrip() + "…"
+        return DirectActionResult(
+            True,
+            f"Saved to Notes: “{shown}”",
+            blocks=[{"type": "link", "href": "#/notes", "label": "Open Notes"}],
+        )
     if action.type in ("list_routines", "run_routine", "cancel_routine"):
         if schedules is None:
             return DirectActionResult(False, "Routines aren't available here.")

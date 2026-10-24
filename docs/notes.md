@@ -26,8 +26,27 @@ model or any other service**; they are only shown in the console.
 - **Finding notes:** the search box looks through titles, text, checklist items and tags
   of all notes. The row under it shows All, your five most-used tags, "All tags (N)"
   (a searchable list of every tag) and Archived.
+- **Delete can be undone** for a few seconds: the note disappears at once and a toast offers
+  Undo; the deletion is final after 6 seconds (if you close the page first, the note stays).
+- **Keyboard:** `/` jumps to the search box and `n` to the new-note box (when no field has
+  focus); Escape closes an open note.
 - **Big collections:** the first 48 notes are drawn, then 48 more as you scroll (or with
   "Show more notes"). Search and tag filters still cover every note.
+
+## Saying a note in chat
+
+"note: call the dentist on Monday" (also "make a note: …", "note to self: …", "anteckna: …")
+saves a note right away, with no model involved, and the reply links to the Notes tab. The
+colon is required, so "note that the build is slow" stays an ordinary message. On the
+phone, sharing text to the assistant and starting it with "note:" does the same.
+
+## Exporting
+
+**Export all** (in a browser; the Android app can't download files) gives a zip with
+`notes.json` (every note, archived ones too, with tags, checklists, dates, pins) and one
+Markdown file per note under `markdown/` (a small header with created and edited times,
+tags and pin, then the title, text and checklist). It is a backup you hold yourself and a way
+out. The API is `GET /notes/export`.
 
 ## Importing from Google Keep
 
@@ -48,8 +67,10 @@ Importing the same export again adds only notes that are not there yet.
 | --- | --- |
 | Table `notes` (title, body, checklist, tags, pinned, archived, source and its key) | `migrations/022_notes.sql`, `NoteModel` in `app/persistence/models.py` |
 | Rules, listing and the Keep import | `app/work/notes.py` (`NoteService`) |
-| API: `GET/POST /notes`, `PATCH/DELETE /notes/{id}`, `POST /notes/import/google-keep` | `app/api/notes.py` |
+| API: `GET/POST /notes`, `PATCH/DELETE /notes/{id}`, `GET /notes/export`, `POST /notes/import/google-keep` | `app/api/notes.py` |
+| "note: …" in chat | `note_add` in `app/chat/direct_actions.py`, the rule in `app/chat/triage.py` |
 | The tab | `app/web/static/notes.js`, `index.html`, `console.css` |
 
 `GET /notes?include_archived=true` returns every note (about 1 MB for 1,600); the page
-filters, sorts and draws them itself.
+filters, sorts and draws them itself, and reuses what it loaded when you come back to the
+tab within a minute.
