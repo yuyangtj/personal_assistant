@@ -150,7 +150,9 @@ Decide what the message needs:
   routines or watches they have; {"type": "run_routine", "text": which one} to run a
   saved routine now; {"type": "cancel_routine", "text": which one} to stop a routine or
   watch (not a coding agent). Resolve relative dates from the user's local time. Use
-  tags from work_items; null when the list is not named.
+  tags from work_items; null when the list is not named. A direct_action is exactly one
+  of these: when the message asks for several things ("remember I like oat milk, add it
+  to groceries and remind me tomorrow at 9"), use "answer", whose agent can do them all.
 For propose_task, set "space" to the best-fitting slug from spaces (or null).
 Set "needs_grocery_tools": true when the message is about grocery offers, prices, receipts,
 purchases or grocery spending at the user's stores (Willys, Lidl), or about the user's
@@ -216,10 +218,23 @@ _NOTE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _REMEMBER = re.compile(r"^(?:please\s+)?remember(?:\s+that)?\s+(?P<text>.+?)[.!]?$", re.IGNORECASE)
+# "..., and remind me tomorrow", "... then add bread": a second request after the first.
+# Such a message goes to the reply agent, which can do each part with its tools.
+_SEVERAL = re.compile(
+    r"(?:[,;]|\b(?:and|then|also)\b)\s+(?:then\s+|also\s+)?(?:please\s+)?"
+    r"(?:add|put|remind|remember|note|jot|save|forget|check|tick|set|schedule|create|make"
+    r"|start|stop|cancel|run|tell|send|book|buy)\b",
+    re.IGNORECASE,
+)
 _FORGET = re.compile(
     r"^(?:please\s+)?forget\s+(?:that\s+|about\s+|the\s+memory\s+(?:about\s+)?)?(?P<text>.+?)[.!]?$",
     re.IGNORECASE,
 )
+
+
+def asks_several(text: str) -> bool:
+    """Whether a message asks for more than one thing ("remember X and remind me Y")."""
+    return bool(_SEVERAL.search(" ".join(text.split())))
 
 
 def _known_tag(name: str | None, work_items: Sequence[dict]) -> str | None:
@@ -243,6 +258,8 @@ def rule_action(text: str, work_items: Sequence[dict] = ()) -> DirectAction | No
     normalized = " ".join(text.split())
     if (match := _NOTE.match(text.strip())) and len(match["text"].strip()) <= NOTE_TEXT_LIMIT:
         return DirectAction(type="note_add", text=match["text"].strip())
+    if asks_several(normalized):
+        return None
     if (match := _REMEMBER.match(normalized)) and len(match["text"]) <= 300:
         return DirectAction(type="remember", text=match["text"], kind="fact")
     if _LIST_ROUTINES.match(normalized):
@@ -334,6 +351,10 @@ class Triager:
             TriageIntent.DIRECT_ACTION,
             TriageIntent.PROPOSE_CODING,
         ):
+            return decision
+        if decision.intent == TriageIntent.ANSWER and asks_several(text):
+            # "add it to groceries and remind me": the reply agent does each part, and
+            # hands a shopping question to the shopping agent itself.
             return decision
         follows_on = (
             after_groceries
