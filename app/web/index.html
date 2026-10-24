@@ -116,10 +116,11 @@
         <input id="note-title" class="note-form-more" maxlength="300" placeholder="Title" aria-label="Title">
         <textarea id="note-body" rows="1" maxlength="20000" placeholder="Take a note…" aria-label="Note"></textarea>
         <div class="row wrap note-form-more">
-          <input id="note-tags" class="grow" placeholder="Tags, separated by commas" aria-label="Tags">
+          <input id="note-tags" class="grow" placeholder="Tags: type or pick" aria-label="Tags" autocomplete="off">
           <label class="check" title="Each line becomes a checklist item"><input type="checkbox" id="note-as-list"> Checklist</label>
           <button type="button" class="quiet" id="note-close">Close</button>
           <button type="submit">Add</button></div>
+        <div id="note-tag-suggest" class="tag-suggest note-form-more"></div>
       </form>
       <input id="note-search" type="search" placeholder="Search notes…" aria-label="Search notes">
       <div class="note-tags-wrap">
