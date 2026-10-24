@@ -6,6 +6,8 @@ chat replies turn it off, since the reply has to come within a few seconds.
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 
 from app.integrations.chat import (
@@ -14,6 +16,9 @@ from app.integrations.chat import (
     ChatMessage,
     ProviderError,
     post_within,
+    read_tool_calls,
+    reasoning_extra,
+    wire_messages,
 )
 
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -26,6 +31,8 @@ class DeepSeekError(ProviderError):
 
 class DeepSeekChatClient:
     provider = "deepseek"
+    #: Takes ``tools`` and returns the model's calls (OpenAI-style tool calling).
+    supports_tools = True
 
     def __init__(
         self,
@@ -49,15 +56,21 @@ class DeepSeekChatClient:
             transport=transport,
         )
 
-    def complete(self, messages: list[ChatMessage], *, max_tokens: int = 700) -> ChatCompletion:
+    def complete(
+        self,
+        messages: list[ChatMessage],
+        *,
+        max_tokens: int = 700,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> ChatCompletion:
         payload = {
             "model": self.model,
             "max_tokens": max_tokens,
             "thinking": {"type": "enabled" if self.thinking else "disabled"},
-            "messages": [
-                {"role": message.role, "content": message.content} for message in messages
-            ],
+            "messages": wire_messages(messages),
         }
+        if tools:
+            payload["tools"] = tools
         try:
             response = post_within(
                 self._client,
@@ -71,7 +84,8 @@ class DeepSeekChatClient:
             raise DeepSeekError(f"DeepSeek returned HTTP {response.status_code}")
         try:
             body = response.json()
-            text = body["choices"][0]["message"].get("content") or ""
+            message = body["choices"][0]["message"]
+            text = message.get("content") or ""
         except (ValueError, KeyError, IndexError, TypeError) as error:
             raise DeepSeekError("DeepSeek returned an unexpected response shape") from error
         usage = body.get("usage") or {}
@@ -81,6 +95,8 @@ class DeepSeekChatClient:
             input_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("completion_tokens"),
             provider=self.provider,
+            tool_calls=read_tool_calls(message),
+            extra=reasoning_extra(message),
         )
 
     def close(self) -> None:

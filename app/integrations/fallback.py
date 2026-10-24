@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from app.integrations.chat import (
     ChatClient,
@@ -32,17 +33,20 @@ class FallbackChatClient:
         self.clients = tuple(clients)
         self.provider = _chain_label(self.clients, "provider")
         self.model = _chain_label(self.clients, "model")
+        self.supports_tools = all(getattr(c, "supports_tools", False) for c in self.clients)
 
     def complete(
         self,
         messages: list[ChatMessage],
         *,
         max_tokens: int = 700,
+        tools: list[dict[str, Any]] | None = None,
     ) -> ChatCompletion:
+        extra = {"tools": tools} if tools else {}
         for client in self.clients:
             try:
-                completion = client.complete(messages, max_tokens=max_tokens)
-                if completion.text.strip():
+                completion = client.complete(messages, max_tokens=max_tokens, **extra)
+                if completion.text.strip() or completion.tool_calls:
                     return completion
             except ProviderError:
                 continue

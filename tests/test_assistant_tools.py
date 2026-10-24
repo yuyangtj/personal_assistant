@@ -10,6 +10,7 @@ from app.assistant.supervisor import SupervisorTools
 from app.assistant.toolbox import AssistantTool, Toolbox, ToolContext
 from app.assistant.tools import bookkeeping_tools, coding_tools, job_tools
 from app.execution.conversation import ConversationExecutor
+from app.integrations.chat import ChatCompletion, ChatMessage, ToolCall
 from tests.test_repository_tools import ScriptedChat
 
 
@@ -342,3 +343,78 @@ def test_without_a_chat_bookkeeping_tools_refuse(client: TestClient) -> None:
 
     assert outcome.text == "error: this only works inside a chat"
     assert client.get("/memories").json()["memories"] == []
+
+
+class NativeChat:
+    """A provider with its own tool calling: replies are ChatCompletions, tools recorded."""
+
+    provider = "fake"
+    model = "m"
+    supports_tools = True
+
+    def __init__(self, *completions: ChatCompletion):
+        self.completions = list(completions)
+        self.requests: list[tuple[list[ChatMessage], list[dict] | None]] = []
+
+    def complete(self, messages, *, max_tokens: int = 700, tools=None) -> ChatCompletion:
+        self.requests.append((list(messages), tools))
+        return self.completions.pop(0)
+
+
+def native_call(id: str, name: str, **arguments) -> ToolCall:
+    return ToolCall(id=id, name=name, arguments=arguments, raw_arguments=json.dumps(arguments))
+
+
+def test_built_in_tool_calls_run_and_their_results_go_back_as_tool_messages(
+    client: TestClient, chat_id: str
+) -> None:
+    chat = NativeChat(
+        ChatCompletion(
+            text="",
+            model="m",
+            tool_calls=(
+                native_call("a", "remember", text="I like oat milk", kind="preference"),
+                native_call("b", "list_add", text="oat milk", list="#groceries"),
+            ),
+            extra={"reasoning_content": "two things to do"},
+        ),
+        ChatCompletion(text=reply("Remembered, and it's on your groceries."), model="m"),
+    )
+    executor = ConversationExecutor(chat)  # type: ignore[arg-type]
+    executor.toolbox = toolbox(client)
+
+    result = run(executor, chat_id, "remember I like oat milk and add it to groceries")
+
+    assert result.output["reply"] == "Remembered, and it's on your groceries."
+    assert [c["tool"] for c in result.output["tool_calls"]] == ["remember", "list_add"]
+    first_messages, tools = chat.requests[0]
+    names = [tool["function"]["name"] for tool in tools]
+    assert {"remember", "list_add", "list_create", "remind"} <= set(names)
+    remember = next(t for t in tools if t["function"]["name"] == "remember")
+    assert remember["function"]["parameters"]["required"] == ["text", "kind"]
+    # The JSON tool format is not described when the API carries the tools.
+    assert '{"tool": "<name>"' not in "\n".join(m.content for m in first_messages)
+    second_messages, _ = chat.requests[1]
+    assistant, *results = second_messages[-3:]
+    assert [c.id for c in assistant.tool_calls] == ["a", "b"]
+    assert assistant.extra == {"reasoning_content": "two things to do"}
+    assert [(m.role, m.tool_call_id) for m in results] == [("tool", "a"), ("tool", "b")]
+    assert "Started your #groceries list with “oat milk”." in results[1].content
+
+
+def test_calls_written_as_text_still_run_on_the_built_in_path(
+    client: TestClient, chat_id: str
+) -> None:
+    chat = NativeChat(
+        ChatCompletion(text=call("note_add", text="bakery on Sveavägen"), model="m"),
+        ChatCompletion(text=reply("Noted."), model="m"),
+    )
+    executor = ConversationExecutor(chat)  # type: ignore[arg-type]
+    executor.toolbox = toolbox(client)
+
+    result = run(executor, chat_id, "note the bakery")
+
+    assert result.output["reply"] == "Noted."
+    messages, _ = chat.requests[1]
+    assert messages[-2].role == "assistant" and messages[-2].tool_calls[0].name == "note_add"
+    assert messages[-1].role == "tool" and messages[-1].tool_call_id == "text_call_0"

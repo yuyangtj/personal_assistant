@@ -66,6 +66,11 @@ class Settings:
     #: Off for chat: DeepSeek thinks by default, which costs seconds per reply.
     deepseek_thinking: bool = False
     deepseek_timeout_seconds: float = 30.0
+    #: Gemini for chat (OpenAI-compatible API); the voice's key is used when unset.
+    gemini_api_key: str | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_reasoning_effort: str = "low"
     gemini_tts_api_key: str | None = None
     gemini_tts_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_tts_model: str = "gemini-3.1-flash-tts-preview"
@@ -218,6 +223,15 @@ class Settings:
             deepseek_model=os.getenv("ASSISTANT_DEEPSEEK_MODEL", defaults.deepseek_model),
             deepseek_thinking=_as_bool(
                 os.getenv("ASSISTANT_DEEPSEEK_THINKING", str(defaults.deepseek_thinking))
+            ),
+            gemini_api_key=os.getenv("GEMINI_API_KEY")
+            or os.getenv("ASSISTANT_GEMINI_TTS_API_KEY")
+            or os.getenv("GEMINI_TTS_API_KEY")
+            or None,
+            gemini_base_url=os.getenv("ASSISTANT_GEMINI_BASE_URL", defaults.gemini_base_url),
+            gemini_model=os.getenv("ASSISTANT_GEMINI_MODEL", defaults.gemini_model),
+            gemini_reasoning_effort=os.getenv(
+                "ASSISTANT_GEMINI_REASONING_EFFORT", defaults.gemini_reasoning_effort
             ),
             deepseek_timeout_seconds=float(
                 os.getenv(
