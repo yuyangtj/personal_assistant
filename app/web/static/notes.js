@@ -50,10 +50,10 @@ function shownNotes() {
 const TOP_TAGS = 5;
 state.tagPanelOpen = false;
 
-function noteTagCounts() {
+function noteTagCounts(includeArchived = false) {
   const counts = new Map();
   for (const note of state.notes) {
-    if (note.archived) continue;
+    if (note.archived && !includeArchived) continue;
     for (const tag of note.tags) {
       const key = tag.toLowerCase();
       const entry = counts.get(key) || { tag, count: 0 };
@@ -137,7 +137,7 @@ function draftTagger(draft) {
   return `<div class="note-tagger">${draft.tags.map((tag) =>
     `<span class="note-tag">${esc(tag)}<button type="button" class="note-untag" data-draft-untag="${esc(tag)}"
       aria-label="Remove tag ${esc(tag)}" title="Remove">×</button></span>`).join("")}
-    <input class="note-tag-input" placeholder="Add a tag" aria-label="Add a tag" maxlength="50"></div>`;
+    <input class="note-tag-input" placeholder="Add a tag" aria-label="Add a tag" maxlength="50" autocomplete="off"></div>`;
 }
 
 function noteEditor(note) {
@@ -154,6 +154,7 @@ function noteEditor(note) {
     ${showBody ? `<textarea class="note-edit-body" maxlength="20000" placeholder="Take a note…" aria-label="Note">${esc(draft.body)}</textarea>` : ""}
     ${items}
     ${draftTagger(draft)}
+    <div class="tag-suggest"></div>
     ${draft.error ? `<div class="err note-edit-error" role="alert">${esc(draft.error)}</div>` : ""}
     <div class="note-foot">
       <div class="note-tools">
@@ -219,7 +220,7 @@ async function finishEditing(card, extra = {}) {
   if (!card || !note) { state.noteEditing = null; state.noteDraft = null; renderNotes(); return; }
   const draft = syncDraft(card);
   const pending = card.querySelector(".note-tag-input");
-  if (pending && pending.value.trim()) draft.tags.push(...splitTags(pending.value));
+  if (pending && pending.value.trim()) draft.tags.push(...splitTags(pending.value).map(canonicalTag));
   const items = draft.items.filter((item) => item.text.trim()).map((item) => ({ text: item.text.trim(), done: item.done }));
   const fields = { ...extra };
   if (draft.title !== note.title) fields.title = draft.title;
@@ -288,9 +289,11 @@ function editorKey(event, card) {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
     finishEditing(card).catch(noteError);
+  } else if (tagInput && handleTagKeys(event, tagInput)) {
+    return;
   } else if (tagInput && event.key === "Enter") {
     event.preventDefault();
-    draft.tags.push(...splitTags(tagInput.value));
+    draft.tags.push(...splitTags(tagInput.value).map(canonicalTag));
     draft.tags = cleanTags(draft.tags);
     refreshEditor(".note-tag-input");
   } else if (itemText && event.key === "Enter") {
@@ -329,11 +332,102 @@ const noteTime = (iso) => { const date = new Date(iso); return Number.isNaN(date
 const noteTool = (action, label, icon, extra = "") =>
   `<button type="button" class="note-tool ${extra}" data-note-action="${action}" aria-label="${label}" title="${label}">${icon}</button>`;
 
+// --- Picking a tag: focus the field to see existing tags, type to narrow them or create a new
+// one. The same field is in the editor, on a card's tag button and in the new-note box.
+const TAG_SUGGESTIONS = 8;
+
+// The spelling already in use, so typing "airflow" doesn't make a second "Airflow".
+function canonicalTag(text) {
+  const clean = text.replace(/^#+/, "").trim().replace(/\s+/g, " ");
+  const known = noteTagCounts(true).find((entry) => entry.tag.toLowerCase() === clean.toLowerCase());
+  return known ? known.tag : clean;
+}
+
+const tagBoxOf = (input) => (input.id === "note-tags" ? $("note-tag-suggest")
+  : input.closest(".note") && input.closest(".note").querySelector(".tag-suggest"));
+
+// What the field is for: the tags the note has, what is being typed, and how to add one.
+function tagContext(input) {
+  if (input.id === "note-tags") {
+    const parts = input.value.split(",");
+    const query = parts.pop();
+    const done = parts.map((part) => part.trim()).filter(Boolean);
+    return { query, have: done, add(name) { input.value = [...done, name].join(", ") + ", "; input.focus(); showTagSuggestions(input); } };
+  }
+  const editor = input.closest(".note.editing");
+  if (editor) {
+    const draft = syncDraft(editor);
+    return { query: input.value, have: draft.tags, add(name) { draft.tags = cleanTags([...draft.tags, name]); refreshEditor(".note-tag-input"); } };
+  }
+  const card = input.closest("[data-note]");
+  const note = card && state.notes.find((item) => item.id === card.dataset.note);
+  if (note) return { query: input.value, have: note.tags, add: (name) => addTags(note.id, [name]) };
+  return null;
+}
+
+function tagOptions(query, have) {
+  const q = query.trim().replace(/^#+/, "").toLowerCase();
+  const haveSet = new Set(have.map((tag) => tag.toLowerCase()));
+  const starts = (tag) => Number(tag.toLowerCase().startsWith(q));
+  return noteTagCounts(true)
+    .filter(({ tag }) => !haveSet.has(tag.toLowerCase()) && (!q || tag.toLowerCase().includes(q)))
+    .sort((a, b) => starts(b.tag) - starts(a.tag) || b.count - a.count || a.tag.localeCompare(b.tag))
+    .slice(0, TAG_SUGGESTIONS);
+}
+
+function showTagSuggestions(input) {
+  const box = tagBoxOf(input);
+  const context = tagContext(input);
+  if (!box || !context) return;
+  const query = context.query.trim().replace(/^#+/, "").replace(/\s+/g, " ");
+  const known = noteTagCounts(true).some(({ tag }) => tag.toLowerCase() === query.toLowerCase());
+  const has = context.have.some((tag) => tag.toLowerCase() === query.toLowerCase());
+  const create = query && !known && !has
+    ? `<button type="button" class="tag-option create" data-tag-name="${esc(query)}">+ New tag “${esc(query)}”</button>` : "";
+  // Existing tags first (so the arrow keys reach them), "New tag" last.
+  box.innerHTML = tagOptions(query, context.have).map(({ tag, count }) =>
+    `<button type="button" class="tag-option" data-tag-name="${esc(tag)}">${esc(tag)} <span class="sub">${count}</span></button>`).join("") + create;
+}
+
+function hideTagSuggestions(input) {
+  const box = tagBoxOf(input);
+  if (box) box.innerHTML = "";
+}
+
+function pickSuggestedTag(option) {
+  const box = option.closest(".tag-suggest");
+  const input = box.id === "note-tag-suggest" ? $("note-tags") : box.closest(".note").querySelector(".note-tag-input");
+  return tagContext(input).add(option.dataset.tagName);
+}
+
+// Arrow keys move through the suggestions and Enter takes the highlighted one; with none
+// highlighted Enter adds what was typed (the caller's job). True when the key was used.
+function handleTagKeys(event, input) {
+  const box = tagBoxOf(input);
+  const options = box ? [...box.querySelectorAll(".tag-option")] : [];
+  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && options.length) {
+    const current = options.findIndex((option) => option.classList.contains("active"));
+    options.forEach((option) => option.classList.remove("active"));
+    const next = event.key === "ArrowDown" ? (current + 1) % options.length : (current <= 0 ? options.length - 1 : current - 1);
+    options[next].classList.add("active");
+    event.preventDefault();
+    return true;
+  }
+  const active = event.key === "Enter" && options.find((option) => option.classList.contains("active"));
+  if (active) {
+    event.preventDefault();
+    Promise.resolve(pickSuggestedTag(active)).catch(noteError);
+    return true;
+  }
+  return false;
+}
+
 function noteTagger(note) {
   return `<div class="note-tagger">${note.tags.map((tag) =>
     `<span class="note-tag">${esc(tag)}<button type="button" class="note-untag" data-note-untag="${esc(tag)}"
       aria-label="Remove tag ${esc(tag)}" title="Remove">×</button></span>`).join("")}
-    <input class="note-tag-input" placeholder="Add a tag, then Enter" aria-label="Add a tag" maxlength="50"></div>`;
+    <input class="note-tag-input" placeholder="Add a tag, then Enter" aria-label="Add a tag" maxlength="50" autocomplete="off"></div>
+    <div class="tag-suggest"></div>`;
 }
 
 function noteCard(note) {
@@ -471,7 +565,7 @@ $("note-form").onsubmit = async (event) => {
       title: $("note-title").value,
       body: asList ? "" : text,
       checklist: asList ? parseChecklist(text) : [],
-      tags: [...splitTags($("note-tags").value),
+      tags: [...splitTags($("note-tags").value).map(canonicalTag),
         ...(state.noteFilter && state.noteFilter !== ARCHIVED ? [state.noteFilter] : [])],
     }) });
     state.notes = [note, ...state.notes];
@@ -535,11 +629,10 @@ document.addEventListener("click", (event) => {
   if (state.tagPanelOpen && !inside) setTagPanel(false);
 });
 
-async function addTag(id, input) {
+async function addTags(id, names) {
   const note = state.notes.find((item) => item.id === id);
-  const added = splitTags(input.value);
-  if (!added.length) return;
-  await saveNote(id, { tags: [...note.tags, ...added] });
+  if (!note || !names.length) return;
+  await saveNote(id, { tags: [...note.tags, ...names] });
   renderNotes();
   const again = document.querySelector(`[data-note="${CSS.escape(id)}"] .note-tag-input`);
   if (again) again.focus();
@@ -609,13 +702,46 @@ $("note-list").onclick = async (event) => {
   } catch (error) { noteError(error); }
 };
 
+// The suggestions follow focus and typing in any of the three fields.
+$("note-list").addEventListener("focusin", (event) => {
+  if (event.target.closest(".note-tag-input")) showTagSuggestions(event.target);
+});
+$("note-list").addEventListener("input", (event) => {
+  if (event.target.closest(".note-tag-input")) showTagSuggestions(event.target);
+});
+$("note-list").addEventListener("focusout", (event) => {
+  if (event.target.closest(".note-tag-input")) hideTagSuggestions(event.target);
+});
+// Tapping a suggestion must not take the focus away from the field first.
+$("note-list").addEventListener("mousedown", (event) => {
+  if (event.target.closest(".tag-option")) event.preventDefault();
+});
+$("note-list").addEventListener("click", (event) => {
+  const option = event.target.closest(".tag-option");
+  if (!option) return;
+  event.stopPropagation();  // not a click on the note behind it
+  Promise.resolve(pickSuggestedTag(option)).catch(noteError);
+}, true);
+$("note-tags").addEventListener("focus", (event) => showTagSuggestions(event.target));
+$("note-tags").addEventListener("input", (event) => showTagSuggestions(event.target));
+$("note-tags").addEventListener("blur", (event) => hideTagSuggestions(event.target));
+$("note-tags").addEventListener("keydown", (event) => handleTagKeys(event, event.target));
+$("note-tag-suggest").addEventListener("mousedown", (event) => {
+  if (event.target.closest(".tag-option")) event.preventDefault();
+});
+$("note-tag-suggest").addEventListener("click", (event) => {
+  const option = event.target.closest(".tag-option");
+  if (option) pickSuggestedTag(option);
+});
+
 $("note-list").onkeydown = (event) => {
   const editor = event.target.closest(".note.editing");
   if (editor) { editorKey(event, editor); return; }
   const tagInput = event.target.closest(".note-tag-input");
   if (tagInput) {
     const id = tagInput.closest("[data-note]").dataset.note;
-    if (event.key === "Enter") { event.preventDefault(); addTag(id, tagInput).catch(noteError); }
+    if (handleTagKeys(event, tagInput)) return;
+    if (event.key === "Enter") { event.preventDefault(); addTags(id, splitTags(tagInput.value).map(canonicalTag)).catch(noteError); }
     else if (event.key === "Escape") { state.noteTagging = null; renderNotes(); }
     return;
   }

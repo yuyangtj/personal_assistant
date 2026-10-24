@@ -386,3 +386,9 @@ button.danger { background: var(--danger); color: #fff; }
 .note-tool.pinned.on svg { fill: currentColor; }
 .note-done { padding: 6px 16px; }
 @media (max-width: 420px) { .note.editing .note-date { display: none; } .note.editing .note-foot { justify-content: space-between; } }
+/* Tag suggestions under a tag field. */
+.tag-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.tag-suggest:empty { display: none !important; }
+.tag-option { background: var(--raised); color: var(--text); border: 1px solid var(--border-strong); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; }
+.tag-option:hover, .tag-option.active { border-color: var(--accent); background: var(--quiet-bg); }
+.tag-option.create { background: transparent; color: var(--accent); border-style: dashed; }
