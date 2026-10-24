@@ -285,12 +285,14 @@ stack safely:
    when you pass `kimi` or `minimax`; automatic fallback stays on.
 4. Validates the Compose configuration.
 5. Backs up PostgreSQL to `backups/assistant-<time>.dump` if the database is running,
-   keeping the newest 20 dumps.
+   keeping the newest 20 dumps and the last dump of each of the last 30 days.
 6. Builds and starts the release with images tagged by commit
    (`personal-assistant:<sha>`); migrations run first.
 7. Waits up to 60 seconds for `/health`.
-8. If healthy, records the release as current and prunes images beyond the newest three
-   releases. If not, restarts the previous release's images without rebuilding.
+8. If healthy, records the release as current, prunes images beyond the current and the
+   previous release, and removes Docker build cache unused for 3 days (6 hours when the
+   disk is over 85% full; `prune_build_cache` in `scripts/housekeeping.sh`). If not,
+   restarts the previous release's images without rebuilding.
 
 Exit codes: `0` deployed and healthy; `3` new release unhealthy and the previous one is
 serving again; anything else failed (including "no previous release to roll back to").
@@ -379,7 +381,9 @@ alias dc='docker compose --env-file .env.remote -f compose.remote.yaml'
 ## Backup and restore
 
 `redeploy-remote.sh` backs up before every deployment into the Git-ignored `backups/`
-directory, readable only by the deploy user. To create one by hand:
+directory, readable only by the deploy user. It keeps the newest 20 dumps and the last
+dump of each of the last 30 days, so a day with many deploys doesn't push out the days
+before it (`prune_backups` in `scripts/housekeeping.sh`). To create one by hand:
 
 ```bash
 docker compose --env-file .env.remote -f compose.remote.yaml exec -T postgres \
