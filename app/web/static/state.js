@@ -6,7 +6,9 @@ const state = { chats: [], archivedChats: [], showArchived: false, chatMenu: nul
                 workflowId: null, taskId: null, busy: false, timer: null,
                 taskTimer: null, prPollAttempts: 0, pendingAction: null,
                 workflowRuns: [], items: [], focus: [], itemId: null,
-                itemRef: null };
+                itemRef: null,
+                // Messages being sent (shown at once), when polling started, what was last drawn.
+                pending: [], pollStarted: null, transcriptSignature: null, stickyError: false };
 
 // Every view has its own address: #/chats/<id>, #/items/<slug>; ?task=<id> or
 // ?workflow=<id> opens a drawer over either, so back/forward, reload and push links work.
@@ -69,10 +71,38 @@ async function render() {
   else if (state.taskId || state.workflowId) hideTask();
 }
 
+// A deploy restarts the API for a few seconds. Reads (GET) are retried quietly while the
+// server is away; a write is never repeated by itself, so a message can't be sent twice.
+const TRANSIENT_STATUSES = new Set([502, 503, 504]);
+const RECONNECTING = "Reconnecting…";
+const RETRY_PAUSES_MS = [1000, 2000, 4000, 6000];
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function api(path, options) {
-  const res = await fetch(path, {
-    headers: { "content-type": "application/json" }, ...options,
-  });
+  const method = ((options && options.method) || "GET").toUpperCase();
+  const retries = method === "GET" ? RETRY_PAUSES_MS.length : 0;
+  for (let attempt = 0; ; attempt++) {
+    let res = null;
+    try {
+      res = await fetch(path, { headers: { "content-type": "application/json" }, ...options });
+    } catch (_) {
+      if (attempt >= retries) {
+        throw new Error("Can't reach the server. Check your connection and try again.");
+      }
+    }
+    if (res && !(TRANSIENT_STATUSES.has(res.status) && attempt < retries)) {
+      if ($("status").textContent === RECONNECTING) $("status").textContent = "";
+      if (TRANSIENT_STATUSES.has(res.status)) {
+        throw new Error("The server is restarting, probably an update. Try again in a moment.");
+      }
+      return readApiResponse(res);
+    }
+    $("status").textContent = RECONNECTING;
+    await pause(RETRY_PAUSES_MS[attempt]);
+  }
+}
+
+async function readApiResponse(res) {
   if (!res.ok) {
     let detail = res.status + " " + res.statusText;
     try { const body = await res.json(); if (body.detail) detail = body.detail; } catch (_) {}
@@ -80,8 +110,13 @@ async function api(path, options) {
   }
   return res.status === 204 ? null : res.json();
 }
-function fail(error) { $("error").textContent = error.message || String(error); }
-function clearError() { $("error").textContent = ""; }
+// A sticky error (a message that could not be sent) stays until the user does something
+// else; the page's own background refreshes must not wipe it a second later.
+function fail(error, { sticky = false } = {}) {
+  $("error").textContent = error.message || String(error);
+  state.stickyError = sticky;
+}
+function clearError() { $("error").textContent = ""; state.stickyError = false; }
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const label = (s) => String(s || "").replace(/_/g, " ");
