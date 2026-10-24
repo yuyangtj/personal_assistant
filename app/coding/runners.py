@@ -29,6 +29,7 @@ from app.coding.base import (
     RunnerAttempt,
     safe_agent_environment,
 )
+from app.coding.claude_stream import ClaudeStreamProgress, final_result
 from app.coding.decision import CodingDecision, CodingDecisionEngine
 from app.coding.git import restore_clean_worktree
 from app.coding.process import (
@@ -272,8 +273,9 @@ class ClaudeCodeMiniMaxRunner:
             self.executable,
             "--print",
             "--dangerously-skip-permissions",
+            "--verbose",
             "--output-format",
-            "json",
+            "stream-json",
         ]
         if self.model:
             command.extend(["--model", self.model])
@@ -298,14 +300,17 @@ class ClaudeCodeMiniMaxRunner:
             display_name="Claude Code with MiniMax",
             next_guidance=next_guidance,
             redirected_command=with_prompt,
+            output_listener=lambda: ClaudeStreamProgress(worktree, on_progress),
         )
-        try:
-            body = json.loads(output)
-            result = body.get("result") if isinstance(body, dict) else None
-        except ValueError:
-            result = None
+        result, is_error = final_result(output)
+        if is_error:
+            detail = result or output
+            raise CodingAgentError(
+                "Claude Code with MiniMax reported an error",
+                category=failure_category(detail[-16_000:]),
+            )
         return text_report(
-            result if isinstance(result, str) else output,
+            result if result is not None else output,
             "Claude Code with MiniMax completed the requested repository change",
         )
 
