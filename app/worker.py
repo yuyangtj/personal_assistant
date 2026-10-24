@@ -13,7 +13,10 @@ from time import monotonic
 
 from app.abilities import AbilityRegistry, abilities_prompt
 from app.assistant.supervisor import SupervisorExecutor, SupervisorTools
+from app.assistant.toolbox import Toolbox
+from app.assistant.tools import bookkeeping_tools, coding_tools, job_tools, repository_tools
 from app.capabilities import CapabilityRegistry
+from app.chat.routines import routine_capabilities
 from app.chat.routines import start_routine as run_routine
 from app.chat.triage import Triager
 from app.coding.base import CodeAgentRunner
@@ -37,7 +40,7 @@ from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.fake import ExecutionCancelled
 from app.execution.grocery_agent import GroceryAgentExecutor
 from app.execution.tool_agent import ToolAgentExecutor
-from app.integrations.factory import chat_client_chain
+from app.integrations.factory import chat_client_chain, triage_client
 from app.integrations.factory import provider_order as _provider_order
 from app.integrations.fallback import FallbackManagerModelClient
 from app.integrations.github import GitHubClient
@@ -53,15 +56,16 @@ from app.providers import DatabaseProviderStateStore, ProviderStateStore
 from app.repositories import RepositoryRegistry
 from app.repositories.briefs import RepositoryBriefs
 from app.repositories.reader import RepositoryReader
-from app.schedules import Scheduler
+from app.schedules import Scheduler, ScheduleService
 from app.services import TaskService
 from app.tools.klarna import KlarnaTools, ToolGateway
 from app.tools.mcp import McpGateway, Toolset
 from app.tools.search import build_search
 from app.validation import ValidationProfileRegistry
 from app.work.briefs import BriefWritebackJob, BriefWriter
-from app.work.items import configure_spaces
+from app.work.items import WorkItemService, configure_spaces
 from app.work.memory import MemoryService
+from app.work.notes import NoteService
 from app.work.purchases import PurchaseService
 from app.work.spaces import SpaceRegistry
 from app.workflows import WorkflowRegistry, WorkflowService
@@ -560,9 +564,10 @@ class TaskWorker:
                 execution_context["progress"] = ProgressReporter(self.service, task.id)
                 execution_context["guidance"] = GuidanceInbox(self.service, task.id)
             if executor.id == "model-conversation":
-                # Its repository lookups show on the reply's card ("Reading app/main.py").
+                # Its tool calls show on the reply's card ("Reading app/main.py").
                 execution_context["progress"] = ProgressReporter(self.service, task.id)
-            if executor.id == "supervisor":
+            if executor.id in {"supervisor", "model-conversation"}:
+                # Their tools act in this chat: a reminder, a list entry, a coding run.
                 execution_context["chat_session_id"] = task.chat_session_id
                 execution_context["origin_message_id"] = task.origin_message_id
             if executor.id in {
@@ -787,6 +792,50 @@ class TaskWorker:
         self._stop_event.set()
 
 
+def build_toolbox(
+    settings: Settings,
+    database: Database,
+    task_service: TaskService,
+    workflow_service: WorkflowService,
+    repositories: RepositoryRegistry,
+    github: GitHubClient | None,
+    *,
+    abilities: set[str],
+) -> Toolbox:
+    """The chat agent's tools, limited to the abilities this server has."""
+    router = Triager(
+        repositories,
+        triage_client(settings) if settings.triage_model_enabled else None,
+        min_confidence=settings.triage_min_confidence,
+        research_available=bool(settings.tavily_api_key or settings.brave_search_api_key),
+        groceries_available=True,
+    )
+    tools = bookkeeping_tools(
+        items=WorkItemService(database),
+        memory=MemoryService(database),
+        schedules=ScheduleService(database),
+        notes=NoteService(database),
+        tasks=task_service,
+        # A routine's route is decided once, when it is saved, like in the chat.
+        route=lambda instruction: routine_capabilities(
+            router, instruction, supervision=settings.supervisor_enabled
+        ),
+    )
+    if github is not None:
+        tools += repository_tools(RepositoryReader(repositories, github))
+    tools += job_tools(
+        task_service,
+        research=bool(settings.tavily_api_key or settings.brave_search_api_key),
+        # The shopping agent isn't installed on coding-only workers.
+        shopping=not settings.worker_coding_only,
+    )
+    if not settings.worker_coding_only:
+        tools += coding_tools(
+            SupervisorTools(database, task_service, workflow_service, repositories)
+        )
+    return Toolbox(tools, abilities=abilities)
+
+
 def add_chat_executors(
     executors: dict[str, Executor],
     settings: Settings,
@@ -804,17 +853,25 @@ def add_chat_executors(
         conversation_executor.research_available = bool(
             settings.tavily_api_key or settings.brave_search_api_key
         )
-        conversation_executor.abilities_text = abilities_prompt(
-            AbilityRegistry.from_directory(settings.abilities_directory).available(settings)
-        )
+        abilities = AbilityRegistry.from_directory(settings.abilities_directory).available(settings)
+        conversation_executor.abilities_text = abilities_prompt(abilities)
+        conversation_executor.default_timezone = settings.default_timezone
         github = (
             GitHubClient(token=settings.github_token, base_url=settings.github_api_base_url)
             if settings.github_token
             else None
         )
         conversation_executor.repository_briefs = RepositoryBriefs(repositories, github)
-        if github is not None:
-            conversation_executor.repository_reader = RepositoryReader(repositories, github)
+        conversation_executor.toolbox = build_toolbox(
+            settings,
+            database,
+            task_service,
+            workflow_service,
+            repositories,
+            github,
+            abilities={ability.id for ability in abilities},
+        )
+        logger.info("Chat agent tools: %s", ", ".join(conversation_executor.toolbox.names))
     if conversation_executor is not None:
         executors[conversation_executor.id] = conversation_executor
     else:

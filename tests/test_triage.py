@@ -187,8 +187,11 @@ def test_posting_a_message_returns_a_decision(client: TestClient) -> None:
 
 
 def test_chat_model_hands_coding_requests_to_the_workflow() -> None:
-    assert "coding workflow" in CONVERSATION_PROMPT
-    assert "never say you cannot work on their" in CONVERSATION_PROMPT
+    from app.execution.conversation import CODING_HANDOFF
+
+    assert "{coding}" in CONVERSATION_PROMPT
+    assert "coding workflow" in CODING_HANDOFF
+    assert "never say you cannot work on their" in CODING_HANDOFF
 
 
 def test_null_goal_and_reason_are_accepted(repositories: RepositoryRegistry) -> None:

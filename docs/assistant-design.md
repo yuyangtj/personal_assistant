@@ -130,7 +130,7 @@ quick tools stay quick, anything slow becomes a background job, and the assistan
 | Chat agent told about repositories | Done (README and files of the selected repo) |
 | Abilities registry with bands, generating "what I can do" (`abilities/`, shown on the Stats page) | Done |
 | Read-only repository tools (list, read, search) in the chat agent, with each lookup shown on the reply's card | Done |
-| More tools in the same agent (notes, memories, lists, Klarna, search, coding status) | Then |
+| More tools in the same agent (notes, memories, lists, reminders, routines, research, shopping, coding runs) | Done (research and shopping run in the background) |
 | One assistant for every message (triage and narrow agents retired) | Then |
 | Per-ability track record and scenarios; bands raised by evidence | Then |
 | Voice and the 3D character on the same API | Later |

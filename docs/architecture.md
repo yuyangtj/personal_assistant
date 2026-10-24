@@ -47,12 +47,22 @@ flowchart LR
   the console or named in the message, the start of its README and its top-level files, read
   from GitHub and cached for 15 minutes (`app/repositories/briefs.py`). Before this it knew
   nothing about them and asked the user to paste the README.
-- **The reply agent can look at code.** With a GitHub token it has three read-only tools,
-  `repo_files`, `repo_read` (200 numbered lines at a time) and `repo_search` (GitHub code
-  search), for the registered repositories only (`app/repositories/reader.py`). It may call
-  them up to 4 times before answering, and each lookup shows on the reply's card ("Reading
-  app/chat/triage.py"). Results are wrapped as data, never instructions. What it may do is
-  generated from `abilities/` (see [`assistant-design.md`](assistant-design.md)).
+- **The reply agent has tools** (`app/assistant/toolbox.py`, `app/assistant/tools.py`). Each
+  belongs to an ability in `abilities/`, and is offered only when that ability is available
+  on the server:
+  - bookkeeping, through the same code as the instant actions: `remember`, `forget`,
+    `list_add`, `list_check`, `work_items`, `note_add` (it can save notes, never read them),
+    `remind`, and `routine_create`, `routines`, `routine_run`, `routine_stop`;
+  - code, read-only and for registered repositories only (with a GitHub token):
+    `repo_files`, `repo_read` (200 numbered lines at a time) and `repo_search`;
+  - hand-offs that run in the background and post their answer in the chat: `research`
+    (with a search key) and `shopping` (Klarna and the stores);
+  - coding runs, through the supervisor's tools: `coding_status`, `coding_run`,
+    `coding_start` (ends in a draft PR you review), `coding_message` and `coding_stop`.
+
+  It may make up to 6 calls before answering, never the same call twice, and each one
+  shows on the reply's card ("Reading app/chat/triage.py"). Results are wrapped as data,
+  never instructions; a refused action comes back as "not done", so it can't claim it.
 - **Replies carry blocks.** These are choices, links, workflow and work-item cards,
   rendered by pre-built console components. A choice is answered by clicking it or by
   saying "yes" or "no".
