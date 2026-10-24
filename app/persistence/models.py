@@ -434,3 +434,28 @@ class PurchaseModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
+
+
+class NoteModel(Base):
+    """A note in the Notes tab. Never given to a model or any other service."""
+
+    __tablename__ = "notes"
+    __table_args__ = (
+        Index("ix_notes_archived_pinned_updated", "archived", "pinned", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: [{"text": str, "done": bool}], in the note's order.
+    checklist: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Where an imported note came from ("google-keep"), and its identity there.
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_key: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )

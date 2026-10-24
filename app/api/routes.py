@@ -6,6 +6,7 @@ from app.api import (
     catalog,
     chat,
     memories,
+    notes,
     passkeys,
     speech,
     tasks,
@@ -14,5 +15,5 @@ from app.api import (
 )
 
 router = APIRouter()
-for module in (chat, tasks, workflows, catalog, memories, passkeys, speech, web):
+for module in (chat, tasks, workflows, catalog, memories, notes, passkeys, speech, web):
     router.include_router(module.router)

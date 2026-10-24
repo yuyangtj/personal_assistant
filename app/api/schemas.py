@@ -406,6 +406,55 @@ class MemoryListResponse(BaseModel):
     memories: list[MemoryResponse]
 
 
+class NoteChecklistItem(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    done: bool = False
+
+
+class CreateNoteRequest(BaseModel):
+    title: str = Field(default="", max_length=300)
+    body: str = Field(default="", max_length=20_000)
+    checklist: list[NoteChecklistItem] = Field(default_factory=list, max_length=200)
+    tags: list[str] = Field(default_factory=list, max_length=30)
+    pinned: bool = False
+
+
+class UpdateNoteRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=300)
+    body: str | None = Field(default=None, max_length=20_000)
+    checklist: list[NoteChecklistItem] | None = Field(default=None, max_length=200)
+    tags: list[str] | None = Field(default=None, max_length=30)
+    pinned: bool | None = None
+    archived: bool | None = None
+
+
+class NoteResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    title: str
+    body: str
+    checklist: list[NoteChecklistItem]
+    tags: list[str]
+    pinned: bool
+    archived: bool
+    source: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class NoteListResponse(BaseModel):
+    notes: list[NoteResponse]
+
+
+class KeepImportResponse(BaseModel):
+    dry_run: bool
+    added: int
+    already_here: int
+    trashed_skipped: int
+    images_skipped: int
+    unreadable: int
+
+
 class ProviderRuntimeStateResponse(BaseModel):
     provider_key: str
     available: bool
