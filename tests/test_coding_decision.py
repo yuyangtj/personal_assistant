@@ -12,7 +12,12 @@ class Runner:
 
 
 def _runners() -> list[Runner]:
-    return [Runner("kimi-code"), Runner("minimax-claude-code"), Runner("codex-cli")]
+    return [
+        Runner("claude-code"),
+        Runner("codex-cli"),
+        Runner("kimi-code"),
+        Runner("minimax-claude-code"),
+    ]
 
 
 def test_decision_engine_prefers_lower_cost_runner_for_simple_work() -> None:
@@ -24,10 +29,10 @@ def test_decision_engine_prefers_lower_cost_runner_for_simple_work() -> None:
     decision = engine.decide(_runners(), "Update the README documentation")
 
     assert decision.profile.complexity == TaskComplexity.SIMPLE
-    assert decision.ordered_providers[0] == "kimi-code"
+    assert decision.ordered_providers[0] == "claude-code"
 
 
-def test_decision_engine_keeps_kimi_first_and_ranks_data_strength_next() -> None:
+def test_decision_engine_keeps_claude_first_and_ranks_data_strength_above_kimi() -> None:
     engine = CodingDecisionEngine(
         CodingRunnerRegistry.from_directory("coding-runners"),
         InMemoryProviderStateStore(),
@@ -37,7 +42,12 @@ def test_decision_engine_keeps_kimi_first_and_ranks_data_strength_next() -> None
 
     assert decision.profile.complexity == TaskComplexity.STANDARD
     assert "data" in decision.profile.traits
-    assert decision.ordered_providers[:2] == ("kimi-code", "minimax-claude-code")
+    assert decision.ordered_providers == (
+        "claude-code",
+        "codex-cli",
+        "minimax-claude-code",
+        "kimi-code",
+    )
 
 
 def test_decision_engine_prefers_reasoning_for_complex_security_architecture() -> None:
@@ -52,7 +62,12 @@ def test_decision_engine_prefers_reasoning_for_complex_security_architecture() -
     )
 
     assert decision.profile.complexity == TaskComplexity.COMPLEX
-    assert decision.ordered_providers == ("kimi-code", "codex-cli", "minimax-claude-code")
+    assert decision.ordered_providers == (
+        "claude-code",
+        "codex-cli",
+        "kimi-code",
+        "minimax-claude-code",
+    )
     assert decision.candidates[0].reasons[-1].startswith("complex_reasoning_fit")
 
 
@@ -121,7 +136,7 @@ def test_fallback_runner_uses_decision_order_and_records_explanation(tmp_path) -
         is_cancelled=lambda: False,
     )
 
-    assert calls == ["kimi-code"]
+    assert calls == ["claude-code"]
     assert fallback.last_decision is not None
-    assert fallback.last_decision.ordered_providers[0] == "kimi-code"
+    assert fallback.last_decision.ordered_providers[0] == "claude-code"
     assert report.notes[-1].startswith("Decision engine: complexity=simple")

@@ -7,7 +7,7 @@ import json
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -55,9 +55,21 @@ class CodexCliRunner:
 
     provider = "codex-cli"
 
-    def __init__(self, *, executable: str = "codex", model: str | None = None):
+    def __init__(
+        self,
+        *,
+        executable: str = "codex",
+        model: str | None = None,
+        codex_home: Path | None = None,
+        own_sandbox: bool = True,
+    ):
         self.executable = executable
         self.model = model
+        #: Where the ChatGPT login (auth.json) lives; it must stay writable for refreshes.
+        self.codex_home = codex_home
+        #: False inside a locked-down container, where Codex's own Linux sandbox can't
+        #: start: the container (read-only, no capabilities, worktree only) is the sandbox.
+        self.own_sandbox = own_sandbox
 
     def run(
         self,
@@ -81,8 +93,11 @@ class CodexCliRunner:
                 "exec",
                 "--ephemeral",
                 "--ignore-user-config",
-                "--sandbox",
-                "workspace-write",
+                *(
+                    ["--sandbox", "workspace-write"]
+                    if self.own_sandbox
+                    else ["--dangerously-bypass-approvals-and-sandbox"]
+                ),
                 "--color",
                 "never",
                 "--json",
@@ -104,7 +119,7 @@ class CodexCliRunner:
                         stdin=subprocess.PIPE,
                         stdout=stdout,
                         stderr=stderr,
-                        env=safe_agent_environment(),
+                        env=self._environment(),
                     )
                     assert process.stdin is not None
                     process.stdin.write(prompt.encode())
@@ -134,6 +149,16 @@ class CodexCliRunner:
                 return CodeAgentReport.model_validate_json(output_path.read_text(encoding="utf-8"))
             except (OSError, ValidationError) as error:
                 raise CodingAgentError("Codex CLI returned an invalid completion report") from error
+
+    def check_login(self) -> str | None:
+        """Why it can't run (no ChatGPT login), or None."""
+        return _login_problem([self.executable, "login", "status"], self._environment())
+
+    def _environment(self) -> dict[str, str]:
+        environment = safe_agent_environment()
+        if self.codex_home is not None:
+            environment["CODEX_HOME"] = str(self.codex_home)
+        return environment
 
 
 class KimiCodeCliRunner:
@@ -243,25 +268,95 @@ class KimiAcpRunner(KimiCodeCliRunner):
         return text_report(reply, "Kimi Code completed the requested repository change")
 
 
-class ClaudeCodeMiniMaxRunner:
-    """Runs Claude Code against MiniMax's Anthropic-compatible endpoint."""
+#: Longest a login check may take before the agent is left out for now.
+LOGIN_CHECK_SECONDS = 60
 
-    provider = "minimax-claude-code"
+
+def _login_problem(
+    command: list[str],
+    environment: Mapping[str, str],
+    failed: Callable[[str], bool] = lambda stdout: False,
+) -> str | None:
+    """Run a login check; what went wrong in a few words, or None when it's fine."""
+    try:
+        completed = subprocess.run(
+            command,
+            env=dict(environment),
+            capture_output=True,
+            text=True,
+            timeout=LOGIN_CHECK_SECONDS,
+            check=False,
+        )
+    except FileNotFoundError:
+        return f"{command[0]} is not installed"
+    except subprocess.TimeoutExpired:
+        return "the login check timed out"
+    if completed.returncode != 0 or failed(completed.stdout):
+        category = failure_category(f"{completed.stdout}\n{completed.stderr}"[-4000:])
+        return category.replace("_", " ")
+    return None
+
+
+class ClaudeCodeRunner:
+    """Runs Claude Code headless, on the user's subscription or on MiniMax's endpoint."""
 
     def __init__(
         self,
         *,
-        api_key: str,
-        base_url: str,
+        provider: str,
+        display_name: str,
+        environment: Mapping[str, str],
         executable: str = "claude",
         model: str | None = None,
     ):
-        if not api_key:
-            raise ValueError("A MiniMax API key is required for Claude Code")
-        self.api_key = api_key
-        self.base_url = base_url.rstrip("/")
+        self.provider = provider
+        self.display_name = display_name
+        self._environment = dict(environment)
         self.executable = executable
         self.model = model
+
+    @classmethod
+    def subscription(
+        cls, *, oauth_token: str, executable: str = "claude", model: str | None = None
+    ) -> ClaudeCodeRunner:
+        """With a token from ``claude setup-token`` (Claude Pro or Max), not an API key."""
+        if not oauth_token:
+            raise ValueError("A Claude Code OAuth token is required")
+        return cls(
+            provider="claude-code",
+            display_name="Claude Code",
+            environment={"CLAUDE_CODE_OAUTH_TOKEN": oauth_token},
+            executable=executable,
+            model=model,
+        )
+
+    @classmethod
+    def minimax(
+        cls, *, api_key: str, base_url: str, executable: str = "claude", model: str | None = None
+    ) -> ClaudeCodeRunner:
+        """Against MiniMax's Anthropic-compatible endpoint, paid by the MiniMax key."""
+        if not api_key:
+            raise ValueError("A MiniMax API key is required for Claude Code")
+        return cls(
+            provider="minimax-claude-code",
+            display_name="Claude Code with MiniMax",
+            environment={
+                "ANTHROPIC_AUTH_TOKEN": api_key,
+                "ANTHROPIC_BASE_URL": base_url.rstrip("/"),
+            },
+            executable=executable,
+            model=model,
+        )
+
+    def check_login(self) -> str | None:
+        """Why it can't run (a rejected token, say), or None; one tiny request."""
+        environment = safe_agent_environment()
+        environment.update(self._environment)
+        return _login_problem(
+            [self.executable, "-p", "Reply with OK", "--output-format", "json"],
+            environment,
+            lambda stdout: '"is_error":true' in stdout.replace(" ", ""),
+        )
 
     def run(
         self,
@@ -288,12 +383,7 @@ class ClaudeCodeMiniMaxRunner:
             return [*command, coding_prompt(with_redirects(request, notes))]
 
         environment = safe_agent_environment()
-        environment.update(
-            {
-                "ANTHROPIC_AUTH_TOKEN": self.api_key,
-                "ANTHROPIC_BASE_URL": self.base_url,
-            }
-        )
+        environment.update(self._environment)
         output = run_code_agent_process(
             command=with_prompt(),
             worktree=worktree,
@@ -301,7 +391,7 @@ class ClaudeCodeMiniMaxRunner:
             is_cancelled=is_cancelled,
             environment=environment,
             on_progress=on_progress,
-            display_name="Claude Code with MiniMax",
+            display_name=self.display_name,
             next_guidance=next_guidance,
             redirected_command=with_prompt,
             output_listener=lambda: ClaudeStreamProgress(worktree, on_progress),
@@ -310,12 +400,12 @@ class ClaudeCodeMiniMaxRunner:
         if is_error:
             detail = result or output
             raise CodingAgentError(
-                "Claude Code with MiniMax reported an error",
+                f"{self.display_name} reported an error",
                 category=failure_category(detail[-16_000:]),
             )
         return text_report(
             result if result is not None else output,
-            "Claude Code with MiniMax completed the requested repository change",
+            f"{self.display_name} completed the requested repository change",
         )
 
 

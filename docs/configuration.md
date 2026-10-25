@@ -11,6 +11,9 @@ Newer settings, all optional:
 | `ASSISTANT_SUPERVISOR_ENABLED` | `true` | Messages about coding work go to the supervisor |
 | `ASSISTANT_MAIN_AGENT_ENABLED` | `false` | Every message goes to the chat agent and its tools, without triage; plain list, memory and reminder phrasings are still done instantly |
 | `ASSISTANT_CODING_CONCURRENCY` | `2` | Coding agents running at once in the coding worker |
+| `ASSISTANT_CODE_AGENT_PROVIDERS` | `claude,codex,kimi,minimax-claude` | Coding agents in order; the next takes over when one is rate-limited or can't log in |
+| `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude Code on your Claude subscription (from `claude setup-token`); without it Claude Code is skipped |
+| `CODEX_HOME` / `ASSISTANT_CODEX_OWN_SANDBOX` | `~/.codex` / `true` (`false` in the coding container) | Where Codex's ChatGPT login lives; Codex is skipped without `auth.json` there. In the locked-down container, the container is Codex's sandbox |
 | `ASSISTANT_KIMI_CODE_PROTOCOL` | `acp` | `acp` runs Kimi Code as a live session; `prompt` is the one-shot fallback |
 | `ASSISTANT_KIMI_CODE_MODEL` | `k3.1-pro` | The model Kimi Code runs on (`kimi-for-coding` is K2.8 Preview) |
 | `ASSISTANT_CODING_SPEC_ENABLED` | `true` | A short spec (goal, acceptance criteria, scope) is written before a coding agent starts |
