@@ -49,7 +49,7 @@ What is built and what is next:
 | `capabilities/`, `workflows/`, `repositories/`, `spaces/` | YAML configuration |
 | `migrations/` | Ordered SQL migrations (re-run on every deploy, so idempotent) |
 | `scripts/`, `deploy/` | Server deployment: host deployer, redeploy with rollback, Caddy |
-| `android-assistant/` | The Android app (`shell/`) and the paused 3D avatar (`avatar/`) |
+| `android-assistant/` | The Android app (`shell/`) |
 | `docs/` | Architecture, configuration, hosting, workflows |
 
 ## Run it locally
@@ -93,13 +93,10 @@ Merged changes are deployed from the console through an approved deployment work
 server's host deployer builds tagged images, checks health, and rolls back automatically.
 Setup and operations are covered in [`docs/remote-hosting.md`](docs/remote-hosting.md).
 
-## Credits
+## The 3D avatar, retired
 
-- **"Cool Man" 3D character** (paused avatar client) by
-  [ardhanaputra](https://sketchfab.com/ardhanaputra), from
-  [Sketchfab](https://sketchfab.com/3d-models/cool-man-ad14b71697dd4ea7836c1f06c75e5f72),
-  licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) and modified for
-  this project. Details:
-  [`android-assistant/avatar/docs/credits.md`](android-assistant/avatar/docs/credits.md).
-- English pronunciations derive from the CMU Pronouncing Dictionary (Carnegie Mellon
-  University, BSD-style licence).
+A Unity 3D-character client (`android-assistant/avatar/`: a Kotlin host, the Unity
+project, design sources, lip-sync tools, and credits for the CC BY 4.0 "Cool Man" model
+and the CMU Pronouncing Dictionary) was paused and then removed on 2026-10-25. The web
+console's SVG face (`app/web/static/avatar.js`) replaces it. To get it back:
+`git checkout e053acb -- android-assistant/avatar`.

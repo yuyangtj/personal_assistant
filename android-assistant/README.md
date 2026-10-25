@@ -1,11 +1,8 @@
 # Android
 
-Two Android clients for the Personal Assistant:
-
-| Folder | What it is | Status |
-|---|---|---|
-| [`shell/`](shell/README.md) | The app: the web console in a native shell, plus voice, phone actions (timers, alarms, calendar drafts) and Gemini Nano for small requests | **In use** |
-| [`avatar/`](avatar/README.md) | The 3D-character client: Kotlin host + Unity avatar with lip-sync, its design sources and tools | Paused; returns once the backend is in good shape |
+The Android app for the Personal Assistant, in [`shell/`](shell/README.md): the web
+console in a native shell, plus voice and phone actions (timers, alarms, calendar drafts).
+(The paused Unity avatar client was removed; see the main README.)
 
 Build the app:
 
