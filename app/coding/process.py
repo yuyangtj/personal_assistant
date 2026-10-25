@@ -303,6 +303,8 @@ def failure_category(diagnostic: str) -> str:
         "quota exceeded",
         "quota exhausted",
         "usage limit",
+        "5-hour limit",
+        "weekly limit",
         "credit balance",
         "insufficient balance",
         "out of tokens",
@@ -312,7 +314,19 @@ def failure_category(diagnostic: str) -> str:
     rate_markers = ("rate limit", "rate_limit", "too many requests", "http 429", "status 429")
     if any(marker in normalized for marker in rate_markers):
         return "rate_limited"
-    auth_markers = ("unauthorized", "invalid api key", "authentication failed", "http 401")
+    auth_markers = (
+        "unauthorized",
+        "invalid api key",
+        "authentication failed",
+        "http 401",
+        "invalid bearer token",
+        "failed to authenticate",
+        "access token is invalid",
+        "api error: 401",
+        "not logged in",
+        "please run /login",
+        "codex login",
+    )
     if any(marker in normalized for marker in auth_markers):
         return "authentication_failed"
     return "execution_failed"

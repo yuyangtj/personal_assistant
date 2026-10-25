@@ -91,6 +91,7 @@ def test_coding_runner_registry_is_visible(client: TestClient) -> None:
     assert response.status_code == 200
     runners = response.json()["runners"]
     assert {runner["id"] for runner in runners} == {
+        "claude-code",
         "kimi-code",
         "minimax-claude-code",
         "codex-cli",

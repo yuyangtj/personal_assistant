@@ -173,7 +173,7 @@ random secrets, and at least one routine model key (`KIMI_API_KEY` or
 ## Coding worker (optional)
 
 The normal `worker` handles chat and non-coding tasks. The separate `coding-worker`
-contains Git, uv, Kimi Code, and Claude Code and has no public port or Docker socket. It
+contains Git, uv, Claude Code, Codex and Kimi Code and has no public port or Docker socket. It
 runs with all Linux capabilities dropped, as the unprivileged `assistant-coder` host
 account, and only receives the explicitly registered repository mounts plus its worktree
 directory.
@@ -215,6 +215,48 @@ requests write and Checks read. It reaches the container only through the askpas
 helper; the `assistant-coder` account itself holds no credentials. Keep
 `ASSISTANT_APPROVAL_TOKEN` separate; it is supplied only to the API and is never
 available to either coding CLI.
+
+### Claude Code and Codex on your subscriptions
+
+The coding agents run in order (`ASSISTANT_CODE_AGENT_PROVIDERS`, default
+`claude,codex,kimi,minimax-claude`). When one is rate-limited or its login stops working,
+the next takes over, so the subscription agents can lead without risking a stuck run.
+Neither needs a browser on the server, and neither uses an API key:
+
+- **Claude Code** uses a long-lived token from your Claude Pro or Max subscription. On
+  your Mac, run `claude setup-token`, sign in, and copy the token it prints (it lasts about
+  a year). On the server, add it without it landing in your shell history:
+
+  ```bash
+  cd /srv/personal-assistant/app
+  read -rs TOKEN && printf '\nCLAUDE_CODE_OAUTH_TOKEN=%s\n' "$TOKEN" >> .env.remote && unset TOKEN
+  ```
+
+- **Codex** uses your ChatGPT login, kept in a folder only the coding user can read. It
+  refreshes the login itself, so the folder must stay writable. Give the server its own
+  login (a copy of your Mac's `~/.codex/auth.json` would share one refresh token, and
+  whichever side refreshes first logs the other out). Device-code login may first need
+  turning on in ChatGPT's security settings.
+
+  ```bash
+  sudo install -d -o assistant-coder -g assistant-coder -m 700 /srv/personal-assistant/codex-home
+  echo 'ASSISTANT_HOST_CODEX_HOME=/srv/personal-assistant/codex-home' >> .env.remote
+  docker compose --env-file .env.remote -f compose.remote.yaml run --rm --no-deps \
+    coding-worker codex login --device-auth
+  ```
+
+  It prints a code; open the link on your phone or Mac, sign in to ChatGPT and enter it.
+
+Then deploy. At startup the worker checks each login with one tiny request and leaves out
+an agent whose login fails, so the others keep serving. Its log says which ones it uses:
+
+```bash
+docker logs personal-assistant-coding-worker-1 2>&1 | grep -E "Coding agents|Leaving out"
+```
+
+Runs count against the same subscription limits as your own use on the Mac. Renew the
+Claude token with `claude setup-token` when it expires (the log shows "Leaving out
+claude-code: authentication failed"); run the Codex login again if it ever shows the same.
 
 ### Adding a coding repository
 

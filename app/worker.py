@@ -32,7 +32,7 @@ from app.coding.reconcile import PullRequestReconciler
 from app.coding.review import DiffReviewer
 from app.coding.runners import (
     DEFAULT_KIMI_CODE_MODEL,
-    ClaudeCodeMiniMaxRunner,
+    ClaudeCodeRunner,
     CodexCliRunner,
     FallbackCodeAgentRunner,
     KimiAcpRunner,
@@ -270,6 +270,12 @@ def build_coding_executor(
     return RepositoryCodingExecutor(executors, default_repository_id=configured_default)
 
 
+def codex_logged_in(codex_home: Path | None) -> bool:
+    """Whether Codex has a login to use: auth.json in its home (default ~/.codex)."""
+    home = codex_home or Path.home() / ".codex"
+    return (home / "auth.json").is_file()
+
+
 def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
     providers = tuple(
         dict.fromkeys(
@@ -278,7 +284,7 @@ def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
             if provider.strip()
         )
     )
-    supported = {"kimi", "minimax-claude", "codex"}
+    supported = {"claude", "codex", "kimi", "minimax-claude"}
     unknown = [provider for provider in providers if provider not in supported]
     if unknown:
         raise ValueError("Unsupported coding provider: " + ", ".join(unknown))
@@ -299,10 +305,20 @@ def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
                 )
             else:
                 logger.warning("Skipping Kimi Code runner: no Kimi API key")
+        elif provider == "claude":
+            if settings.claude_code_oauth_token:
+                runners.append(
+                    ClaudeCodeRunner.subscription(
+                        oauth_token=settings.claude_code_oauth_token,
+                        executable=settings.claude_code_executable,
+                    )
+                )
+            else:
+                logger.warning("Skipping Claude Code: no CLAUDE_CODE_OAUTH_TOKEN")
         elif provider == "minimax-claude":
             if settings.minimax_api_key:
                 runners.append(
-                    ClaudeCodeMiniMaxRunner(
+                    ClaudeCodeRunner.minimax(
                         api_key=settings.minimax_api_key,
                         base_url=settings.minimax_anthropic_base_url,
                         executable=settings.claude_code_executable,
@@ -311,17 +327,46 @@ def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
                 )
             else:
                 logger.warning("Skipping MiniMax Claude Code runner: no MiniMax API key")
-        else:
+        elif codex_logged_in(settings.codex_home):
             runners.append(
                 CodexCliRunner(
                     executable=settings.code_agent_executable,
                     model=settings.code_agent_model,
+                    codex_home=settings.codex_home,
+                    own_sandbox=settings.codex_own_sandbox,
                 )
             )
+        else:
+            logger.warning("Skipping Codex: no ChatGPT login in CODEX_HOME (auth.json)")
     if not runners:
         raise ValueError("No configured coding runner is usable")
     logger.info("Configured coding runners: %s", ", ".join(runner.provider for runner in runners))
     return runners
+
+
+def drop_logged_out_runners(executor: RepositoryCodingExecutor) -> None:
+    """Leave out a subscription agent whose login doesn't work, rather than fail its runs.
+
+    The others still serve; the log says why, so the login can be renewed.
+    """
+    agents = {id(c.agent): c.agent for c in executor.executors.values()}
+    for agent in agents.values():
+        runners = getattr(agent, "runners", None)
+        if not runners:
+            continue
+        kept = []
+        for runner in runners:
+            check = getattr(runner, "check_login", None)
+            problem = check() if callable(check) else None
+            if problem:
+                logger.warning("Leaving out %s: %s", runner.provider, problem)
+            else:
+                kept.append(runner)
+        if not kept:
+            raise ValueError("Coding worker preflight failed: no coding agent can log in")
+        agent.runners = tuple(kept)
+        agent.provider = "->".join(runner.provider for runner in kept)
+        logger.info("Coding agents: %s", ", ".join(runner.provider for runner in kept))
 
 
 def preflight_coding_executor(executor: RepositoryCodingExecutor) -> None:
@@ -370,6 +415,8 @@ def preflight_coding_executor(executor: RepositoryCodingExecutor) -> None:
         executable = getattr(runner, "executable", None)
         if isinstance(executable, str) and shutil.which(executable) is None:
             problems.append(f"coding runner executable not found: {executable}")
+    if not problems:
+        drop_logged_out_runners(executor)
     if problems:
         raise ValueError("Coding worker preflight failed: " + "; ".join(problems))
 

@@ -78,7 +78,8 @@ class Settings:
     gemini_tts_timeout_seconds: float = 30.0
     gemini_tts_cache_entries: int = 128
     code_agent_enabled: bool = False
-    code_agent_providers: str = "kimi,minimax-claude,codex"
+    #: In order; a provider that is rate-limited or not logged in hands over to the next.
+    code_agent_providers: str = "claude,codex,kimi,minimax-claude"
     code_repository_path: Path | None = None
     code_worktree_root: Path = Path("/tmp/personal-assistant-worktrees")
     code_agent_executable: str = "codex"
@@ -89,6 +90,12 @@ class Settings:
     #: one-shot fallback.
     kimi_code_protocol: str = "acp"
     claude_code_executable: str = "claude"
+    #: From ``claude setup-token``: Claude Code on the user's Claude subscription.
+    claude_code_oauth_token: str | None = None
+    #: Codex's home, holding the ChatGPT login (auth.json); must be writable and kept.
+    codex_home: Path | None = None
+    #: False in the coding container, where Codex's own sandbox can't start.
+    codex_own_sandbox: bool = True
     minimax_anthropic_base_url: str = "https://api.minimaxi.com/anthropic"
     minimax_code_model: str | None = None
     code_agent_rate_limit_cooldown_seconds: int = 300
@@ -345,6 +352,11 @@ class Settings:
             ).lower(),
             claude_code_executable=os.getenv(
                 "ASSISTANT_CLAUDE_CODE_EXECUTABLE", defaults.claude_code_executable
+            ),
+            claude_code_oauth_token=os.getenv("CLAUDE_CODE_OAUTH_TOKEN") or None,
+            codex_home=Path(value) if (value := os.getenv("CODEX_HOME")) else None,
+            codex_own_sandbox=_as_bool(
+                os.getenv("ASSISTANT_CODEX_OWN_SANDBOX", str(defaults.codex_own_sandbox))
             ),
             minimax_anthropic_base_url=os.getenv(
                 "ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL",

@@ -4,6 +4,7 @@ FROM python:3.13-slim
 
 ARG KIMI_CODE_VERSION=2.0.2
 ARG CLAUDE_CODE_VERSION=2.1.280
+ARG CODEX_VERSION=0.163.0
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -17,6 +18,7 @@ RUN apt-get update \
     && npm install --global \
         "@moonshot-ai/kimi-code@${KIMI_CODE_VERSION}" \
         "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+        "@openai/codex@${CODEX_VERSION}" \
     && python -m pip install --no-cache-dir uv \
     && rm -rf /var/lib/apt/lists/*
 

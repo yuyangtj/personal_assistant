@@ -203,7 +203,13 @@ services:
       ASSISTANT_REPOSITORY_ANALYTICS_AGENT_PLAYGROUND_PATH: /workspace/repos/analytics-agent-playground
       ASSISTANT_CODE_WORKTREE_ROOT: /workspace/worktrees
       ASSISTANT_CODE_AGENT_ENABLED: "true"
-      ASSISTANT_CODE_AGENT_PROVIDERS: kimi,minimax-claude
+      # In order: the next one takes over when one is rate-limited or not logged in.
+      ASSISTANT_CODE_AGENT_PROVIDERS: ${ASSISTANT_CODE_AGENT_PROVIDERS:-claude,codex,kimi,minimax-claude}
+      # Claude Code on the Claude subscription (from `claude setup-token`).
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Codex on the ChatGPT subscription: its login lives in the codex-home bind below.
+      CODEX_HOME: /service-state/codex
+      ASSISTANT_CODEX_OWN_SANDBOX: ${ASSISTANT_CODEX_OWN_SANDBOX:-false}
       ASSISTANT_CODE_AGENT_PREFLIGHT_ENABLED: "true"
       ASSISTANT_DEFAULT_REPOSITORY_ID: ${ASSISTANT_DEFAULT_REPOSITORY_ID:-personal-assistant}
       ASSISTANT_WORKER_ID: coding-worker-remote
@@ -244,6 +250,9 @@ services:
       - type: bind
         source: ${ASSISTANT_HOST_CODE_WORKTREE_ROOT:-./.coding-worktrees}
         target: /workspace/worktrees
+      - type: bind
+        source: ${ASSISTANT_HOST_CODEX_HOME:-./.codex-home}
+        target: /service-state/codex
     networks:
       - private
 

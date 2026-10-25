@@ -9,7 +9,7 @@ import pytest
 from app.coding import process
 from app.coding.base import CodingAgentError
 from app.coding.claude_stream import ClaudeStreamProgress, final_result
-from app.coding.runners import ClaudeCodeMiniMaxRunner
+from app.coding.runners import ClaudeCodeRunner
 from app.execution.fake import ExecutionCancelled
 
 FAKE_AGENT = Path(__file__).with_name("fake_claude_agent.py")
@@ -28,7 +28,7 @@ def _sample_lines(cwd: Path) -> list[str]:
 
 def _runner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, pause: float = 1.5
-) -> ClaudeCodeMiniMaxRunner:
+) -> ClaudeCodeRunner:
     executable = tmp_path / "claude"
     executable.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE_AGENT}" "$@"\n')
     executable.chmod(0o755)
@@ -38,7 +38,7 @@ def _runner(
         "FAKE_CLAUDE_PAUSE": str(pause),
     }
     monkeypatch.setattr("app.coding.runners.safe_agent_environment", lambda: dict(environment))
-    return ClaudeCodeMiniMaxRunner(
+    return ClaudeCodeRunner.minimax(
         api_key="minimax-secret",
         base_url="https://api.minimaxi.com/anthropic",
         executable=str(executable),
