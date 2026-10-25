@@ -112,6 +112,15 @@ def test_failed_reminder_push_is_logged_with_the_schedule_id(
 
     assert any(reminder.id in record.message for record in caplog.records)
 
+    # With push turned off there is nothing to report.
+    caplog.clear()
+    schedules.create(
+        kind=ScheduleKind.REMINDER, message="Water plants", run_at=now - timedelta(minutes=1)
+    )
+    with caplog.at_level("WARNING"):
+        assert Scheduler(database, start_run=lambda _s: None, clock=lambda: now).run_due() == 1
+    assert not [r for r in caplog.records if "push failed" in r.message]
+
 
 def test_routines_start_a_run(database: Database, service: TaskService) -> None:
     schedules = ScheduleService(database)

@@ -215,7 +215,8 @@ class Scheduler:
                         role="assistant",
                         content=text,
                     )
-            if not self.notifier.send("Reminder", text, priority=4):
+            sent = self.notifier.send("Reminder", text, priority=4)
+            if not sent and not isinstance(self.notifier, NullNotifier):  # off is not a failure
                 logger.warning("Reminder push failed for schedule %s", schedule.id)
             return
         # The run itself pushes its result when it finishes (see the worker).
