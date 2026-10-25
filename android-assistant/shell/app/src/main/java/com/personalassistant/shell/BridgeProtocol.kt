@@ -5,10 +5,10 @@ import org.json.JSONObject
 /**
  * The messages the console page and the app exchange, as JSON strings.
  *
- * The page can ask for voice, speech and on-device routing, and confirm an action the app
- * proposed. It can never describe an action itself: the app keeps the proposed actions and
- * the page only refers to one by the id the app gave it. For an action a server reply
- * proposed, the page names the reply's card and the app reads the action from the server.
+ * The page can ask for voice and speech, and confirm an action a server reply proposed.
+ * It can never describe an action itself: the page names the reply's card, the app reads
+ * the action from the server and checks it, and the page then refers to it only by the id
+ * the app gave it.
  */
 object BridgeProtocol {
     const val MAX_TEXT = 4_000
@@ -29,21 +29,11 @@ object BridgeProtocol {
     const val MAX_SHARED_TEXT = 5_000_000
     const val MAX_SCREEN_TEXT = 8_000
 
-    fun capabilities(voice: Boolean, deviceAi: DeviceAiState, assistant: Boolean? = null): String =
-        JSONObject()
+    fun capabilities(voice: Boolean, assistant: Boolean? = null): String = JSONObject()
         .put("type", "capabilities")
         .put("voice", voice)
         .apply { if (assistant != null) put("assistant", assistant) }
         .put("speak", true)
-        .put("onDevice", deviceAi.availability.wire)
-        .put("onDeviceDetail", deviceAi.detail)
-        .toString()
-
-    fun deviceAi(state: DeviceAiState): String = JSONObject()
-        .put("type", "device_ai")
-        .put("onDevice", state.availability.wire)
-        .put("onDeviceDetail", state.detail)
-        .apply { state.progress?.let { put("progress", it.toDouble()) } }
         .toString()
 
     /** Text shared from another app, for the chat box. */
@@ -72,19 +62,6 @@ object BridgeProtocol {
         .apply { if (text != null) put("text", text) }
         .toString()
 
-    fun route(id: String, route: RequestRoute, actionId: String? = null): String {
-        val message = JSONObject().put("type", "route").put("id", id)
-        when (route) {
-            is RequestRoute.Reply -> message.put("route", "reply").put("text", route.text)
-            is RequestRoute.Confirm -> message
-                .put("route", "confirm")
-                .put("label", route.action.label)
-                .put("action", requireNotNull(actionId))
-            is RequestRoute.Cloud -> message.put("route", "cloud")
-        }
-        return message.toString()
-    }
-
     /** A reply's phone-action card, checked by the app: its label and id, or why not. */
     fun messageAction(blockId: String, actionId: String?, label: String?, error: String?): String =
         JSONObject()
@@ -108,9 +85,7 @@ object BridgeProtocol {
         "stop_listening",
         "speak",
         "stop_speaking",
-        "route",
         "run_action",
         "offer_message_action",
-        "enable_on_device",
     )
 }

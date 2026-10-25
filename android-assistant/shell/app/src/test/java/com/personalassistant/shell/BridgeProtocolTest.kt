@@ -9,7 +9,10 @@ import org.junit.Test
 class BridgeProtocolTest {
     @Test
     fun onlyKnownRequestsFromThePageAreAccepted() {
-        assertEquals("route", BridgeProtocol.parse("""{"type":"route","id":"r1","text":"hi"}""")?.type)
+        assertEquals("listen", BridgeProtocol.parse("""{"type":"listen"}""")?.type)
+        // The phone no longer decides what a message means: there is no routing to ask for.
+        assertNull(BridgeProtocol.parse("""{"type":"route","id":"r1","text":"hi"}"""))
+        assertNull(BridgeProtocol.parse("""{"type":"enable_on_device"}"""))
         assertNull(BridgeProtocol.parse("""{"type":"run_intent","uri":"tel:123"}"""))
         assertNull(BridgeProtocol.parse("not json"))
         val long = BridgeProtocol.parse("""{"type":"speak","text":"${"a".repeat(5_000)}"}""")
@@ -17,21 +20,21 @@ class BridgeProtocolTest {
     }
 
     @Test
-    fun aConfirmRouteCarriesOnlyALabelAndTheAppsActionId() {
-        val action = LocalAction(kind = LocalActionKind.TIMER, label = "Set a 5 minute timer", seconds = 300)
+    fun aCheckedActionCarriesOnlyALabelAndTheAppsActionId() {
+        val message = JSONObject(BridgeProtocol.messageAction("b1", "a-1", "Set a timer for 5 minutes", null))
 
-        val message = JSONObject(BridgeProtocol.route("r1", RequestRoute.Confirm(action), "a-1"))
-
-        assertEquals("confirm", message.getString("route"))
-        assertEquals("Set a 5 minute timer", message.getString("label"))
+        assertEquals("message_action", message.getString("type"))
+        assertEquals("Set a timer for 5 minutes", message.getString("label"))
         assertEquals("a-1", message.getString("action"))
         assertFalse(message.has("seconds"))  // the page never holds the action itself
     }
 
     @Test
-    fun repliesAndCloudRoutesAreDistinguished() {
-        assertEquals("reply", JSONObject(BridgeProtocol.route("r", RequestRoute.Reply("Hi"))).getString("route"))
-        assertEquals("cloud", JSONObject(BridgeProtocol.route("r", RequestRoute.Cloud("x"))).getString("route"))
+    fun capabilitiesNoLongerMentionAnOnDeviceModel() {
+        val caps = JSONObject(BridgeProtocol.capabilities(voice = true, assistant = false))
+
+        assertEquals(true, caps.getBoolean("voice"))
+        assertFalse(caps.has("onDevice"))
     }
 
     @Test

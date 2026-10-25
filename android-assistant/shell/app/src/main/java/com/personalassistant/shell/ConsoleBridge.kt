@@ -12,12 +12,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * What the console page can ask of the phone. Registered only for the console's own
- * origin, so no other page (or frame) ever sees it. Everything runs on the main thread.
+ * What the console page can ask of the phone: listen, speak, and run the actions a server
+ * reply proposed once the user confirms them. The phone never decides what a message
+ * means; every message goes to the server. Registered only for the console's own origin,
+ * so no other page (or frame) ever sees it. Everything runs on the main thread.
  */
 class ConsoleBridge(
     private val scope: CoroutineScope,
-    private val router: OnDeviceRouter,
     private val speech: SpeechOutput,
     private val actions: PhoneActionRunner,
     private val voiceAvailable: () -> Boolean,
@@ -32,14 +33,6 @@ class ConsoleBridge(
     /** Shared or screen context that arrived before the page said hello (cold start). */
     private var pending: String? = null
     private val proposedActions = mutableMapOf<String, LocalAction>()
-    private var deviceAi = DeviceAiState()
-
-    init {
-        scope.launch {
-            deviceAi = router.checkStatus()
-            send(BridgeProtocol.deviceAi(deviceAi))
-        }
-    }
 
     override fun onPostMessage(
         view: WebView,
@@ -53,7 +46,7 @@ class ConsoleBridge(
         val incoming = BridgeProtocol.parse(message.data ?: return) ?: return
         when (incoming.type) {
             "hello" -> {
-                send(BridgeProtocol.capabilities(voiceAvailable(), deviceAi, isAssistant()))
+                send(BridgeProtocol.capabilities(voiceAvailable(), isAssistant()))
                 pending?.let(::send)
                 pending = null
             }
@@ -62,27 +55,8 @@ class ConsoleBridge(
             "stop_listening" -> stopListening()
             "speak" -> incoming.text?.let { speech.speak(it) {} }
             "stop_speaking" -> speech.stop()
-            "route" -> route(incoming)
             "run_action" -> runAction(incoming.id)
             "offer_message_action" -> offerServerAction(incoming.id, incoming.text)
-            "enable_on_device" -> scope.launch {
-                router.download { state ->
-                    deviceAi = state
-                    send(BridgeProtocol.deviceAi(state))
-                }
-            }
-        }
-    }
-
-    private fun route(incoming: BridgeProtocol.Incoming) {
-        val id = incoming.id ?: return
-        val text = incoming.text ?: return
-        scope.launch {
-            val route = router.route(text, deviceAi.availability)
-            val actionId = (route as? RequestRoute.Confirm)?.let {
-                UUID.randomUUID().toString().also { key -> proposedActions[key] = route.action }
-            }
-            send(BridgeProtocol.route(id, route, actionId))
         }
     }
 
@@ -114,7 +88,7 @@ class ConsoleBridge(
         }
     }
 
-    /** Runs an action this app proposed and the user confirmed on the page. */
+    /** Runs an action the app checked and the user confirmed on the page. */
     private fun runAction(actionId: String?) {
         val action = actionId?.let(proposedActions::remove)
         if (action == null) {
@@ -142,6 +116,5 @@ class ConsoleBridge(
 
     fun close() {
         speech.close()
-        router.close()
     }
 }
