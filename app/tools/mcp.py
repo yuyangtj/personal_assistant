@@ -77,6 +77,24 @@ class McpGateway:
         self.client.close()
 
 
+def not_connected(result: dict[str, Any]) -> bool:
+    """Whether a store tool answered that the user's account isn't set up."""
+    for part in result.get("content", []):
+        try:
+            payload = json.loads(part.get("text", ""))
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("configured") is False:
+            return True
+    return False
+
+
+def server_unavailable(gateway: Any, server: str) -> bool:
+    """Whether the gateway says a store isn't connected at all (its tools aren't offered)."""
+    connected = getattr(gateway, "connected", None)
+    return connected is not None and not connected(server)
+
+
 def _prune(value: Any) -> Any:
     if isinstance(value, dict):
         return {

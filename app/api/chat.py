@@ -25,7 +25,6 @@ from app.api.schemas import (
     CreateCodingWorkflowFromMessageRequest,
     CreateTaskFromMessageRequest,
     TaskListResponse,
-    TaskProposalResponse,
     TaskResponse,
     TriageDecisionResponse,
     UpdateChatSessionRequest,
@@ -173,11 +172,6 @@ def append_chat_message(
         raise HTTPException(status_code=422, detail=str(error)) from error
     return AppendChatMessageResponse(
         message=ChatMessageResponse.from_model(posted.message),
-        proposal=(
-            TaskProposalResponse.model_validate(posted.proposal.as_dict())
-            if posted.proposal is not None
-            else None
-        ),
         focused_work_items=posted.focused_work_items,
         decision=triage_message(request, chat_session_id, body, posted.message.id),
     )
@@ -309,7 +303,6 @@ def _remember_privately(
     service.append_chat_message(chat_session_id, content=PRIVATE_REPLY, role="assistant")
     return AppendChatMessageResponse(
         message=ChatMessageResponse.from_model(posted.message),
-        proposal=None,
         focused_work_items=[],
         decision=TriageDecisionResponse(
             intent="direct_action",

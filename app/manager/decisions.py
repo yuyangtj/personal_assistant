@@ -4,8 +4,6 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.manager.model.contracts import AnalysisFailure, AnalysisResult
-
 
 class DecisionBase(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -63,5 +61,3 @@ class ManagerOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     decision: ManagerDecision
-    analysis: AnalysisResult | None = None
-    analysis_failure: AnalysisFailure | None = None

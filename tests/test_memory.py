@@ -54,7 +54,6 @@ def test_the_model_gets_every_shared_memory_and_never_a_private_one(client) -> N
     assert "My partner is called Anna" in for_model
     assert "Jag äter inte kött" in for_model
     assert "Door code 4711" not in for_model
-    assert service.for_groceries() == ["Jag äter inte kött"]
 
 
 def test_forget_deletes_the_matching_memory(client) -> None:

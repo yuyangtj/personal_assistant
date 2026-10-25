@@ -12,7 +12,7 @@ from pathlib import Path
 from time import monotonic
 
 from app.abilities import AbilityRegistry, abilities_prompt
-from app.assistant.supervisor import SupervisorExecutor, SupervisorTools
+from app.assistant.supervisor import SupervisorTools
 from app.assistant.toolbox import Toolbox
 from app.assistant.tools import (
     bookkeeping_tools,
@@ -42,17 +42,11 @@ from app.config import Settings
 from app.deployments import DeploymentRegistry, HostDeployerSpool
 from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.fake import ExecutionCancelled
-from app.execution.grocery_agent import GroceryAgentExecutor
 from app.execution.tool_agent import ToolAgentExecutor
 from app.integrations.factory import chat_client_chain
-from app.integrations.factory import provider_order as _provider_order
-from app.integrations.fallback import FallbackManagerModelClient
 from app.integrations.github import GitHubClient
-from app.integrations.kimi import KimiManagerModelClient
-from app.integrations.minimax import MiniMaxManagerModelClient
-from app.manager import DeterministicManager, ModelAssistedManager, TaskManager
+from app.manager import DeterministicManager, TaskManager
 from app.manager.decisions import DelegateDecision, FailDecision
-from app.manager.model import ManagerModelClient, ValidatedManagerModelAdapter
 from app.notify import Notifier, NullNotifier, build_notifier
 from app.persistence.database import Database
 from app.persistence.models import ScheduleModel
@@ -428,61 +422,9 @@ def build_conversation_executor(settings: Settings) -> ConversationExecutor | No
     return ConversationExecutor(client)
 
 
-def _build_manager_client(
-    settings: Settings,
-    provider: str,
-    *,
-    primary: bool,
-) -> ManagerModelClient | None:
-    base_url_override = settings.manager_model_base_url if primary else None
-    model_override = settings.manager_model_name if primary else None
-    if provider == "kimi":
-        if not settings.kimi_api_key:
-            return None
-        return KimiManagerModelClient(
-            api_key=settings.kimi_api_key,
-            base_url=base_url_override or settings.kimi_base_url,
-            model=model_override or settings.kimi_model,
-        )
-    if not settings.minimax_api_key:
-        return None
-    return MiniMaxManagerModelClient(
-        api_key=settings.minimax_api_key,
-        base_url=base_url_override or settings.minimax_base_url,
-        model=model_override or settings.minimax_model,
-    )
-
-
 def build_manager(settings: Settings, registry: CapabilityRegistry) -> TaskManager:
-    """Builds the opt-in model-assisted manager or the deterministic default."""
-    if not settings.manager_model_enabled:
-        return DeterministicManager(registry)
-    order = _provider_order(
-        settings.manager_model_provider,
-        settings.manager_model_fallback_provider,
-        supported=frozenset({"kimi", "minimax"}),
-    )
-    clients = [
-        client
-        for index, provider in enumerate(order)
-        if (client := _build_manager_client(settings, provider, primary=index == 0)) is not None
-    ]
-    if not clients:
-        raise ValueError(
-            "Manager analysis requires credentials for a configured provider: " + ", ".join(order)
-        )
-    client: ManagerModelClient = (
-        clients[0] if len(clients) == 1 else FallbackManagerModelClient(clients)
-    )
-    logger.info("Manager provider order: %s", client.provider)
-    return ModelAssistedManager(
-        registry,
-        ValidatedManagerModelAdapter(
-            client,
-            timeout_seconds=settings.manager_model_timeout_seconds,
-        ),
-        minimum_confidence=settings.manager_model_minimum_confidence,
-    )
+    """Picks the executor for a task from the capabilities it needs."""
+    return DeterministicManager(registry)
 
 
 class TaskWorker:
@@ -571,16 +513,6 @@ class TaskWorker:
                     "Validate that a structured result was produced",
                 ],
             )
-            if outcome.analysis is not None:
-                self.service.record_task_analysis(
-                    task.id,
-                    outcome.analysis.event_payload(),
-                )
-            if outcome.analysis_failure is not None:
-                self.service.record_task_analysis_failure(
-                    task.id,
-                    outcome.analysis_failure.event_payload(),
-                )
             self.service.record_manager_decision(
                 task.id,
                 decision.model_dump(mode="json"),
@@ -636,12 +568,10 @@ class TaskWorker:
                 work_items = self.service.work_item_context(task)
                 if work_items:
                     execution_context["work_items"] = work_items
-            # Saved memories (never the private ones): all of them for conversation, so
-            # the model judges relevance; food preferences for the grocery agent.
+            # Saved memories (never the private ones), all of them, so the model judges
+            # relevance.
             if self.memory_service is not None and executor.id == "model-conversation":
                 execution_context["memories"] = self.memory_service.for_model()
-            if self.memory_service is not None and executor.id == "grocery-agent":
-                execution_context["memories"] = self.memory_service.for_groceries()
             result = executor.execute(
                 task_id=task.id,
                 request=task.original_request,
@@ -887,12 +817,7 @@ def build_toolbox(
         [] if settings.worker_coding_only else store_tools(*shopping_tools(settings, database))
     )
     tools += shopping
-    tools += job_tools(
-        task_service,
-        research=settings.web_search_available,
-        # Without the tools themselves, shopping questions go to the shopping agent.
-        shopping=not settings.worker_coding_only and not shopping,
-    )
+    tools += job_tools(task_service, research=settings.web_search_available)
     if not settings.worker_coding_only:
         tools += coding_tools(
             SupervisorTools(database, task_service, workflow_service, repositories)
@@ -945,21 +870,6 @@ def add_chat_executors(
     if search is not None and conversation_executor is not None:
         executors[ToolAgentExecutor.id] = ToolAgentExecutor(conversation_executor.client, search)
         logger.info("Web research agent enabled with %s search", search.name)
-    # Not on coding-only workers: they never run it, and their image has no toolsets.
-    if conversation_executor is not None and not settings.worker_coding_only:
-        executors[GroceryAgentExecutor.id] = GroceryAgentExecutor(
-            conversation_executor.client, *shopping_tools(settings, database)
-        )
-        logger.info(
-            "Shopping agent enabled: Klarna%s",
-            f", stores through {settings.mcp_gateway_url}" if settings.mcp_gateway_url else " only",
-        )
-    if conversation_executor is not None and not settings.worker_coding_only:
-        executors[SupervisorExecutor.id] = SupervisorExecutor(
-            conversation_executor.client,
-            SupervisorTools(database, task_service, workflow_service, repositories),
-        )
-        logger.info("Assistant supervisor enabled")
     return conversation_executor
 
 
@@ -1057,7 +967,7 @@ def main() -> None:
     )
 
     extra_workers: list[TaskWorker] = []
-    # Chat replies get their own claim loop, so research, routines or the shopping agent
+    # Chat replies get their own claim loop, so research or routines
     # running in the main loop never keep someone waiting for an answer.
     if not settings.worker_coding_only and settings.worker_reply_lane:
         worker.lane = "background"
@@ -1122,8 +1032,6 @@ def main() -> None:
     finally:
         if conversation_executor is not None:
             conversation_executor.client.close()
-        if isinstance(manager, ModelAssistedManager):
-            manager.analyzer.client.close()
         if coding_executor is not None:
             coding_executor.github.close()
         database.dispose()

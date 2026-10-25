@@ -36,8 +36,8 @@ for an open upload block in that chat (a model can't create one), runs the handl
 posts the result as the next assistant message. A new kind of file is one more target, not
 a new screen.
 
-Klarna has no API for customers, so purchases come from its CSV exports. The shopping agent
-(`toolsets/groceries.yaml`) has read-only `klarna.spending` and `klarna.purchases` tools
+Klarna has no API for customers, so purchases come from its CSV exports. The chat agent
+(`toolsets/groceries.yaml`, as `klarna_*` tools) has read-only `klarna.spending` and `klarna.purchases` tools
 served from the `purchases` table (`018`), plus `klarna.upload_export`. It offers the upload
 when nothing is imported, when the newest purchase is over two weeks old, or when the user
 asks. Imports merge on date, time, merchant and amount (identical ones by occurrence) and
@@ -53,10 +53,9 @@ is saved by "remember that …" in chat or on the console's **Memories** page, a
 | | Given to |
 |---|---|
 | Shared memory | the conversation model, all of them newest first within about 6,000 characters, so the model judges relevance (synonyms, Swedish) |
-| Shared memory tagged `food` (tagged automatically when plainly about food, editable) | also the grocery agent |
 | Private memory | nothing: it stays on the server and is only shown on the Memories page |
 
-Coding agents, the supervisor and on-phone answers get no memories. "Remember privately …" in
+Coding agents get no memories. "Remember privately …" in
 chat is handled before the message is stored or any model sees it: the memory is saved as
 private and the transcript only keeps a placeholder, so later turns can't pass it on.
 "Forget …" only matches shared memories, since its reply repeats what was forgotten.

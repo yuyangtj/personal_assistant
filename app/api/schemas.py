@@ -127,15 +127,6 @@ class ChatMessageResponse(BaseModel):
         return cls.model_validate(message)
 
 
-class TaskProposalResponse(BaseModel):
-    """A suggested task the client should confirm before anything runs."""
-
-    reason: str
-    suggested_goal: str
-    required_capabilities: list[str]
-    consequential: bool
-
-
 class TriageOptionResponse(BaseModel):
     label: str
     intent: str
@@ -156,20 +147,16 @@ class TriageDecisionResponse(BaseModel):
     #: For direct actions, what was done (also posted as the assistant's reply).
     result: str | None = None
     about_work: bool = False
-    #: The server already took care of this message (an action, an offer, or a choice
-    #: picked); the client only refreshes and must not queue a chat reply.
+    #: The server already took care of this message (an explicit note, or a private
+    #: memory); the client only refreshes and must not queue a chat reply.
     handled: bool = False
     source: str
-    #: Where the message went: "chat reply", "shopping agent", "offer (propose_task)", ...
+    #: Where the message went: "main agent", or "action: note_add" for an explicit note.
     route: str | None = None
-    #: The previous reply came from the shopping agent (short follow-ups stay there).
-    follow_up: bool = False
 
 
 class AppendChatMessageResponse(BaseModel):
     message: ChatMessageResponse
-    #: Keyword-rule proposal, kept for older clients; new clients render ``decision``.
-    proposal: TaskProposalResponse | None = None
     #: What the server decided this message needs (answer, propose work, or ask).
     decision: TriageDecisionResponse | None = None
     #: Slugs of work items this message focused the chat on through #mentions.

@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.capabilities import CapabilityRegistry
-from app.domain.proposals import propose_task
 from app.execution import ConversationExecutor
 from app.manager import DeterministicManager
 from app.services import TaskService
@@ -33,27 +31,11 @@ def test_talking_in_a_chat_launches_no_work(client: TestClient) -> None:
 
     assert body["message"]["role"] == "user"
     assert body["message"]["linked_task_id"] is None
-    assert body["proposal"] is None
     assert client.get("/tasks").json()["tasks"] == []
     # The first message still names the conversation.
     assert client.get(f"/chat-sessions/{chat_id}").json()["title"] == (
         "I have been thinking about our sign-in flow."
     )
-
-
-def test_actionable_message_is_proposed_but_still_needs_confirming(client: TestClient) -> None:
-    chat_id = _chat(client)
-
-    body = _say(client, chat_id, "Please add authentication to the tasks repository.")
-
-    assert body["proposal"] == {
-        "reason": "This asks for work that changes code or infrastructure.",
-        "suggested_goal": "Please add authentication to the tasks repository.",
-        "required_capabilities": ["coding"],
-        "consequential": True,
-    }
-    # Proposing is not launching.
-    assert client.get("/tasks").json()["tasks"] == []
 
 
 def test_confirming_a_proposal_links_the_task_to_its_originating_message(
@@ -251,43 +233,3 @@ def test_follow_up_prompt_carries_the_parent_summary_not_its_events(
     assert 'Task "Add authentication"' in carried
     assert "Status: failed" in carried
     assert "Error: Android integration incomplete" in carried
-
-
-@pytest.mark.parametrize(
-    "content",
-    [
-        "Why did this fail?",
-        "What is the status of the deploy?",
-        "That makes sense, thanks.",
-        "The sign-in flow feels slow.",
-        "",
-    ],
-)
-def test_conversation_is_left_alone(content: str) -> None:
-    assert propose_task(content) is None
-
-
-@pytest.mark.parametrize(
-    ("content", "consequential", "capabilities"),
-    [
-        ("Refactor the payments module.", True, ["coding"]),
-        (
-            "can you add button in the http://127.0.0.1:8000/ui to toggle dark and light themes",
-            True,
-            ["coding"],
-        ),
-        ("Can you research three hosting options?", False, []),
-        ("Let's deploy to production.", True, []),
-        ("please write the release notes", True, []),
-    ],
-)
-def test_work_requests_are_proposed_with_their_cost_flagged(
-    content: str,
-    consequential: bool,
-    capabilities: list[str],
-) -> None:
-    proposal = propose_task(content)
-
-    assert proposal is not None
-    assert proposal.consequential is consequential
-    assert proposal.required_capabilities == capabilities

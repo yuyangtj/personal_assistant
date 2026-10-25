@@ -9,7 +9,7 @@ Newer settings, all optional:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `ASSISTANT_CODING_CONCURRENCY` | `2` | Coding agents running at once in the coding worker |
-| `ASSISTANT_WORKER_REPLY_LANE` / `ASSISTANT_WORKER_REPLY_POLL_INTERVAL_SECONDS` | `true` / `0.25` | Chat replies get their own claim loop in the worker, so research, routines and the shopping agent never hold one up |
+| `ASSISTANT_WORKER_REPLY_LANE` / `ASSISTANT_WORKER_REPLY_POLL_INTERVAL_SECONDS` | `true` / `0.25` | Chat replies get their own claim loop in the worker, so research and routines never hold one up |
 | `ASSISTANT_CODE_AGENT_PROVIDERS` | `claude,codex,kimi,minimax-claude` | Coding agents in order; the next takes over when one is rate-limited or can't log in |
 | `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude Code on your Claude subscription (from `claude setup-token`); without it Claude Code is skipped |
 | `CODEX_HOME` / `ASSISTANT_CODEX_OWN_SANDBOX` | `~/.codex` / `true` (`false` in the coding container) | Where Codex's ChatGPT login lives; Codex is skipped without `auth.json` there. In the locked-down container, the container is Codex's sandbox |
@@ -53,43 +53,6 @@ conflict, failed/missing check, or missing credential leaves the task unmerged. 
 revisions supersede the old approval task, reuse the PR branch, and require a fresh
 exact-SHA approval. Configuration and examples are in
 [`docs/coding-pull-request-workflow.md`](coding-pull-request-workflow.md).
-
-## Optional manager-model analysis
-
-Set `ASSISTANT_MANAGER_MODEL_ENABLED=true` to let Kimi or MiniMax infer a task's
-required capabilities before deterministic routing. Explicit `required_capabilities`
-still bypass the model. Responses are validated against the existing `TaskAnalysis`
-schema, invented capabilities are rejected, and one repair attempt is allowed.
-
-| Variable | Default |
-| --- | --- |
-| `ASSISTANT_MANAGER_MODEL_ENABLED` | `false` |
-| `ASSISTANT_MANAGER_MODEL_PROVIDER` | `kimi` (`kimi` or `minimax`) |
-| `ASSISTANT_MANAGER_MODEL_FALLBACK_PROVIDER` | `auto` (the other routine provider) |
-| `ASSISTANT_MANAGER_MODEL_BASE_URL` | unset; use the selected provider's URL |
-| `ASSISTANT_MANAGER_MODEL` | unset; use the selected provider's model |
-| `ASSISTANT_MANAGER_MODEL_TIMEOUT_SECONDS` | `30` |
-| `ASSISTANT_MANAGER_MODEL_MINIMUM_CONFIDENCE` | `0.5` |
-
-| Provider | Key | Provider URL | Default manager model |
-| --- | --- | --- | --- |
-| Kimi | `KIMI_API_KEY` / `ASSISTANT_KIMI_API_KEY` | `https://api.kimi.com/coding/v1` | `kimi-for-coding-highspeed` |
-| MiniMax | `MINIMAX_API_KEY` / `ASSISTANT_MINIMAX_API_KEY` | `https://api.minimax.chat/v1` | `MiniMax-M3` |
-
-When manager analysis is enabled, an ordinary request can make two model calls:
-one to infer capabilities and one to execute the selected capability. Those calls
-may use different providers. Provider, model, latency, attempts, and token usage are
-recorded with the task analysis.
-
-For example, to analyze with Kimi while keeping the default MiniMax conversation
-provider:
-
-```bash
-ASSISTANT_MANAGER_MODEL_ENABLED=true \
-ASSISTANT_MANAGER_MODEL_PROVIDER=kimi \
-ASSISTANT_MANAGER_MODEL=kimi-for-coding-highspeed \
-docker compose up --build
-```
 
 ## Conversational replies with Kimi or MiniMax
 

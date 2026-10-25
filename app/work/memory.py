@@ -170,14 +170,6 @@ class MemoryService:
             used += len(memory.content)
         return chosen
 
-    def for_groceries(self) -> list[str]:
-        """Food preferences for the grocery agent; private memories are never included."""
-        return [
-            memory.content
-            for memory in self.list()
-            if not memory.private and FOOD_TAG in (memory.tags or [])
-        ][:20]
-
     def find(self, text: str) -> list[MemoryModel]:
         """Shared memories matching a description ("my coffee order"), best first.
 

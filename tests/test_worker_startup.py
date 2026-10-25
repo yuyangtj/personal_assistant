@@ -6,7 +6,7 @@ import pytest
 def test_the_worker_starts_with_a_gateway_and_no_search_key(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """The live configuration that crash-looped after #57: grocery agent on, research off."""
+    """The live configuration that crash-looped after #57: store gateway set, research off."""
     from app import worker
 
     monkeypatch.setenv("ASSISTANT_DATABASE_URL", f"sqlite+pysqlite:///{tmp_path}/w.sqlite3")
@@ -25,11 +25,11 @@ def test_the_worker_starts_with_a_gateway_and_no_search_key(
 
     worker.main()
 
-    assert "grocery-agent" in started[0]
+    assert "model-conversation" in started[0]
     assert "tool-agent" not in started[0]
 
 
-def test_the_coding_worker_starts_without_the_shopping_agents_files(
+def test_the_coding_worker_starts_without_the_shopping_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     """The coding worker crash-looped after #71: its image has no toolsets/ directory."""
@@ -49,4 +49,4 @@ def test_the_coding_worker_starts_without_the_shopping_agents_files(
 
     worker.main()
 
-    assert started and "grocery-agent" not in started[0]
+    assert started

@@ -21,7 +21,7 @@ flowchart LR
     chat --> llm{DeepSeek · Kimi · MiniMax · Gemini}
     chat --> tools[Its tools: notes · lists · memories · reminders · routines · shopping · code · coding runs]
     tools --> runs[(Coding runs)]
-    tools -->|hands off| bg[Research · shopping agent, in the background]
+    tools -->|hands off| bg[Research, in the background]
 
     coding[Coding worker, 2 at once] -->|claims| runs
     coding --> session[Kimi Code ACP session · Claude Code fallback]
@@ -40,7 +40,6 @@ flowchart LR
   most small bugs came from handing messages between deciders.)
 - **Coding runs** are started, inspected, steered and stopped through the agent's coding
   tools. No tool can merge or deploy; those stay behind the approval token in the console.
-  The supervisor executor still runs routines saved with it.
 - **The reply agent knows the repositories.** Every chat reply is told which repositories
   are registered and what the assistant can really do, and, for the repository selected in
   the console or named in the message, the start of its README and its top-level files, read
@@ -61,7 +60,7 @@ flowchart LR
     and an upload button it asks for go with the reply;
   - a hand-off that runs in the background and posts its answer in the chat: `research`
     (with a search key);
-  - coding runs, through the supervisor's tools: `coding_status`, `coding_run`,
+  - coding runs (`SupervisorTools` in `app/assistant/supervisor.py`): `coding_status`, `coding_run`,
     `coding_start` (ends in a draft PR you review), `coding_message` and `coding_stop`.
 
   The tools go to the model through the provider's own tool calling (Kimi, MiniMax,
@@ -81,7 +80,7 @@ flowchart LR
 |---|---|
 | `app/api` | One router per resource (chat, tasks, workflows, catalog, web, …) and shared helpers |
 | `app/chat` | Message handling: the note rule, reply blocks (choices are suggestions), bookkeeping actions, routines |
-| `app/assistant` | The supervisor and its overview of the work |
+| `app/assistant` | The chat agent's toolbox and tools, and the overview of coding runs |
 | `app/coding` | Starting runs, the agents (runners, ACP sessions, one-shot processes), git, reports, the PR executor |
 | `app/services` | `TaskService`: chat, tasks, executions, approvals and progress over one database |
 | `app/work` | Work items, briefs, spaces, memory |
@@ -109,34 +108,10 @@ outside routing.
 - **Merging:** the approval API binds consent to the recorded PR and its exact head SHA
   before calling GitHub. GitHub branch protections remain an independent final gate.
 
-## Manager-model boundary
+## Picking the executor
 
-```mermaid
-flowchart LR
-    task[Task without explicit requirements] --> assisted[Model-assisted manager]
-    assisted --> adapter[Validated manager-model adapter]
-    adapter --> prompt[Prompt plus capability catalog and JSON schema]
-    prompt --> client{Provider client}
-    client --> scripted[Scripted test client]
-    client --> kimi[Kimi manager client opt-in]
-    client --> minimax[MiniMax manager client opt-in]
-    scripted --> raw[Raw JSON response]
-    kimi --> raw
-    minimax --> raw
-    raw --> guard[Schema and capability allowlist validation]
-    guard --> analysis[TaskAnalysis]
-    analysis --> policy[Deterministic routing policy]
-    policy --> registry[Capability registry]
-    registry --> decision[Typed manager outcome]
-
-    explicit[Task with explicit requirements] --> policy
-
-    classDef implemented fill:#dbeafe,stroke:#2563eb,color:#172554
-    class task,assisted,adapter,prompt,client,scripted,kimi,minimax,raw,guard,analysis,policy,registry,decision,explicit implemented
-```
-
-The model only infers `TaskAnalysis`; it never chooses an adapter or command.
-Explicit requirements bypass inference. Malformed or invented outputs receive
-one schema-repair attempt and then become a safe, audited failure. Kimi and
-MiniMax provider clients are implemented but model analysis remains disabled unless
-`ASSISTANT_MANAGER_MODEL_ENABLED=true`; deterministic routing is the default.
+A task names the capabilities it needs (`required_capabilities`: none for a chat reply,
+`web_research`, or `coding` and `pull_request_creation`). `DeterministicManager` picks the
+enabled capability in `capabilities/` that provides them, and the worker runs its adapter.
+No model takes part in this. (A model-assisted manager existed behind a setting that was
+never turned on; it was removed on 2026-10-25.)

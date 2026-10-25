@@ -39,7 +39,7 @@ What is built and what is next:
 |---|---|
 | `app/api` | HTTP routes, one module per resource |
 | `app/chat` | Message handling: the note rule, reply blocks, bookkeeping actions, routines |
-| `app/assistant` | The supervisor and its overview of the work |
+| `app/assistant` | The chat agent's toolbox and tools, and the overview of coding runs |
 | `app/coding` | Coding runs and agents: runners, live sessions, git, reports, PR executor |
 | `app/services` | The task service: chat, tasks, executions, approvals, progress |
 | `app/work` | Work items, briefs, spaces, memory, notes, stats |

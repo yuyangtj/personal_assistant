@@ -36,7 +36,7 @@ def toolbox(client: TestClient, **kwargs) -> Toolbox:
         notes=state.note_service,
         tasks=state.task_service,
     )
-    tools += job_tools(state.task_service, research=True, shopping=True)
+    tools += job_tools(state.task_service, research=True)
     tools += coding_tools(
         SupervisorTools(
             state.database,
@@ -285,16 +285,13 @@ def test_a_refusal_says_not_done_so_the_model_cant_claim_it(
     assert client.app.state.schedule_service.list() == []
 
 
-def test_research_and_shopping_get_the_users_own_message(client: TestClient, chat_id: str) -> None:
-    executor, _ = agent(client, call("shopping"), reply("Checking your Lidl spending."))
-    run(executor, chat_id, "how much did I spend at Lidl last month?")
+def test_research_gets_the_users_own_message(client: TestClient, chat_id: str) -> None:
     executor, _ = agent(client, call("research"), reply("Looking it up."))
     run(executor, chat_id, "cheapest trains to Copenhagen next week")
 
     tasks = client.get(f"/chat-sessions/{chat_id}/tasks").json()["tasks"]
-    assert sorted((t["original_request"], t["required_capabilities"]) for t in tasks) == [
+    assert [(t["original_request"], t["required_capabilities"]) for t in tasks] == [
         ("cheapest trains to Copenhagen next week", ["web_research"]),
-        ("how much did I spend at Lidl last month?", ["groceries"]),
     ]
     # A hand-off is not something the user said: no message is posted in their name.
     assert client.get(f"/chat-sessions/{chat_id}/messages").json()["messages"] == []

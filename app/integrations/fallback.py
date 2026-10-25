@@ -9,18 +9,13 @@ from app.integrations.chat import (
     ChatMessage,
     ProviderError,
 )
-from app.manager.model.contracts import (
-    ManagerModelClient,
-    ManagerModelRequest,
-    ModelInvocation,
-)
 
 
 class ProviderChainError(ProviderError):
     """All configured providers failed without exposing provider response details."""
 
 
-def _chain_label(clients: Sequence[ChatClient | ManagerModelClient], attribute: str) -> str:
+def _chain_label(clients: Sequence[ChatClient], attribute: str) -> str:
     return "->".join(str(getattr(client, attribute)) for client in clients)
 
 
@@ -55,33 +50,3 @@ class FallbackChatClient:
     def close(self) -> None:
         for client in self.clients:
             client.close()
-
-
-class FallbackManagerModelClient:
-    """Tries manager-model providers in preference order for provider failures."""
-
-    def __init__(self, clients: Sequence[ManagerModelClient]):
-        if len(clients) < 2:
-            raise ValueError("A fallback manager chain requires at least two clients")
-        self.clients = tuple(clients)
-        self.provider = _chain_label(self.clients, "provider")
-        self.model = _chain_label(self.clients, "model")
-
-    def generate(
-        self,
-        request: ManagerModelRequest,
-        *,
-        timeout_seconds: float,
-    ) -> ModelInvocation:
-        for client in self.clients:
-            try:
-                return client.generate(request, timeout_seconds=timeout_seconds)
-            except ProviderError:
-                continue
-        raise ProviderChainError(f"Manager provider chain exhausted: {self.provider}")
-
-    def close(self) -> None:
-        for client in self.clients:
-            close = getattr(client, "close", None)
-            if close is not None:
-                close()

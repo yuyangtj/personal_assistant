@@ -1,21 +1,17 @@
-from __future__ import annotations
+"""The chat agent's coding-run tools (``SupervisorTools``), and how runs and PRs report."""
 
-import json
+from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.assistant.supervisor import SupervisorExecutor, SupervisorTools
-from app.execution.base import ConversationTurn
-from tests.fakes import ScriptedChat
+from app.assistant.supervisor import SupervisorTools
 
 
-def _supervisor(client: TestClient, *replies: str) -> tuple[SupervisorExecutor, ScriptedChat]:
+def _tools(client: TestClient) -> SupervisorTools:
     state = client.app.state
-    chat = ScriptedChat(*replies)
-    tools = SupervisorTools(
+    return SupervisorTools(
         state.database, state.task_service, state.workflow_service, state.repository_registry
     )
-    return SupervisorExecutor(chat, tools), chat
 
 
 def _chat_with_message(client: TestClient, text: str) -> tuple[str, str]:
@@ -24,130 +20,61 @@ def _chat_with_message(client: TestClient, text: str) -> tuple[str, str]:
     return chat, message.id
 
 
-def _run(executor: SupervisorExecutor, chat: str, message: str, request: str, history=()):
-    return executor.execute(
-        task_id="supervisor-task",
-        request=request,
-        is_cancelled=lambda: False,
-        history=history,
-        context={"chat_session_id": chat, "origin_message_id": message},
-    ).output
-
-
-def _step(**fields) -> str:
-    return json.dumps(fields)
-
-
-def test_supervisor_starts_a_coding_agent_and_says_so(client: TestClient) -> None:
-    chat, message = _chat_with_message(client, "change the tab icon to a rocket")
-    executor, model = _supervisor(
-        client,
-        _step(
-            action="start_coding",
-            repository_id="personal-assistant",
-            goal="Change the browser tab icon to a rocket.",
-        ),
-        _step(action="reply", reply="Started a coding agent on the rocket icon."),
+def _start(client: TestClient, chat: str, message: str, goal: str, repository="personal-assistant"):
+    return _tools(client).start_coding(
+        repository, goal, chat_session_id=chat, origin_message_id=message
     )
 
-    output = _run(executor, chat, message, "change the tab icon to a rocket")
+
+def test_a_coding_agent_is_started_on_a_registered_repository(client: TestClient) -> None:
+    chat, message = _chat_with_message(client, "change the tab icon to a rocket")
+
+    started = _start(client, chat, message, "Change the browser tab icon to a rocket.")
 
     (run,) = client.get("/workflow-runs").json()["runs"]
+    assert started["workflow_run_id"] == run["id"]
     assert run["status"] == "running"
     assert run["input"]["request"] == "Change the browser tab icon to a rocket."
     assert run["origin_message_id"] == message
     events = client.get(f"/workflow-runs/{run['id']}/events").json()["events"]
     assert any(event["payload"].get("by") == "supervisor" for event in events)
-    assert output["reply"] == "Started a coding agent on the rocket icon."
-    assert output["blocks"][0] == {"type": "workflow", "workflow_run_id": run["id"]}
-    # The model saw the registered repositories and the (empty) active work.
-    prompt = "\n".join(message.content for message in model.requests[0])
-    assert "personal-assistant" in prompt
-    assert "No coding runs in the last week." in prompt
+    assert "No coding runs in the last week." not in _tools(client).overview(chat)[0]
 
 
-def test_supervisor_answers_progress_from_active_work(client: TestClient) -> None:
+def test_progress_comes_from_the_runs_own_steps(client: TestClient) -> None:
     chat, message = _chat_with_message(client, "fix the toggle")
-    starter, _ = _supervisor(
-        client,
-        _step(action="start_coding", repository_id="personal-assistant", goal="Fix the toggle."),
-        _step(action="reply", reply="On it."),
-    )
-    _run(starter, chat, message, "fix the toggle")
+    _start(client, chat, message, "Fix the toggle.")
     (run,) = client.get("/workflow-runs").json()["runs"]
     service = client.app.state.task_service
     service.record_progress(run["task_id"], "▸ Find the toggle\n· Fix it", "plan")
     service.record_progress(run["task_id"], "Writing app/web/index.html", "tool")
 
-    executor, model = _supervisor(
-        client,
-        _step(action="run_detail", run=run["id"][:8]),
-        _step(action="reply", reply="It is editing index.html now."),
-    )
-    output = _run(
-        executor,
-        chat,
-        message,
-        "how's it going?",
-        history=[ConversationTurn(request="fix the toggle", reply="On it.")],
-    )
+    overview, _ = _tools(client).overview(chat)
+    detail = _tools(client).run_detail(run["id"][:8], chat)
 
-    assert output["reply"] == "It is editing index.html now."
-    first = "\n".join(m.content for m in model.requests[0])
-    assert f"run {run['id'][:8]} [personal-assistant] “Fix the toggle.”" in first
-    assert "latest step: Writing app/web/index.html" in first
-    assert "(started from this chat)" in first
-    assert "▸ Find the toggle" in first
-    detail = json.loads(model.requests[1][-1].content.split("\n", 1)[1])
+    assert f"run {run['id'][:8]} [personal-assistant] “Fix the toggle.”" in overview
+    assert "latest step: Writing app/web/index.html" in overview
+    assert "(started from this chat)" in overview
+    assert "▸ Find the toggle" in overview
     assert detail["recent_steps"] == ["Writing app/web/index.html"]
 
 
-def test_supervisor_stops_a_run_when_asked(client: TestClient) -> None:
+def test_a_run_is_stopped_when_asked(client: TestClient) -> None:
     chat, message = _chat_with_message(client, "fix the toggle")
-    starter, _ = _supervisor(
-        client,
-        _step(action="start_coding", repository_id="personal-assistant", goal="Fix the toggle."),
-        _step(action="reply", reply="On it."),
-    )
-    _run(starter, chat, message, "fix the toggle")
+    _start(client, chat, message, "Fix the toggle.")
     (run,) = client.get("/workflow-runs").json()["runs"]
 
-    executor, _ = _supervisor(
-        client,
-        _step(action="stop_run", run=run["id"][:8]),
-        _step(action="reply", reply="Stopped it."),
-    )
-    _run(executor, chat, message, "stop that")
-
+    assert _tools(client).stop_run(run["id"][:8], chat) == {"stopped": run["id"][:8]}
     assert client.get(f"/tasks/{run['task_id']}").json()["status"] == "cancelled"
 
 
-def test_supervisor_cannot_start_work_in_an_unknown_repository(client: TestClient) -> None:
+def test_no_work_starts_in_an_unknown_repository(client: TestClient) -> None:
     chat, message = _chat_with_message(client, "fix the secret repo")
-    executor, model = _supervisor(
-        client,
-        _step(action="start_coding", repository_id="secret-repo", goal="Fix it."),
-        _step(action="reply", reply="That repository isn't registered."),
-    )
 
-    output = _run(executor, chat, message, "fix the secret repo")
+    started = _start(client, chat, message, "Fix it.", repository="secret-repo")
 
+    assert "error" in started
     assert client.get("/workflow-runs").json()["runs"] == []
-    assert "error" in model.requests[1][-1].content
-    assert output["blocks"] == []
-
-
-def test_supervisor_starts_one_run_per_message(client: TestClient) -> None:
-    chat, message = _chat_with_message(client, "do three things")
-    start = _step(action="start_coding", repository_id="personal-assistant", goal="Do a thing.")
-    executor, _ = _supervisor(
-        client, start, start, _step(action="reply", reply="Started the first one.")
-    )
-
-    output = _run(executor, chat, message, "do three things")
-
-    assert len(client.get("/workflow-runs").json()["runs"]) == 1
-    assert len([b for b in output["blocks"] if b["type"] == "workflow"]) == 1
 
 
 def test_a_ready_pull_request_is_reported_in_the_chat(client: TestClient) -> None:
@@ -187,12 +114,7 @@ def test_a_ready_pull_request_is_reported_in_the_chat(client: TestClient) -> Non
 
 def _started_run(client: TestClient) -> tuple[str, str, dict]:
     chat, message = _chat_with_message(client, "change the icon")
-    starter, _ = _supervisor(
-        client,
-        _step(action="start_coding", repository_id="personal-assistant", goal="Change the icon."),
-        _step(action="reply", reply="On it."),
-    )
-    _run(starter, chat, message, "change the icon")
+    _start(client, chat, message, "Change the icon.")
     (run,) = client.get("/workflow-runs").json()["runs"]
     return chat, message, run
 
@@ -211,17 +133,12 @@ def _execution(client: TestClient, task_id: str) -> str:
 def test_redirecting_a_working_agent_sends_it_the_instructions(client: TestClient) -> None:
     chat, message, run = _started_run(client)
     _execution(client, run["task_id"])
-    executor, model = _supervisor(
-        client,
-        _step(action="message_agent", run=run["id"][:8], text="Use a rocket instead."),
-        _step(action="reply", reply="Told the agent to use a rocket."),
-    )
 
-    _run(executor, chat, message, "make it a rocket instead")
+    sent = _tools(client).message_agent(run["id"][:8], "Use a rocket instead.", chat)
 
     inbox = client.app.state.task_service.user_messages_after(run["task_id"], 0)
     assert [text for _, text in inbox] == ["Use a rocket instead."]
-    assert '"sent_to"' in model.requests[1][-1].content
+    assert "sent_to" in sent
 
 
 def test_redirecting_after_the_pr_is_open_starts_a_revision(client: TestClient) -> None:
@@ -240,13 +157,7 @@ def test_redirecting_after_the_pr_is_open_starts_a_revision(client: TestClient) 
             "expected_head_sha": "a" * 40,
         },
     )
-    executor, _ = _supervisor(
-        client,
-        _step(action="message_agent", run=run["id"][:8], text="Also make it blue."),
-        _step(action="reply", reply="Started a revision of PR 41."),
-    )
-
-    _run(executor, chat, message, "also make it blue")
+    _tools(client).message_agent(run["id"][:8], "Also make it blue.", chat)
 
     revision = client.app.state.task_service.get_task(
         client.get(f"/tasks/{run['task_id']}").json()["superseded_by_task_id"]
@@ -262,127 +173,10 @@ def test_redirecting_a_finishing_run_is_refused(client: TestClient) -> None:
     client.app.state.task_service.start_validation(
         run["task_id"], execution_id, output={"summary": "Validating"}
     )
-    executor, model = _supervisor(
-        client,
-        _step(action="message_agent", run=run["id"][:8], text="Use a rocket."),
-        _step(action="reply", reply="It's finishing; I'll revise it once the PR is open."),
-    )
+    refused = _tools(client).message_agent(run["id"][:8], "Use a rocket.", chat)
 
-    _run(executor, chat, message, "make it a rocket")
-
-    assert "finishing up" in model.requests[1][-1].content
+    assert "finishing up" in refused["error"]
     assert client.app.state.task_service.user_messages_after(run["task_id"], 0) == []
-
-
-def test_supervisor_replies_drop_markdown_emphasis(client: TestClient) -> None:
-    chat, message = _chat_with_message(client, "status?")
-    executor, _ = _supervisor(
-        client,
-        _step(action="reply", reply="Recent work:\n- **PR #35** is ready\n\n- __Run 804e__ failed"),
-    )
-
-    output = _run(executor, chat, message, "status?")
-
-    assert output["reply"] == "Recent work:\n- PR #35 is ready\n- Run 804e failed"
-
-
-def test_a_reply_without_an_action_key_is_still_a_reply(client: TestClient) -> None:
-    chat, message = _chat_with_message(client, "status?")
-    executor, model = _supervisor(client, '{"reply": "reply", "reply": "Nothing is running."}')
-
-    output = _run(executor, chat, message, "status?")
-
-    assert output["reply"] == "Nothing is running."
-    assert len(model.requests) == 1  # no repair round-trip
-
-
-def test_a_repair_prompt_restates_the_users_question(client: TestClient) -> None:
-    chat, message = _chat_with_message(client, "status?")
-    executor, model = _supervisor(
-        client, "Here is the status, in prose.", _step(action="reply", reply="All quiet.")
-    )
-
-    _run(executor, chat, message, "What coding work has been going on recently?")
-
-    repair = model.requests[1][-1].content
-    assert "What coding work has been going on recently?" in repair
-
-
-def test_only_links_the_supervisor_was_given_survive(client: TestClient) -> None:
-    from app.coding.flow import start_coding_run
-    from app.coding.runs import CodingRunPhase, CodingRunStore
-
-    state = client.app.state
-    chat, message = _chat_with_message(client, "fix the toggle")
-    run = start_coding_run(
-        state.task_service,
-        state.workflow_service,
-        state.repository_registry,
-        repository_id="personal-assistant",
-        request="Fix the toggle.",
-        chat_session_id=chat,
-        origin_message_id=message,
-        approved_by="chat",
-    )
-    # The run's checkpoint holds the real PR URL.
-    store = CodingRunStore(state.database)
-    store.start(
-        task_id=run.task_id,
-        repository_id="personal-assistant",
-        github_repository="yuyangtj/personal_assistant",
-        branch="assistant/x",
-    )
-    real = "https://github.com/yuyangtj/personal_assistant/pull/35"
-    store.update(
-        run.task_id, CodingRunPhase.PR_CREATED, pull_request_number=35, pull_request_url=real
-    )
-    executor, model = _supervisor(
-        client,
-        _step(
-            action="reply",
-            reply=f"PR 35 is ready at {real}.",
-            links=[
-                {"label": "PR 35", "href": real},
-                {"label": "Wrong owner", "href": "https://github.com/personal-assistant/x/pull/35"},
-                {"label": "Made up", "href": "https://console/user/runs/1"},
-                {"label": "Review", "href": f"#/chats/{chat}?task={run.task_id}"},
-            ],
-        ),
-    )
-
-    output = _run(executor, chat, message, "is the PR ready?")
-
-    overview = "\n".join(m.content for m in model.requests[0])
-    assert f"PR: {real}" in overview
-    assert f"review in the console: #/chats/{chat}?task={run.task_id}" in overview
-    assert output["reply"] == "PR 35 is ready."
-    assert [b["label"] for b in output["blocks"] if b["type"] == "link"] == ["PR 35", "Review"]
-
-
-def test_a_reply_that_stops_at_a_heading_is_asked_to_finish(client: TestClient) -> None:
-    chat, message = _chat_with_message(client, "status?")
-    executor, model = _supervisor(
-        client,
-        _step(action="reply", reply="Recent coding work includes:"),
-        _step(action="reply", reply="Recent coding work: PR 35 is ready for review."),
-    )
-
-    output = _run(executor, chat, message, "status?")
-
-    assert output["reply"] == "Recent coding work: PR 35 is ready for review."
-    assert "whole answer" in model.requests[1][-1].content
-
-
-def test_urls_in_the_reply_become_buttons_or_are_dropped(client: TestClient) -> None:
-    from app.assistant.supervisor import _without_urls
-
-    text, found = _without_urls(
-        "PR #35 is waiting your review at https://github.com/acme/w/pull/35. "
-        "Details (https://made.up/x) are below."
-    )
-
-    assert text == "PR #35 is waiting your review. Details are below."
-    assert found == ["https://github.com/acme/w/pull/35", "https://made.up/x"]
 
 
 def test_a_revision_can_be_routed_to_the_coding_agent(client: TestClient) -> None:
@@ -398,12 +192,7 @@ def test_a_revision_can_be_routed_to_the_coding_agent(client: TestClient) -> Non
         artifacts=[],
         approval={"number": 41, "head_branch": "assistant/x", "expected_head_sha": "a" * 40},
     )
-    executor, _ = _supervisor(
-        client,
-        _step(action="message_agent", run=run["id"][:8], text="Use a different icon."),
-        _step(action="reply", reply="Started a revision."),
-    )
-    _run(executor, chat, message, "use a different icon")
+    _tools(client).message_agent(run["id"][:8], "Use a different icon.", chat)
 
     revision = service.get_task(service.get_task(run["task_id"]).superseded_by_task_id)
     # The worker's manager picks the agent by what it provides; this used to fail with
@@ -434,12 +223,7 @@ def _open_pr_with_revision(client: TestClient) -> tuple[str, dict, str]:
             "draft": True,
         },
     )
-    executor, _ = _supervisor(
-        client,
-        _step(action="message_agent", run=run["id"][:8], text="Use a different icon."),
-        _step(action="reply", reply="Started a revision."),
-    )
-    _run(executor, chat, message, "use a different icon")
+    _tools(client).message_agent(run["id"][:8], "Use a different icon.", chat)
     revision_id = service.get_task(run["task_id"]).superseded_by_task_id
     return chat, run, revision_id
 

@@ -10,7 +10,6 @@ from sqlalchemy import delete, select, update
 
 from app.chat.blocks import validate_blocks
 from app.domain.enums import EventType, TaskStatus
-from app.domain.proposals import propose_task
 from app.domain.task_context import build_task_context, render_task_context
 from app.execution.base import ConversationTurn
 from app.persistence.models import (
@@ -189,10 +188,8 @@ class ChatOperations(ServiceBase):
     ) -> PostedMessage:
         """Record a turn of conversation. No task is launched and nothing is executed.
 
-        Returns the stored message and, for user turns that read as a request for work,
-        a proposal the client can offer as "create a task?". The proposal is advisory:
-        only :meth:`create_task_from_message` actually starts work. ``#slug`` mentions of
-        existing work items focus the chat on them.
+        Only :meth:`create_task_from_message` starts work. ``#slug`` mentions of existing
+        work items focus the chat on them.
         """
         normalized_content = content.strip()
         if not normalized_content:
@@ -222,8 +219,7 @@ class ChatOperations(ServiceBase):
                 if role == "user"
                 else []
             )
-            proposal = propose_task(normalized_content) if role == "user" else None
-            return PostedMessage(message=message, proposal=proposal, focused_work_items=focused)
+            return PostedMessage(message=message, focused_work_items=focused)
 
     def open_upload(self, chat_session_id: str, message_id: str, block_id: str) -> dict[str, Any]:
         """The still-open upload block an assistant message in this chat offered."""
