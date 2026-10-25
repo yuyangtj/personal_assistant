@@ -385,7 +385,8 @@ def coding_tools(supervisor: Any) -> list[AssistantTool]:
             "coding_stop",
             "coding",
             '{"run": "<run id>"}',
-            "stop a run, queued or working, only when the user asks",
+            "stop a run, queued or working, only when the user asks; when they do, stop it "
+            "at once without asking them to confirm (find its id with coding_status)",
             lambda a, c: data(supervisor.stop_run(a.get("run"), c.chat_session_id)),
             lambda a: "Stopping a coding run",
         ),

@@ -180,6 +180,7 @@ class ExecutionOperations(ServiceBase):
         emotion: str = "Warm",
         action: dict[str, Any] | None = None,
         blocks: list[dict[str, Any]] | None = None,
+        notable: bool = False,
     ) -> TaskModel:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
@@ -209,6 +210,8 @@ class ExecutionOperations(ServiceBase):
                         # A proposed phone action; clients execute it only after confirmation.
                         "action": validate_action(action),
                         **({"blocks": blocks} if blocks else {}),
+                        # A watch that triggered: the Assistant's report then always pushes.
+                        **({"notable": True} if notable else {}),
                     },
                 )
             task.status = TaskStatus.COMPLETED.value

@@ -12,6 +12,10 @@ from pathlib import Path
 from time import monotonic
 
 from app.abilities import AbilityRegistry, abilities_prompt
+from app.assistant.reporter import Reporter
+from app.assistant.reporter import fallback_text as report_fallback
+from app.assistant.reporter import links as report_links
+from app.assistant.reporter import needs_push as report_push
 from app.assistant.supervisor import SupervisorTools
 from app.assistant.toolbox import Toolbox
 from app.assistant.tools import (
@@ -449,6 +453,7 @@ class TaskWorker:
         brief_writeback: BriefWritebackJob | None = None,
         brief_writeback_interval_seconds: float = 30.0,
         scheduler: Scheduler | None = None,
+        reporter: Reporter | None = None,
         scheduler_interval_seconds: float = 20.0,
         pull_requests: PullRequestReconciler | None = None,
         pull_request_interval_seconds: float = 300.0,
@@ -471,6 +476,7 @@ class TaskWorker:
         self.brief_writeback_interval_seconds = brief_writeback_interval_seconds
         self._brief_writeback_thread: threading.Thread | None = None
         self.scheduler = scheduler
+        self.reporter = reporter
         self.scheduler_interval_seconds = scheduler_interval_seconds
         self._scheduler_thread: threading.Thread | None = None
         self.pull_requests = pull_requests
@@ -605,31 +611,24 @@ class TaskWorker:
                     ),
                     approval=approval,
                 )
-                number = approval.get("number")
-                self.notifier.send(
-                    "Ready for your review",
-                    f"Pull request #{number}: {task.current_goal[:200]}"
-                    if number
-                    else task.current_goal[:200],
-                    priority=4,
-                    path=f"/?task={task.id}",
-                )
-                return True
+                return True  # the Assistant's report tells the user, with a push
             reply = result.output.get("reply") or result.output["summary"]
+            report = (task.source_context or {}).get("report")
+            blocks = result.output.get("blocks")
+            if report:
+                blocks = [*(blocks or []), *report_links(report)]
             self.service.complete_task(
                 task.id,
                 execution_id,
                 reply=str(reply),
                 emotion=str(result.output.get("emotion", "Warm")),
                 action=result.output.get("action"),
-                blocks=result.output.get("blocks"),
+                blocks=blocks,
+                # A watch that triggered: its report always pushes.
+                notable=bool(routine is not None and result.output.get("notable")),
             )
-            if routine is not None and (not routine.quiet or result.output.get("notable")):
-                self.notifier.send(
-                    f"Routine: {routine.message[:60]}",
-                    str(reply)[:300],
-                    path=f"/?task={task.id}",
-                )
+            if report:
+                self._push_report(task, report, str(reply), bool(result.output.get("notable")))
         except ExecutionCancelled:
             if execution_id is not None:
                 self.service.finish_cancelled_execution(execution_id)
@@ -642,18 +641,32 @@ class TaskWorker:
                 execution_id=execution_id,
                 **({"reply": user_message} if user_message else {}),
             )
-            if self.coding_only:
-                # Long coding runs finish while you are away; chat replies don't need a push.
-                self.notifier.send(
-                    "Coding task failed",
-                    user_message or task.current_goal[:200],
-                    priority=4,
-                    path=f"/?task={task.id}",
+            report = (task.source_context or {}).get("report")
+            if report:
+                # No model could write the report: say it plainly, and still push what must.
+                text = report_fallback(report)
+                self.service.append_chat_message(
+                    task.chat_session_id,
+                    content=text,
+                    role="assistant",
+                    blocks=report_links(report) or None,
                 )
+                self._push_report(task, report, text, False)
         finally:
             heartbeat.stop()
             self._sync_workflow(task.id)
         return True
+
+    def _push_report(self, task, report: list, text: str, notable: bool) -> None:
+        """A report goes to the phone only for the must-knows or when the agent says so."""
+        priority = report_push(report, notable=notable)
+        if priority is not None:
+            self.notifier.send(
+                "Assistant",
+                text[:300],
+                priority=priority,
+                path=f"/ui#/chats/{task.chat_session_id}",
+            )
 
     def _routine(self, task) -> ScheduleModel | None:
         schedule_id = (task.source_context or {}).get("schedule_id")
@@ -751,9 +764,18 @@ class TaskWorker:
                 fired = scheduler.run_due()
             except Exception:
                 logger.exception("Could not run due schedules")
-                continue
+                fired = 0
             if fired:
                 logger.info("Ran %d due schedules", fired)
+            if self.reporter is not None:
+                # Finished background work, told in the Assistant conversation.
+                try:
+                    report = self.reporter.run_due()
+                except Exception:
+                    logger.exception("Could not report finished work")
+                    continue
+                if report:
+                    logger.info("Started report %s", report)
 
     def _brief_writeback_loop(self) -> None:
         job = self.brief_writeback
@@ -957,6 +979,7 @@ def main() -> None:
             else None
         ),
         scheduler=Scheduler(database, start_run=start_routine, notifier=notifier),
+        reporter=Reporter(task_service, database),
         scheduler_interval_seconds=settings.scheduler_interval_seconds,
         pull_requests=(
             PullRequestReconciler(
