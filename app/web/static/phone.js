@@ -86,7 +86,9 @@ function phoneSpeak(text, { queued = false } = {}) {
   const ms = Math.min(text.length, 2000) * SPEECH_MS_PER_CHARACTER;
   speakingUntil = (queued ? Math.max(Date.now(), speakingUntil) : Date.now()) + ms;
   window.avatarEvent?.("speak", { text, ms });
-  speakingTimer = setTimeout(() => showSpeaking(false), speakingUntil - Date.now() + 1500);
+  // An app that reports when speech really ends ("speech" done) needs only a safety net.
+  const slack = phone.caps && phone.caps.speechEvents ? 30000 : 1500;
+  speakingTimer = setTimeout(() => showSpeaking(false), speakingUntil - Date.now() + slack);
 }
 
 // A reply spoken while it is written: each finished sentence of its draft goes to the phone
@@ -235,6 +237,17 @@ function onPhoneMessage(message) {
     } else if (message.state === "error") {
       showListening(false);
       if (message.text) fail(new Error(message.text));
+    }
+  } else if (message.type === "speech") {
+    // What the phone is actually saying, for the avatar's lip sync: start, each word, done.
+    if (message.state === "start") {
+      $("stop-speaking").hidden = false;
+      window.avatarEvent?.("speech", { state: "start" });
+    } else if (message.state === "word") {
+      window.avatarEvent?.("word", { word: message.word || "" });
+    } else if (message.state === "done") {
+      window.avatarEvent?.("speech", { state: "done" });
+      showSpeaking(false);
     }
   } else if (message.type === "shared") {
     ensureChatOpen().then(() => {

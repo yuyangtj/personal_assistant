@@ -259,15 +259,33 @@ function applyAvatarForChat() {
   const shown = $("avatar-toggle").getAttribute("aria-pressed") === "true";
   if (avatarWanted() !== shown) setAvatar(!shown, { remember: false });
 }
-function loadAvatar() {
-  if (window.avatar) return Promise.resolve();
+function loadScript(src) {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/ui/static/avatar.js";
+    script.src = src;
     script.onload = resolve;
     script.onerror = reject;
     document.head.append(script);
   });
+}
+function loadAvatar() {
+  return window.avatar ? Promise.resolve() : loadScript("/ui/static/avatar.js");
+}
+// The Live2D avatar (Ren), when the server has its files (ASSISTANT_AVATAR_ASSETS_DIR):
+// its manifest, then Live2D's runtime and our bundle, once. Null: draw our own instead.
+let live2dManifest;
+async function loadLive2d() {
+  if (live2dManifest !== undefined) return live2dManifest;
+  live2dManifest = null;
+  try {
+    const response = await fetch("/ui/avatar-assets/manifest.json", { cache: "no-cache" });
+    if (!response.ok) return null;
+    const manifest = await response.json();
+    if (!window.Live2DCubismCore) await loadScript(`/ui/avatar-assets/${manifest.core}`);
+    if (!window.live2dAvatar) await loadScript(`/ui/avatar-assets/${manifest.script}`);
+    live2dManifest = manifest;
+  } catch (_) { live2dManifest = null; }
+  return live2dManifest;
 }
 async function setAvatar(on, { remember = true } = {}) {
   if (remember) {
@@ -288,7 +306,7 @@ async function setAvatar(on, { remember = true } = {}) {
     fail(new Error("The avatar couldn't load. Try again."));
     return;
   }
-  window.avatar.mount(stage);
+  window.avatar.mount(stage, { live2d: await loadLive2d() });
   window.avatarEvent("transcript", avatarTranscriptState());
   if (phone.listening) window.avatarEvent("listening", { on: true });
 }

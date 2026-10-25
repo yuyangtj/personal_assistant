@@ -36,6 +36,8 @@ object BridgeProtocol {
         .put("speak", true)
         // The page may send a reply a sentence at a time ("speak_more" queues it).
         .put("speakQueue", true)
+        // Speech start, each spoken word and done arrive as "speech" messages (lip sync).
+        .put("speechEvents", true)
         .toString()
 
     /** Text shared from another app, for the chat box. */
@@ -56,6 +58,13 @@ object BridgeProtocol {
         .put("type", "screen")
         .put("app", app.take(80))
         .put("text", text.take(MAX_SCREEN_TEXT))
+        .toString()
+
+    /** Speech as it happens: "start", "word" (with the word being spoken) or "done". */
+    fun speech(state: String, word: String? = null): String = JSONObject()
+        .put("type", "speech")
+        .put("state", state)
+        .apply { if (word != null) put("word", word.take(80)) }
         .toString()
 
     fun voice(state: String, text: String? = null): String = JSONObject()

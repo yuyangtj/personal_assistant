@@ -526,24 +526,53 @@ a.upload-button { display: inline-block; }
 .abilities li .status-pill { margin-left: 6px; }
 .abilities li.unavailable strong { color: var(--muted); }
 
-/* The avatar (avatar.js): a small face above the transcript, only when switched on. */
-.avatar-stage { display: flex; justify-content: center; height: 150px; flex: none; margin: 2px 0 6px; }
+/* The avatar (avatar.js): a small round mascot above the conversation, when switched on.
+   Its colours follow the theme: a warm clay body, a lighter belly, dark eyes. */
+:root, :root[data-theme="dark"] {
+  --av-body: #c9a27e; --av-shade: #a97f5d; --av-light: #ecd2b6; --av-belly: #e7cdb1;
+  --av-ear-in: #e3a48f; --av-cheek: #e58f7d; --av-white: #fbf8f3; --av-iris: #2b2220;
+  --av-brow: #4a3a33; --av-mouth: #4a2a26; --av-tongue: #e07a74; --av-shadow: #0000004d;
+}
+:root[data-theme="light"] {
+  --av-body: #d9b08c; --av-shade: #bf916c; --av-light: #f3dcc4; --av-belly: #f0d9c0;
+  --av-ear-in: #eaa892; --av-cheek: #ec9a86; --av-white: #ffffff; --av-iris: #2b2220;
+  --av-brow: #5a463d; --av-mouth: #4a2a26; --av-tongue: #e07a74; --av-shadow: #14141422;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --av-body: #d9b08c; --av-shade: #bf916c; --av-light: #f3dcc4; --av-belly: #f0d9c0;
+    --av-ear-in: #eaa892; --av-cheek: #ec9a86; --av-white: #ffffff; --av-iris: #2b2220;
+    --av-brow: #5a463d; --av-mouth: #4a2a26; --av-tongue: #e07a74; --av-shadow: #14141422;
+  }
+}
+.avatar-stage { display: flex; justify-content: center; height: 150px; flex: none; margin: 4px 0 2px; }
 .avatar-stage[hidden] { display: none; }
 .avatar-face { height: 100%; overflow: visible; }
-.avatar-head { fill: var(--raised); stroke: var(--accent); stroke-width: 2; }
-.avatar-eye, .avatar-mouth { fill: var(--text); }
-.avatar-brow { fill: none; stroke: var(--text); stroke-width: 3.5; stroke-linecap: round; }
-.avatar-cheek { fill: var(--accent); opacity: .18; }
-.avatar-body { transform-origin: 60px 100px; animation: avatar-breathe 5s ease-in-out infinite; }
-.avatar-ring { fill: none; stroke: var(--accent); stroke-width: 2; opacity: 0; transform-origin: 60px 62px; }
-.avatar-ring.on { opacity: .85; animation: avatar-pulse 1.4s ease-in-out infinite; }
+.av-body, .av-arm, .av-hand, .av-ear > ellipse:first-child { fill: var(--av-body); }
+.av-hand { stroke: var(--av-shade); stroke-width: 1.5; }
+.av-shade { fill: var(--av-shade); opacity: .4; }
+.av-light { fill: var(--av-light); opacity: .7; }
+.av-belly { fill: var(--av-belly); opacity: .85; }
+.av-ear-in { fill: var(--av-ear-in); }
+.av-arm { stroke: var(--av-shade); stroke-width: 1.5; }
+.av-cheek { fill: var(--av-cheek); opacity: .45; }
+.av-white { fill: var(--av-white); }
+.av-iris { fill: var(--av-iris); }
+.av-glint { fill: #fff; }
+.av-brow { fill: none; stroke: var(--av-brow); stroke-width: 4; stroke-linecap: round; }
+.av-mouth-fill { fill: var(--av-mouth); }
+.av-lip-line { fill: none; stroke: var(--av-mouth); stroke-width: 3.2; stroke-linecap: round; }
+.av-teeth { fill: #fbf8f3; }
+.av-tongue { fill: var(--av-tongue); }
+.av-shadow { fill: var(--av-shadow); }
+.avatar-ring { fill: none; stroke: var(--accent); stroke-width: 2; opacity: 0; transform-origin: 100px 108px; }
+.avatar-ring.on { opacity: .8; animation: avatar-pulse 1.4s ease-in-out infinite; }
 .avatar-dots { fill: var(--muted); opacity: 0; }
 .avatar-dots.on { opacity: 1; }
 .avatar-dots.on circle { animation: avatar-dot 1.2s ease-in-out infinite; }
 .avatar-dots.on circle:nth-child(2) { animation-delay: .2s; }
 .avatar-dots.on circle:nth-child(3) { animation-delay: .4s; }
-@keyframes avatar-breathe { 50% { transform: scale(1.015); } }
-@keyframes avatar-pulse { 50% { transform: scale(1.06); opacity: .35; } }
+@keyframes avatar-pulse { 50% { transform: scale(1.05); opacity: .3; } }
 @keyframes avatar-dot { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .avatar-face * { animation: none !important; } }
 @media (max-width: 720px) { .avatar-stage { height: 110px; } }
@@ -595,3 +624,8 @@ form > button, .row > button { align-self: flex-end; }
 .recent-days h2 { margin: 0 0 6px; color: var(--text); font: 400 17px/1.3 var(--serif); }
 .recent-days p { margin: 0 0 8px; white-space: pre-wrap; }
 .recent-days .sub { margin: 0; }
+/* Ren (Live2D): a taller stage, his canvas filling it. */
+.avatar-stage.live2d { height: 230px; }
+.avatar-live2d { width: min(100%, 320px); height: 100%; }
+.avatar-live2d canvas { display: block; }
+@media (max-width: 720px) { .avatar-stage.live2d { height: 180px; } }

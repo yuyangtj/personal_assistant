@@ -145,3 +145,35 @@ def app_signing_fingerprints() -> list[str]:
         for statement in statements
         for fingerprint in statement["target"].get("sha256_cert_fingerprints", [])
     ]
+
+
+#: What the Live2D avatar's files may be; anything else is refused.
+AVATAR_TYPES = {
+    ".js": "text/javascript",
+    ".json": "application/json",
+    ".png": "image/png",
+    ".moc3": "application/octet-stream",
+    ".frag": "text/plain",
+    ".vert": "text/plain",
+}
+
+
+@router.get("/ui/avatar-assets/{path:path}", include_in_schema=False)
+def avatar_assets(path: str, request: Request) -> FileResponse:
+    """The Live2D avatar (model, textures, runtime), from a folder kept outside the repo.
+
+    Behind the same login as the console. Unset or missing: 404, and the page shows its
+    own drawn avatar instead.
+    """
+    root = request.app.state.settings.avatar_assets_dir
+    suffix = Path(path).suffix.lower()
+    if root is None or suffix not in AVATAR_TYPES or ".." in Path(path).parts:
+        raise HTTPException(status_code=404, detail="Not found")
+    base = Path(root).resolve()
+    target = (base / path).resolve()
+    if not target.is_relative_to(base) or not target.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    # The manifest says what to load, so it is checked on every load; the rest is big and
+    # only changes when the model is rebuilt.
+    cache = "no-cache" if path == "manifest.json" else "public, max-age=604800"
+    return FileResponse(target, media_type=AVATAR_TYPES[suffix], headers={"Cache-Control": cache})

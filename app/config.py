@@ -31,6 +31,9 @@ class Settings:
     validation_profiles_directory: Path = Path("validation-profiles")
     deployment_targets_directory: Path = Path("deployment-targets")
     spaces_directory: Path = Path("spaces")
+    #: Built Live2D avatar files (scripts/build_live2d.sh), served at /ui/avatar-assets/.
+    #: Unset: the console shows its own drawn avatar instead.
+    avatar_assets_dir: Path | None = None
     deploy_spool_directory: Path | None = None
     brief_writeback_enabled: bool = False
     ntfy_topic_url: str | None = None
@@ -203,6 +206,9 @@ class Settings:
             ),
             spaces_directory=Path(
                 os.getenv("ASSISTANT_SPACES_DIRECTORY", str(defaults.spaces_directory))
+            ),
+            avatar_assets_dir=(
+                Path(value) if (value := os.getenv("ASSISTANT_AVATAR_ASSETS_DIR")) else None
             ),
             deploy_spool_directory=(
                 Path(value) if (value := os.getenv("ASSISTANT_DEPLOY_SPOOL_DIRECTORY")) else None

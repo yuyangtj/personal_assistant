@@ -34,6 +34,11 @@ class ConsoleBridge(
     private var pending: String? = null
     private val proposedActions = mutableMapOf<String, LocalAction>()
 
+    init {
+        // The avatar's lip sync follows what the phone actually says, word by word.
+        speech.events = { state, word -> send(BridgeProtocol.speech(state, word)) }
+    }
+
     override fun onPostMessage(
         view: WebView,
         message: WebMessageCompat,

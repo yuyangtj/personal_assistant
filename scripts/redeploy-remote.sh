@@ -153,6 +153,9 @@ fi
 
 echo "Building and starting release ${release_tag}..."
 export ASSISTANT_IMAGE_TAG="${release_tag}"
+# The avatar's files are copied here by hand (docs/remote-hosting.md); the folder must
+# exist for the API's bind mount, and empty is fine.
+mkdir -p "${ASSISTANT_AVATAR_ASSETS_HOST:-/srv/personal-assistant/avatar-assets}"
 "${compose[@]}" up -d --build --remove-orphans
 
 echo "Waiting for the API health check..."

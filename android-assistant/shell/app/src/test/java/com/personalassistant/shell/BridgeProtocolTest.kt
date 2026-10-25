@@ -34,6 +34,16 @@ class BridgeProtocolTest {
         assertEquals("speak_more", BridgeProtocol.parse("""{"type":"speak_more","text":"Then tea."}""")?.type)
         val caps = JSONObject(BridgeProtocol.capabilities(voice = true))
         assertEquals(true, caps.getBoolean("speakQueue"))
+        assertEquals(true, caps.getBoolean("speechEvents"))
+    }
+
+    @Test
+    fun speechIsReportedAsItHappens() {
+        val word = JSONObject(BridgeProtocol.speech("word", "Stockholm"))
+        assertEquals("speech", word.getString("type"))
+        assertEquals("word", word.getString("state"))
+        assertEquals("Stockholm", word.getString("word"))
+        assertFalse(JSONObject(BridgeProtocol.speech("done")).has("word"))
     }
 
     @Test
