@@ -99,6 +99,10 @@ def test_codex_uses_its_login_home_and_the_container_as_its_sandbox(
         ("You've hit your 5-hour limit. Resets at 14:00", "quota_exhausted"),
         ("You've hit your usage limit. Upgrade to Pro or try again in 3 days", "quota_exhausted"),
         ("API Error: 401 Invalid bearer token", "authentication_failed"),
+        (
+            "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+            "authentication_failed",
+        ),
         ("Not logged in · Please run /login", "authentication_failed"),
         ("Rate limit reached for requests", "rate_limited"),
     ],
