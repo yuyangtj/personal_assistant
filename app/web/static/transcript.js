@@ -189,16 +189,27 @@ async function send(text, { local = true, voice = false } = {}) {
   let entry = null;
   try {
     const attachments = phone.screen ? [{ kind: "screen", ...phone.screen }] : [];
+    // Once you speak in a conversation, its replies are spoken from then on, also to typed
+    // messages and tapped suggestions, until you mute or switch conversations.
+    if (voice) phone.voiceChat = state.chatId;
+    const spoken = voice || Boolean(phone.bridge && state.chatId && phone.voiceChat === state.chatId);
     if (local && phone.bridge && !awaitingChoice() && !attachments.length) {
-      // Simple things (the time, a timer) can be answered on the phone itself.
+      // Simple things (the time, a timer) can be answered on the phone itself. Its model
+      // can't see the conversation, so once one is going ("yes please do" follows a
+      // question) the phone keeps only the actions you confirm; the rest goes to the server.
       const route = await phoneRoute(text);
-      if (route && route.route !== "cloud") { answerOnPhone(text, route, voice); return true; }
+      const ongoing = state.messages.some((m) => m.role !== "system");
+      if (route && route.route !== "cloud" && !(ongoing && route.route === "reply")) {
+        answerOnPhone(text, route, spoken);
+        return true;
+      }
     }
     if (!state.chatId) {
       state.chatId = (await api("/chat-sessions", { method: "POST", body: "{}" })).id;
       goChat(state.chatId);
       loadChats();
     }
+    if (voice) phone.voiceChat = state.chatId;
     entry = { chatId: state.chatId, text, messageId: null };
     state.pending.push(entry);
     state.pollStarted = Date.now();
@@ -211,7 +222,7 @@ async function send(text, { local = true, voice = false } = {}) {
     entry.messageId = posted.message.id;
     if (attachments.length) setScreen(null);
     // A spoken question gets its answer spoken too, whenever it arrives.
-    if (voice) phone.speakFor = posted.message.id;
+    if (spoken) phone.speakFor = posted.message.id;
     // The server decides what the message needs; the repository picker is only an override.
     // When it already took care of it (an action, an offer with choices, or a choice
     // picked), its reply is in the transcript; otherwise the message gets a chat reply.

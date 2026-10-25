@@ -93,7 +93,7 @@ $("composer").onsubmit = async (e) => {
     $("input").focus();
   }
 };
-// Clearing the box drops dictation: a typed message gets a written reply only.
+// Clearing the box drops dictation (replies are still spoken in a conversation you've spoken in).
 $("input").addEventListener("input", () => { if (!$("input").value.trim()) phone.dictated = false; });
 $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("composer").requestSubmit(); }

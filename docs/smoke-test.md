@@ -17,7 +17,8 @@ the run can be found on the Stats page.
 | 4 | "pls do" (after the answer offers one next step) | Do that step, without asking which one |
 | 5 | "what's on offer at Willys this week?" | Use the store tools (the reply card shows "Looking at Willys") and name real offers |
 | 6 | "note: the cabin wifi password is on the fridge" | Save it at once, with an "Open Notes" link |
-| 7 | Hold the mic and ask "what's the time?" | Answer on the phone itself, spoken, without waiting for the server |
+| 7 | In a new conversation, hold the mic and ask "what's the time?" | Answer on the phone itself, spoken, without waiting for the server |
+| 7b | Then type "and what should I do this evening?" | The reply is spoken too: once you've spoken in a conversation, its replies are read out until you mute |
 | 8 | "set a timer for 2 minutes" | Show a card with Do it / Cancel. After Do it the phone's timer runs, and it rings at the end |
 | 9 | Share a web page to the assistant from Chrome and ask "what is this about?" | Answer from the shared page |
 | 10 | "how are my coding runs going?" | List the runs and their state, or say there are none |
