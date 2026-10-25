@@ -86,6 +86,10 @@
   {"name": "swedish-bookkeeping", "lists": ["Groceries"], "turns": [
     {"say": "lägg till mjölk på inköpslistan", "expect": {"tool": "list_add"}}
   ]},
+  {"name": "whats-going-on", "about": "Looking across every chat: the work going on, and what was said in another conversation.", "turns": [
+    {"say": "what's going on across my chats and work right now?", "expect": {"tools_any": ["overview"]}},
+    {"say": "what did we talk about in the chat about my Klarna spending?", "expect": {"tools_any": ["chat_read", "chats"]}}
+  ]},
   {"name": "stores-not-connected", "about": "Without the store gateway, a store question is answered honestly, nothing invented.", "turns": [
     {"say": "what's on offer at Willys this week?", "expect": {"reply_any": ["connect", "not available", "can't", "cannot", "don't have", "couldn't"], "or_tool": "research"}}
   ]}

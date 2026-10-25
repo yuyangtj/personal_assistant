@@ -243,10 +243,21 @@ const theme = {
 theme.init();
 $("theme-toggle").onclick = () => theme.toggle();
 
-// The avatar: off unless switched on on this device; its script loads only then.
+// The avatar: on by default in Assistant, off elsewhere unless switched on; each choice is
+// remembered on this device. Its script loads only when it is first shown.
 const AVATAR_STORAGE_KEY = "assistantAvatar";
+const AVATAR_HOME_KEY = "assistantAvatarHome";
+const inHome = () => Boolean(state.chatId && state.chatId === state.homeId);
 function avatarWanted() {
-  try { return localStorage.getItem(AVATAR_STORAGE_KEY) === "1"; } catch (_) { return false; }
+  try {
+    if (inHome()) return localStorage.getItem(AVATAR_HOME_KEY) !== "0";
+    return localStorage.getItem(AVATAR_STORAGE_KEY) === "1";
+  } catch (_) { return inHome(); }
+}
+// Called whenever another chat opens: the face follows that chat's setting.
+function applyAvatarForChat() {
+  const shown = $("avatar-toggle").getAttribute("aria-pressed") === "true";
+  if (avatarWanted() !== shown) setAvatar(!shown, { remember: false });
 }
 function loadAvatar() {
   if (window.avatar) return Promise.resolve();
@@ -259,7 +270,9 @@ function loadAvatar() {
   });
 }
 async function setAvatar(on, { remember = true } = {}) {
-  if (remember) { try { localStorage.setItem(AVATAR_STORAGE_KEY, on ? "1" : "0"); } catch (_) {} }
+  if (remember) {
+    try { localStorage.setItem(inHome() ? AVATAR_HOME_KEY : AVATAR_STORAGE_KEY, on ? "1" : "0"); } catch (_) {}
+  }
   const button = $("avatar-toggle");
   button.setAttribute("aria-pressed", String(on));
   button.setAttribute("aria-label", on ? "Hide the avatar" : "Show the avatar");
@@ -281,4 +294,4 @@ async function setAvatar(on, { remember = true } = {}) {
 }
 // The switch is in a conversation's ⋯ menu, so the face appears right where it was turned on.
 $("avatar-toggle").onclick = () => setAvatar($("avatar-toggle").getAttribute("aria-pressed") !== "true");
-if (avatarWanted()) setAvatar(true, { remember: false });
+applyAvatarForChat();

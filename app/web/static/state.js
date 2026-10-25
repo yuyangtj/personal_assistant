@@ -173,6 +173,7 @@ function shortWhen(iso) {
 async function loadChats() {
   try {
     state.chats = (await api("/chat-sessions")).sessions;
+    state.homeId = state.chats.find((c) => c.home)?.id || state.homeId;
     state.archivedChats = state.showArchived
       ? (await api("/chat-sessions?archived=true")).sessions : [];
     renderChats();
@@ -202,9 +203,20 @@ function chatRow(c) {
     </div>${actions}`;
 }
 
+// Assistant: always first, with no pin, archive or delete.
+function homeRow(c) {
+  return `<div class="chat-row home-row">
+      <button class="chat-item ${c.id === state.chatId ? "active" : ""}" data-chat="${c.id}" type="button">
+        <div>Assistant</div>
+        <div class="when">Everything, in one place</div>
+      </button></div>`;
+}
+
 function renderChats() {
-  const pinned = state.chats.filter((c) => c.pinned);
-  const rest = state.chats.filter((c) => !c.pinned);
+  const home = state.chats.find((c) => c.home);
+  const others = state.chats.filter((c) => !c.home);
+  const pinned = others.filter((c) => c.pinned);
+  const rest = others.filter((c) => !c.pinned);
   const repos = [...new Set(rest.map((c) => c.repository_id).filter(Boolean))];
   const sections = [["Pinned", pinned],
     ...repos.map((repo) => [repositoryName(repo), rest.filter((c) => c.repository_id === repo)]),
@@ -215,7 +227,8 @@ function renderChats() {
       aria-expanded="${Boolean(state.showArchived)}">${state.showArchived ? "▾" : "▸"} Archived</button>`
     + (state.showArchived ? (state.archivedChats.map(chatRow).join("")
       || `<div class="sub">Nothing archived.</div>`) : "");
-  $("chat-list").innerHTML = (list || `<div class="sub">No conversations yet.</div>`) + archived;
+  $("chat-list").innerHTML = (home ? homeRow(home) : "")
+    + (list || (home ? "" : `<div class="sub">No conversations yet.</div>`)) + archived;
 }
 
 async function chatAction(action, id) {

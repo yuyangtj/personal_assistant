@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 
 import httpx
@@ -203,7 +204,7 @@ def test_the_stats_page_lists_what_the_assistant_can_do(page: Page, live_server:
         ]
     )
     expect(body).to_contain_text("Notes")
-    coding = body.locator("li", has_text="Coding")
+    coding = body.locator("li", has_text=re.compile(r"^\s*Coding"))
     expect(coding).to_contain_text("runs in the background")
     # No GitHub token on the test server: shown, but marked as not set up.
     expect(body.locator("li", has_text="Looking at repositories")).to_contain_text(
