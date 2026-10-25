@@ -5,12 +5,11 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from fastapi.testclient import TestClient
 
-from app.chat.triage import Triager
 from app.notify import NtfyNotifier
 from app.persistence.database import Database
 from app.schedules import Recurrence, ScheduleKind, Scheduler, ScheduleService, next_occurrence
 from app.services import TaskService
-from tests.test_triage import ScriptedChat, suggestion
+from tests.test_direct_actions import _do
 
 
 class RecordingNotifier:
@@ -139,34 +138,24 @@ def test_ntfy_posts_title_priority_and_click_link() -> None:
     assert failing.send("t", "m") is False
 
 
-# --- reminders from chat and the API --------------------------------------------------
+# --- reminders from the agent's tool and the API --------------------------------------------------
 
 
 def test_reminder_from_chat_uses_the_users_timezone(client: TestClient) -> None:
     item = client.post("/work-items", json={"title": "Family"}).json()
     chat = client.post("/chat-sessions", json={}).json()
-    client.app.state.triager = Triager(
-        client.app.state.repository_registry,
-        ScriptedChat(
-            suggestion(
-                intent="direct_action",
-                confidence=0.95,
-                action={
-                    "type": "remind",
-                    "text": "call mum",
-                    "at": "2099-01-05T09:00",
-                    "work_item": item["slug"],
-                },
-            )
-        ),
+
+    reply = _do(
+        client,
+        chat["id"],
+        timezone="Europe/Stockholm",
+        type="remind",
+        text="call mum",
+        at="2099-01-05T09:00",
+        work_item=item["slug"],
     )
 
-    response = client.post(
-        f"/chat-sessions/{chat['id']}/messages",
-        json={"content": "remind me to call mum", "timezone": "Europe/Stockholm"},
-    ).json()
-
-    assert response["decision"]["result"] == "I'll remind you Mon 05 Jan 09:00: call mum"
+    assert reply == "I'll remind you Mon 05 Jan 09:00: call mum"
     (schedule,) = client.get("/schedules", params={"work_item_id": item["slug"]}).json()[
         "schedules"
     ]
@@ -181,22 +170,10 @@ def test_reminder_from_chat_uses_the_users_timezone(client: TestClient) -> None:
 
 def test_past_reminders_are_refused(client: TestClient) -> None:
     chat = client.post("/chat-sessions", json={}).json()
-    client.app.state.triager = Triager(
-        client.app.state.repository_registry,
-        ScriptedChat(
-            suggestion(
-                intent="direct_action",
-                confidence=0.95,
-                action={"type": "remind", "text": "x", "at": "2001-01-01T09:00"},
-            )
-        ),
-    )
 
-    response = client.post(
-        f"/chat-sessions/{chat['id']}/messages", json={"content": "remind me yesterday"}
-    ).json()
+    reply = _do(client, chat["id"], type="remind", text="x", at="2001-01-01T09:00")
 
-    assert response["decision"]["result"] == "That time has already passed."
+    assert reply == "That time has already passed."
     assert client.get("/schedules").json()["schedules"] == []
 
 

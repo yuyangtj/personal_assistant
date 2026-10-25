@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Sequence
 from contextlib import suppress
 from typing import Annotated, Any, Literal
 from uuid import uuid4
@@ -267,3 +268,28 @@ def model_blocks(decoded: dict[str, Any]) -> list[dict[str, Any]]:
             except ValueError:
                 continue
     return blocks
+
+
+def pending_choices(messages: Sequence[Any], *, current_message_id: str) -> tuple[Any, dict] | None:
+    """The open choices the current message answers: on the turn right before it."""
+    earlier = [message for message in messages if message.id != current_message_id]
+    for message in reversed(earlier):
+        if message.role == "system":
+            continue  # task references don't count as a turn
+        if message.role != "assistant":
+            return None
+        for block in message.blocks or []:
+            if block.get("type") == "choices" and block.get("state") == "open":
+                return message, block
+        return None
+    return None
+
+
+def settle(blocks: list[dict[str, Any]], block_id: str, *, chosen: str | None) -> list[dict]:
+    """The message's blocks with one choices block marked chosen (or lapsed)."""
+    settled = []
+    for block in blocks:
+        if block.get("id") == block_id:
+            block = {**block, "state": "chosen" if chosen else "lapsed", "chosen": chosen}
+        settled.append(block)
+    return settled

@@ -47,7 +47,10 @@ _CLAIMS_DONE = re.compile(
     r"\bi(?:'ll| will)\s+(?:now\s+)?(?:stop|cancel|start|add|save|note|remind|remember)\b"
     r"[^?]*\bnow\b[^?]*$|"
     # A state it can only know from a tool ("that run is already stopped").
-    r"\b(?:i've|i have)\s+(?:stopped|cancell?ed)\b|"
+    r"\b(?:i've|i have)\s+(?:stopped|cancell?ed|forgotten|deleted|removed)\b|"
+    # A reply that opens with the result ("Stopped, the README run won't go further.").
+    r"^\W*(?:okay|ok|sure|alright)?[,.!\s—-]*(?:stopped|cancell?ed|done|added|saved|"
+    r"forgotten|deleted|removed|started)\b(?:\s*[,.!:—-]|\s+(?:it|that|the|your)\b)|"
     r"\b(?:is|was|has been)\s+already\s+(?:stopped|cancell?ed|done|finished)\b",
     re.IGNORECASE,
 )

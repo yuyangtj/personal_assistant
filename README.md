@@ -6,18 +6,17 @@ progress, lets you redirect them while they run, and opens pull requests for you
 Shopping, finance and home come later.
 
 You use it through the web console (installable as an app) or the Android app, which is
-the same console plus voice, phone actions and on-device answers. It runs on one Hetzner
+the same console plus voice and phone actions (timers, alarms, calendar drafts). It runs on one Hetzner
 server.
 
 ## How it works
 
-- **Chat first.** Each message is triaged:
-  - small talk gets a chat reply;
-  - bookkeeping ("add oat milk to #groceries", "remind me at 9") is done instantly;
-  - anything about coding work goes to the **supervisor**.
-- **The supervisor** sees every run. It can start a coding agent, look closer at one,
-  pass it new instructions while it works, or stop it. When something needs a decision,
-  the reply carries **choices** to click or answer with "yes".
+- **One assistant.** Every message goes to one chat agent with tools: lists, memories,
+  reminders, routines, notes (save only), shopping, research, reading code, and coding runs.
+  It sees the whole conversation, so "yes please do" means what it just offered. Only
+  "note: …" is saved without a model. Replies may carry suggestion buttons; tapping one
+  just says it.
+- **Coding runs** are started, checked, steered and stopped by the agent's tools.
 - **Coding agents** (Kimi Code, with Claude Code on MiniMax as fallback) work in isolated
   worktrees, two at a time. Their plan and steps stream back live. Each opens a draft PR,
   and only you can merge or deploy, with the approval token.
@@ -39,7 +38,7 @@ What is built and what is next:
 | Path | What it is |
 |---|---|
 | `app/api` | HTTP routes, one module per resource |
-| `app/chat` | Message handling: triage, offers and choices, quick actions |
+| `app/chat` | Message handling: the note rule, reply blocks, bookkeeping actions, routines |
 | `app/assistant` | The supervisor and its overview of the work |
 | `app/coding` | Coding runs and agents: runners, live sessions, git, reports, PR executor |
 | `app/services` | The task service: chat, tasks, executions, approvals, progress |

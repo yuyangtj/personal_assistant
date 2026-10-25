@@ -7,11 +7,9 @@ from app.api.routes import router
 from app.api.web import app_signing_fingerprints
 from app.api.work_items import router as work_items_router
 from app.capabilities import CapabilityRegistry
-from app.chat.triage import Triager
 from app.coding.decision import CodingRunnerRegistry
 from app.config import Settings
 from app.deployments import DeploymentRegistry, HostDeployerSpool
-from app.integrations.factory import triage_client
 from app.integrations.gemini_tts import GeminiTtsClient
 from app.integrations.github import GitHubClient
 from app.integrations.speech import CachedSpeechSynthesizer
@@ -71,15 +69,6 @@ def create_app(
     application.state.work_item_service = WorkItemService(database)
     application.state.schedule_service = ScheduleService(database)
     application.state.space_registry = space_registry
-    application.state.triager = Triager(
-        repository_registry,
-        triage_client(resolved_settings) if resolved_settings.triage_model_enabled else None,
-        min_confidence=resolved_settings.triage_min_confidence,
-        research_available=resolved_settings.web_search_available,
-        # Klarna purchases are always there; the stores need the MCP gateway.
-        groceries_available=True,
-        spaces=space_registry,
-    )
     application.state.capability_registry = registry
     application.state.repository_registry = repository_registry
     application.state.workflow_registry = workflow_registry

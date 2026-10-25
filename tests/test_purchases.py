@@ -11,7 +11,7 @@ from app.execution.grocery_agent import GroceryAgentExecutor
 from app.tools.klarna import KlarnaTools, ToolGateway
 from app.tools.mcp import Toolset
 from app.work.purchases import PurchaseService
-from tests.test_triage import ScriptedChat
+from tests.fakes import ScriptedChat
 
 HEADER = "date,time,merchant,amount,currency,original_amount,payment_type,status,date_display\n"
 EXPORT = HEADER + (
@@ -151,18 +151,6 @@ def test_stale_data_and_asking_to_upload_both_offer_the_button(client: TestClien
         assert output.output["blocks"][0]["target"] == "klarna-purchases"
 
 
-def test_klarna_questions_go_to_the_shopping_agent(client: TestClient) -> None:
-    chat = client.post("/chat-sessions", json={}).json()["id"]
-
-    client.post(
-        f"/chat-sessions/{chat}/messages",
-        json={"content": "How much did I spend with Klarna last month?"},
-    )
-
-    (task,) = client.get(f"/chat-sessions/{chat}/tasks").json()["tasks"]
-    assert task["required_capabilities"] == ["groceries"]
-
-
 def test_monthly_spending_comes_with_a_chart_the_model_cannot_alter(client: TestClient) -> None:
     rows = "2026-07-03,10:00,Apotea,100,SEK,,Pay in 30 days,,3 Jul\n"
     _service(client).import_klarna_csv(EXPORT + rows)
@@ -236,7 +224,7 @@ def test_a_long_history_reports_the_newest_months_and_weeks(client: TestClient) 
 def test_each_message_keeps_how_it_was_routed(client: TestClient) -> None:
     chat = client.post("/chat-sessions", json={}).json()["id"]
 
-    for text in ("How much did I spend with Klarna last month?", "good morning"):
+    for text in ("How much did I spend with Klarna last month?", "note: buy bread"):
         client.post(f"/chat-sessions/{chat}/messages", json={"content": text})
 
     routed = {
@@ -245,9 +233,9 @@ def test_each_message_keeps_how_it_was_routed(client: TestClient) -> None:
         if m["role"] == "user"
     }
     klarna = routed["How much did I spend with Klarna last month?"]
-    assert (klarna["route"], klarna["capabilities"]) == ("shopping agent", ["groceries"])
-    assert (routed["good morning"]["route"], routed["good morning"]["source"]) == (
-        "chat reply",
+    assert (klarna["route"], klarna["source"]) == ("main agent", "main-agent")
+    assert (routed["note: buy bread"]["route"], routed["note: buy bread"]["source"]) == (
+        "action: note_add",
         "rules",
     )
 

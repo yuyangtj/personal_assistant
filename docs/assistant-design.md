@@ -132,7 +132,7 @@ quick tools stay quick, anything slow becomes a background job, and the assistan
 | Read-only repository tools (list, read, search) in the chat agent, with each lookup shown on the reply's card | Done |
 | More tools in the same agent (notes, memories, lists, reminders, routines, research, shopping, coding runs) | Done; research runs in the background, shopping is the agent's own tools (2026-10-25) |
 | Providers' own tool calling | Done (2026-10-25). Main-agent eval: DeepSeek Flash 11/11, median 2.3–2.6 s, p90 under 5.3 s; MiniMax 11/11, median 4.8–6.2 s |
-| One assistant for every message (triage and narrow agents retired) | Built behind `ASSISTANT_MAIN_AGENT_ENABLED` (off). Chat eval 2026-10-24: 12/12 turns on both paths; median 8.4 s against 6.5 s, p90 13.8 s against 13.7 s (`scripts/chat_eval/run.py --main-agent`) |
+| One assistant for every message (triage, offers and the phone's router retired) | Done (2026-10-25): the chat agent is the only decider; only "note: …" is instant. Gate: `scripts/chat_eval/run.py --repeat 3` |
 | Per-ability track record and scenarios; bands raised by evidence | Then |
 | Voice and the 3D character on the same API | Later |
 

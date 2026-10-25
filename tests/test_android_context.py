@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import json
-
 from fastapi.testclient import TestClient
 
-from app.chat.triage import Triager
 from app.execution.conversation import ConversationExecutor
-from app.repositories import RepositoryRegistry
+from tests.fakes import ScriptedChat
 from tests.test_purchases import EXPORT
-from tests.test_triage import ScriptedChat, suggestion
 
 SCREEN = {"kind": "screen", "app": "Willys", "text": "Zoégas Skånerost 450 g\n54,90 kr"}
 
@@ -50,11 +46,7 @@ def test_an_unknown_shared_file_is_answered_not_guessed(client: TestClient) -> N
     )
 
 
-def test_the_screen_goes_with_the_message_to_routing_and_the_answering_agent(
-    client: TestClient,
-) -> None:
-    model = ScriptedChat(suggestion(intent="answer"))
-    client.app.state.triager = Triager(RepositoryRegistry.from_directory("repositories"), model)
+def test_the_screen_goes_with_the_message_to_the_answering_agent(client: TestClient) -> None:
     chat = _chat(client)
 
     posted = client.post(
@@ -62,8 +54,6 @@ def test_the_screen_goes_with_the_message_to_routing_and_the_answering_agent(
         json={"content": "is this a good price?", "attachments": [SCREEN]},
     ).json()
 
-    routed = json.loads(model.requests[0][1].content)
-    assert routed["screen_context"].startswith("Zoégas Skånerost")
     (block,) = posted["message"]["blocks"]
     assert block["type"] == "attachment" and block["app"] == "Willys"
     task = client.post(f"/chat-sessions/{chat}/messages/{posted['message']['id']}/task", json={})

@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.chat.triage import Triager
-from app.repositories import RepositoryRegistry
 from app.work.spaces import SpaceRegistry
-from tests.test_triage import ScriptedChat, suggestion
 
 
 def test_space_packs_load_and_require_the_core_spaces(tmp_path: Path) -> None:
@@ -23,21 +19,6 @@ def test_space_packs_load_and_require_the_core_spaces(tmp_path: Path) -> None:
     (tmp_path / "bad.yaml").write_text("slug: Bad Slug\nname: x\nkind: x\n")
     with pytest.raises(ValueError, match="Invalid space manifest"):
         SpaceRegistry.from_directory(tmp_path)
-
-
-def test_triage_places_new_work_in_a_known_space() -> None:
-    spaces = SpaceRegistry.from_directory("spaces")
-    repositories = RepositoryRegistry.from_directory("repositories")
-    chat = ScriptedChat(
-        suggestion(intent="propose_task", space="shopping", confidence=0.9),
-        suggestion(intent="propose_task", space="mars", confidence=0.9),
-    )
-    triager = Triager(repositories, chat, spaces=spaces)
-
-    assert triager.decide("find me a rain jacket").space == "shopping"
-    assert triager.decide("plan a trip to mars").space is None
-    request = json.loads(chat.requests[0][1].content)
-    assert {space["slug"] for space in request["spaces"]} == {"coding", "general", "shopping"}
 
 
 def test_confirmed_task_creates_its_item_in_the_chosen_space(client: TestClient) -> None:

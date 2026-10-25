@@ -22,9 +22,7 @@ from app.assistant.tools import (
     store_tools,
 )
 from app.capabilities import CapabilityRegistry
-from app.chat.routines import routine_capabilities
 from app.chat.routines import start_routine as run_routine
-from app.chat.triage import Triager
 from app.coding.base import CodeAgentRunner
 from app.coding.decision import CodingDecisionEngine, CodingRunnerRegistry
 from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
@@ -46,7 +44,7 @@ from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.fake import ExecutionCancelled
 from app.execution.grocery_agent import GroceryAgentExecutor
 from app.execution.tool_agent import ToolAgentExecutor
-from app.integrations.factory import chat_client_chain, triage_client
+from app.integrations.factory import chat_client_chain
 from app.integrations.factory import provider_order as _provider_order
 from app.integrations.fallback import FallbackManagerModelClient
 from app.integrations.github import GitHubClient
@@ -875,23 +873,12 @@ def build_toolbox(
     abilities: set[str],
 ) -> Toolbox:
     """The chat agent's tools, limited to the abilities this server has."""
-    router = Triager(
-        repositories,
-        triage_client(settings) if settings.triage_model_enabled else None,
-        min_confidence=settings.triage_min_confidence,
-        research_available=settings.web_search_available,
-        groceries_available=True,
-    )
     tools = bookkeeping_tools(
         items=WorkItemService(database),
         memory=MemoryService(database),
         schedules=ScheduleService(database),
         notes=NoteService(database),
         tasks=task_service,
-        # A routine's route is decided once, when it is saved, like in the chat.
-        route=lambda instruction: routine_capabilities(
-            router, instruction, supervision=settings.supervisor_enabled
-        ),
     )
     if github is not None:
         tools += repository_tools(RepositoryReader(repositories, github))
@@ -1027,11 +1014,8 @@ def main() -> None:
         settings.ntfy_topic_url, token=settings.ntfy_token, public_url=settings.public_url
     )
 
-    # Routines saved before they were routed at creation fall back to keyword rules.
-    routine_fallback = Triager(repositories, groceries_available=True)
-
     def start_routine(schedule) -> str | None:
-        return run_routine(task_service, schedule, fallback=routine_fallback)
+        return run_routine(task_service, schedule)
 
     if not settings.worker_coding_only:
         logger.info(

@@ -1,3 +1,6 @@
+from tests.test_direct_actions import _do
+
+
 def test_memory_is_explicit_searchable_and_archivable(client) -> None:
     created = client.post(
         "/memories",
@@ -54,19 +57,19 @@ def test_the_model_gets_every_shared_memory_and_never_a_private_one(client) -> N
     assert service.for_groceries() == ["Jag äter inte kött"]
 
 
-def test_forget_in_chat_deletes_the_matching_memory(client) -> None:
+def test_forget_deletes_the_matching_memory(client) -> None:
     chat = client.post("/chat-sessions", json={}).json()["id"]
     service = client.app.state.memory_service
     service.create(kind="preference", content="I like window seats")
     service.create(kind="fact", content="My gym is SATS Odenplan")
 
-    reply = _say(client, chat, "Forget that I like window seats")["decision"]["result"]
+    reply = _do(client, chat, type="forget", text="I like window seats")
 
     assert reply == "Forgotten: I like window seats"
     assert [m["content"] for m in client.get("/memories").json()["memories"]] == [
         "My gym is SATS Odenplan"
     ]
-    missing = _say(client, chat, "forget my shoe size")["decision"]["result"]
+    missing = _do(client, chat, type="forget", text="my shoe size")
     assert missing.startswith("I don't have a memory about that")
 
 
@@ -74,7 +77,7 @@ def test_forget_never_repeats_a_private_memory(client) -> None:
     chat = client.post("/chat-sessions", json={}).json()["id"]
     client.app.state.memory_service.create(kind="fact", content="Door code 4711", private=True)
 
-    reply = _say(client, chat, "forget the door code")["decision"]["result"]
+    reply = _do(client, chat, type="forget", text="the door code")
 
     assert "4711" not in reply
     assert len(client.get("/memories").json()["memories"]) == 1

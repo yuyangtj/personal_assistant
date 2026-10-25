@@ -68,7 +68,7 @@ Importing the same export again adds only notes that are not there yet.
 | Table `notes` (title, body, checklist, tags, pinned, archived, source and its key) | `migrations/022_notes.sql`, `NoteModel` in `app/persistence/models.py` |
 | Rules, listing and the Keep import | `app/work/notes.py` (`NoteService`) |
 | API: `GET/POST /notes`, `PATCH/DELETE /notes/{id}`, `GET /notes/export`, `POST /notes/import/google-keep` | `app/api/notes.py` |
-| "note: …" in chat | `note_add` in `app/chat/direct_actions.py`, the rule in `app/chat/triage.py` |
+| "note: …" in chat | `note_add` in `app/chat/direct_actions.py`, the rule (`note_rule`) in the same file |
 | The tab | `app/web/static/notes.js`, `index.html`, `console.css` |
 
 `GET /notes?include_archived=true` returns every note (about 1 MB for 1,600); the page
