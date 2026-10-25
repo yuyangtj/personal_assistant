@@ -60,6 +60,10 @@ flowchart LR
       once, with a push;
     - a PR waiting for review gets one quiet reminder a day (`tasks.followed_up_at`).
   - When the agent promises to check something later, it sets a one-off routine then.
+- **Recent days.** A rolling summary across all chats (`app/work/digest.py`, table
+  `digests`): rewritten by a model call once the chats have been quiet for 10 minutes,
+  built from chat messages only (never Notes or private memories), and given to every
+  reply. It's shown read-only on the Memories page (`GET /digest`).
 - **Coding runs** are started, inspected, steered and stopped through the agent's coding
   tools. No tool can merge or deploy; those stay behind the approval token in the console.
 - **The reply agent knows the repositories.** Every chat reply is told which repositories

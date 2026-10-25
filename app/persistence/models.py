@@ -478,3 +478,18 @@ class NoteModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
+
+
+class DigestModel(Base):
+    """The assistant's rolling summary of recent days across all chats (kind "recent")."""
+
+    __tablename__ = "digests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: The newest chat message already folded into it.
+    through_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )

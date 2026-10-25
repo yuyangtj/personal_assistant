@@ -93,6 +93,11 @@
   {"name": "check-back-later", "about": "A promise to look again later is scheduled, not just said.", "turns": [
     {"say": "can you check the cheapest train from Stockholm to Copenhagen again tomorrow at 8 and tell me?", "expect": {"tools_any": ["routine_create"]}}
   ]},
+  {"name": "remembers-recent-days", "about": "Something said in one chat is remembered in another, through the summary of recent days.", "turns": [
+    {"say": "what's the weather usually like in Shanghai in mid November? I'll be there from the 12th to the 20th", "expect": {}},
+    {"summarize": true},
+    {"say": "when am I flying to Shanghai?", "expect": {"reply_any": ["12", "twelfth"]}}
+  ]},
   {"name": "stores-not-connected", "about": "Without the store gateway, a store question is answered honestly, nothing invented.", "turns": [
     {"say": "what's on offer at Willys this week?", "expect": {"reply_any": ["connect", "not available", "can't", "cannot", "don't have", "couldn't"], "or_tool": "research"}}
   ]}

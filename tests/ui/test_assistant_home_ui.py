@@ -65,3 +65,26 @@ def test_something_shared_with_no_chat_open_goes_to_assistant(
 
     eventually(lambda: _chat_id(page) == _home(api))
     expect(page.locator("#input")).to_have_value("https://example.com/recipe")
+
+
+def test_memories_shows_what_the_assistant_remembers_of_recent_days(
+    page: Page, live_server: str, live_app
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.work.digest import DigestJob, DigestWriter
+    from tests.fakes import ScriptedChat
+
+    page.goto(f"{live_server}/ui#/memories")
+    expect(page.locator("#recent-days")).to_be_hidden()  # nothing yet
+
+    service = live_app.state.task_service
+    chat = service.create_chat_session(title="Trip").id
+    service.append_chat_message(chat, content="flying to Shanghai on 12 November")
+    writer = DigestWriter(ScriptedChat('{"summary": "Flying to Shanghai on 12 November."}'))
+    later = datetime.now(UTC) + timedelta(minutes=11)
+    DigestJob(service.database, writer, clock=lambda: later).run_due()
+
+    page.reload()
+    expect(page.locator("#recent-days")).to_contain_text("Flying to Shanghai on 12 November.")
+    expect(page.locator("#recent-days-when")).to_contain_text("last updated")
