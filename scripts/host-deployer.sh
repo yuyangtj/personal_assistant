@@ -82,7 +82,7 @@ run_redeploy() {
     # Keep whichever conversation provider the operator last chose.
     provider="$(sed -n 's/^ASSISTANT_CONVERSATION_MODEL_PROVIDER=//p' "${ENV_FILE}" | tail -n 1)"
     case "${provider}" in
-        minimax|kimi) ;;
+        minimax|kimi|deepseek|gemini) ;;
         *) provider=minimax ;;
     esac
     ASSISTANT_DEPLOY_EXPECTED_SHA="${commit}" ASSISTANT_DEPLOY_ENV_FILE="${ENV_FILE}" \

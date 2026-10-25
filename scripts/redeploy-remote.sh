@@ -23,7 +23,7 @@ PROVIDER="${1:-}"
 source "${SCRIPT_DIRECTORY}/housekeeping.sh"
 
 usage() {
-    echo "Usage: $0 [minimax|kimi]  (default: keep the provider set in .env.remote)" >&2
+    echo "Usage: $0 [minimax|kimi|deepseek|gemini]  (default: keep the provider set in .env.remote)" >&2
 }
 
 wait_for_health() {
@@ -65,7 +65,7 @@ set_env_value() {
 }
 
 case "${PROVIDER}" in
-    ""|minimax|kimi) ;;
+    ""|minimax|kimi|deepseek|gemini) ;;
     *)
         usage
         exit 2
@@ -81,7 +81,7 @@ if [[ -z "${PROVIDER}" ]]; then
     # Keep the operator's current choice; only an explicit argument switches it.
     PROVIDER="$(sed -n 's/^ASSISTANT_CONVERSATION_MODEL_PROVIDER=//p' "${ENV_FILE}" | tail -n 1)"
     case "${PROVIDER}" in
-        minimax|kimi) ;;
+        minimax|kimi|deepseek|gemini) ;;
         *) PROVIDER=minimax ;;
     esac
 fi
@@ -119,8 +119,10 @@ if [[ -n "${EXPECTED_SHA}" ]]; then
 fi
 
 set_env_value "ASSISTANT_CONVERSATION_MODEL_PROVIDER" "${PROVIDER}"
-set_env_value "ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER" "auto"
-echo "Conversation provider: ${PROVIDER} (automatic fallback enabled)"
+# Keep a fallback the operator chose; only a missing one becomes "auto".
+FALLBACK="$(sed -n 's/^ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER=//p' "${ENV_FILE}" | tail -n 1)"
+set_env_value "ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER" "${FALLBACK:-auto}"
+echo "Conversation provider: ${PROVIDER} (fallback: ${FALLBACK:-auto})"
 
 # This script treats .env.remote as authoritative. Exported shell values otherwise
 # take precedence over --env-file and can silently retain an older provider or raw hash.
