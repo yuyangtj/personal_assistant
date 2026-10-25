@@ -5,7 +5,9 @@ import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
+import java.time.ZoneId
 import java.util.UUID
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -23,6 +25,8 @@ class ConsoleBridge(
     private val stopListening: () -> Unit,
     private val isAssistant: () -> Boolean? = { null },
     private val openAssistantSettings: () -> Unit = {},
+    /** Reads a reply's phone-action card from the console's server (see ServerActions). */
+    private val fetchServerAction: suspend (path: String) -> JSONObject? = { null },
 ) : WebViewCompat.WebMessageListener, VoiceInput.Listener {
     private var page: JavaScriptReplyProxy? = null
     /** Shared or screen context that arrived before the page said hello (cold start). */
@@ -60,6 +64,7 @@ class ConsoleBridge(
             "stop_speaking" -> speech.stop()
             "route" -> route(incoming)
             "run_action" -> runAction(incoming.id)
+            "offer_message_action" -> offerServerAction(incoming.id, incoming.text)
             "enable_on_device" -> scope.launch {
                 router.download { state ->
                     deviceAi = state
@@ -78,6 +83,34 @@ class ConsoleBridge(
                 UUID.randomUUID().toString().also { key -> proposedActions[key] = route.action }
             }
             send(BridgeProtocol.route(id, route, actionId))
+        }
+    }
+
+    /**
+     * A phone action a server reply proposed. Only the card's ids come from the page; the
+     * action itself is read from the server and checked here before it can be confirmed.
+     */
+    private fun offerServerAction(blockId: String?, reference: String?) {
+        val id = blockId ?: return
+        val path = reference?.let { ServerActions.path(it, id) }
+        if (path == null) {
+            send(BridgeProtocol.messageAction(id, null, null, "That action can't be read. Ask again."))
+            return
+        }
+        scope.launch {
+            val card = fetchServerAction(path)
+            val action = card?.takeIf { it.optString("id") == id }?.optJSONObject("action")
+                ?.let { ServerActions.toLocal(it, ZoneId.systemDefault()) }
+            if (action == null) {
+                send(
+                    BridgeProtocol.messageAction(
+                        id, null, null, "This phone can't do that action. Ask again with the details.",
+                    ),
+                )
+                return@launch
+            }
+            val key = UUID.randomUUID().toString().also { proposedActions[it] = action }
+            send(BridgeProtocol.messageAction(id, key, action.label, null))
         }
     }
 

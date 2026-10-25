@@ -116,3 +116,88 @@ def test_the_reply_card_shows_what_the_agent_is_doing(
     expect(page.locator("#transcript .taskcard")).to_contain_text(
         "Looking at Klarna", timeout=10000
     )
+
+
+def _timer_card(page: Page, live_app) -> tuple[str, str, str]:
+    """A reply with a proposed 10-minute timer, as the agent leaves it."""
+    chat_id = _chat_id(page)
+    service = live_app.state.task_service
+    posted = service.append_chat_message(chat_id, content="set a timer for 10 minutes")
+    service.create_task_from_message(chat_id, posted.message.id)
+    task = service.claim_next_task(worker_id="ui-test", lease_seconds=60)
+    execution = service.start_execution(
+        task.id, capability_id="conversation", executor_id="model-conversation", execution_input={}
+    )
+    service.start_validation(task.id, execution, output={"summary": "timer"})
+    service.complete_task(
+        task.id,
+        execution,
+        reply="A 10-minute timer for the pasta.",
+        action={"type": "set_timer", "seconds": 600, "label": "pasta"},
+    )
+    reply = service.list_chat_messages(chat_id)[-1]
+    (block,) = reply.blocks
+    return chat_id, reply.id, block["id"]
+
+
+def test_in_a_browser_a_phone_action_says_to_use_the_phone(
+    page: Page, live_server: str, live_app
+) -> None:
+    new_chat(page, live_server)
+    _timer_card(page, live_app)
+    page.reload()
+
+    expect(page.locator("#transcript .phone-action-note")).to_contain_text(
+        "Set a 10-minute timer: open the assistant on your phone", timeout=10000
+    )
+    expect(page.locator("#transcript [data-message-action]")).to_have_count(0)
+
+
+# A stand-in for the phone app's bridge: it records what the page asks and answers as the
+# app does once it has read and checked the action on the server.
+FAKE_PHONE = """
+window.sentToPhone = [];
+window.AndroidAssistant = {
+  postMessage(raw) {
+    const message = JSON.parse(raw);
+    window.sentToPhone.push(message);
+    const reply = (m) => setTimeout(() => this.onmessage({ data: JSON.stringify(m) }), 50);
+    if (message.type === "offer_message_action") {
+      reply({ type: "message_action", id: message.id, action: "native-1",
+              label: "Set a timer for 10 minutes" });
+    } else if (message.type === "run_action") {
+      reply({ type: "action_result", action: message.id });
+    }
+  },
+  onmessage: null,
+};
+"""
+
+
+def test_on_the_phone_a_proposed_timer_is_confirmed_and_marked_done(
+    page: Page, live_server: str, live_app
+) -> None:
+    page.add_init_script(FAKE_PHONE)
+    new_chat(page, live_server)
+    chat_id, message_id, block_id = _timer_card(page, live_app)
+    page.reload()
+
+    card = page.locator("#transcript .phone-action-card")
+    expect(card).to_contain_text("Set a timer for 10 minutes?", timeout=10000)
+    sent = page.evaluate("() => window.sentToPhone")
+    # The page names the card only; the app reads the action from the server.
+    assert {
+        "type": "offer_message_action",
+        "id": block_id,
+        "text": f"{chat_id}/{message_id}",
+    } in sent
+    assert not any("seconds" in str(message) for message in sent)
+
+    card.locator("[data-message-action]").click()
+
+    expect(page.locator("#transcript .upload-done")).to_contain_text(
+        "Set a timer for 10 minutes", timeout=10000
+    )
+    assert {"type": "run_action", "id": "native-1"} in page.evaluate("() => window.sentToPhone")
+    (block,) = live_app.state.task_service.list_chat_messages(chat_id)[-1].blocks
+    assert block["state"] == "done"

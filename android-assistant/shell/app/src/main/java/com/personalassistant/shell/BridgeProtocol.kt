@@ -7,7 +7,8 @@ import org.json.JSONObject
  *
  * The page can ask for voice, speech and on-device routing, and confirm an action the app
  * proposed. It can never describe an action itself: the app keeps the proposed actions and
- * the page only refers to one by the id the app gave it.
+ * the page only refers to one by the id the app gave it. For an action a server reply
+ * proposed, the page names the reply's card and the app reads the action from the server.
  */
 object BridgeProtocol {
     const val MAX_TEXT = 4_000
@@ -84,6 +85,16 @@ object BridgeProtocol {
         return message.toString()
     }
 
+    /** A reply's phone-action card, checked by the app: its label and id, or why not. */
+    fun messageAction(blockId: String, actionId: String?, label: String?, error: String?): String =
+        JSONObject()
+            .put("type", "message_action")
+            .put("id", blockId)
+            .apply {
+                if (error != null) put("error", error) else put("action", actionId).put("label", label)
+            }
+            .toString()
+
     fun actionResult(actionId: String, error: String?): String = JSONObject()
         .put("type", "action_result")
         .put("action", actionId)
@@ -99,6 +110,7 @@ object BridgeProtocol {
         "stop_speaking",
         "route",
         "run_action",
+        "offer_message_action",
         "enable_on_device",
     )
 }

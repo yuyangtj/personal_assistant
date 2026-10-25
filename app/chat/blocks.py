@@ -93,6 +93,31 @@ class UploadBlock(BaseModel):
     result: str | None = Field(default=None, max_length=300)
 
 
+class PhoneActionBlock(BaseModel):
+    """A timer, alarm or calendar draft the agent proposed, run on the phone after the user
+    confirms it there. The phone app fetches this block from the server itself and checks
+    the action again; the page only says which block it is."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["phone_action"] = "phone_action"
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    action: dict[str, Any]
+    state: Literal["open", "done", "cancelled"] = "open"
+    #: What happened, once settled ("Timer set", "No clock app on this phone").
+    result: str | None = Field(default=None, max_length=200)
+
+    @field_validator("action")
+    @classmethod
+    def a_valid_phone_action(cls, value: dict[str, Any]) -> dict[str, Any]:
+        from app.execution.actions import validate_action
+
+        action = validate_action(value)
+        if action is None:
+            raise ValueError("not a valid phone action")
+        return action
+
+
 class AttachmentBlock(BaseModel):
     """Context the user attached to their message, e.g. the text of the screen they were on.
 
@@ -168,6 +193,7 @@ Block = Annotated[
     | WorkflowBlock
     | ItemBlock
     | UploadBlock
+    | PhoneActionBlock
     | AttachmentBlock
     | ChartBlock
     | TableBlock,

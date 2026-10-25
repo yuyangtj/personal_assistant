@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -216,6 +216,45 @@ def upload_to_chat(
     service.append_chat_message(chat_session_id, content=f"📎 {body.filename}")
     service.append_chat_message(chat_session_id, content=reply, role="assistant")
     return {"reply": reply}
+
+
+@router.get("/chat-sessions/{chat_session_id}/messages/{message_id}/phone-actions/{block_id}")
+def get_phone_action(
+    chat_session_id: str, message_id: str, block_id: str, request: Request
+) -> dict:
+    """The phone action the agent proposed, for the phone app to check and run itself."""
+    try:
+        block = task_service(request).open_phone_action(chat_session_id, message_id, block_id)
+    except ChatMessageNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Action not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"id": block["id"], "action": block["action"]}
+
+
+class SettlePhoneActionRequest(BaseModel):
+    state: Literal["done", "cancelled"]
+    result: str = Field(default="", max_length=200)
+
+
+@router.post("/chat-sessions/{chat_session_id}/messages/{message_id}/phone-actions/{block_id}")
+def settle_phone_action(
+    chat_session_id: str,
+    message_id: str,
+    block_id: str,
+    body: SettlePhoneActionRequest,
+    request: Request,
+) -> dict:
+    """Done on the phone, or cancelled there: the card shows it and isn't offered again."""
+    try:
+        task_service(request).settle_phone_action(
+            chat_session_id, message_id, block_id, state=body.state, result=body.result
+        )
+    except ChatMessageNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Action not found") from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"state": body.state}
 
 
 class SharedFileRequest(BaseModel):

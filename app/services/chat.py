@@ -242,6 +242,41 @@ class ChatOperations(ServiceBase):
                     return dict(block)
             raise ChatMessageNotFoundError(block_id)
 
+    def open_phone_action(
+        self, chat_session_id: str, message_id: str, block_id: str
+    ) -> dict[str, Any]:
+        """The still-open phone action an assistant message in this chat proposed."""
+        with self.database.session() as session:
+            message = session.get(ChatMessageModel, message_id)
+            if (
+                message is None
+                or message.chat_session_id != chat_session_id
+                or message.role != "assistant"
+            ):
+                raise ChatMessageNotFoundError(message_id)
+            for block in message.blocks or []:
+                if block.get("type") == "phone_action" and block.get("id") == block_id:
+                    if block.get("state") != "open":
+                        raise ValueError("This action was already used; ask again")
+                    return dict(block)
+            raise ChatMessageNotFoundError(block_id)
+
+    def settle_phone_action(
+        self, chat_session_id: str, message_id: str, block_id: str, *, state: str, result: str
+    ) -> None:
+        """Mark a phone action done or cancelled, so it is never offered twice."""
+        self.open_phone_action(chat_session_id, message_id, block_id)
+        with self.database.session() as session, session.begin():
+            message = session.get(ChatMessageModel, message_id, with_for_update=True)
+            message.blocks = validate_blocks(
+                [
+                    {**block, "state": state, "result": result[:200] or None}
+                    if block.get("id") == block_id
+                    else block
+                    for block in message.blocks or []
+                ]
+            )
+
     def complete_upload(self, message_id: str, block_id: str, result: str) -> None:
         with self.database.session() as session, session.begin():
             message = session.get(ChatMessageModel, message_id, with_for_update=True)

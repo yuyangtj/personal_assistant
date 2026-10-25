@@ -5,7 +5,66 @@
 // replies, timers and alarms, and simple answers that stay on the phone. In a browser
 // none of this exists and the console works as before.
 const phone = { bridge: window.AndroidAssistant || null, caps: null, routes: new Map(), next: 0,
-                turns: {}, speakFor: null, listening: false, dictated: false, dictationBase: "", screen: null };
+                turns: {}, speakFor: null, listening: false, dictated: false, dictationBase: "", screen: null,
+                // Phone-action cards on replies, by block id: what the app said after
+                // checking the action itself ({ action, label } or { error }).
+                offers: {} };
+
+// What a proposed phone action does, in words; shown in a browser, where nothing can run.
+function describePhoneAction(action) {
+  if (action.type === "set_timer") {
+    const minutes = Math.round(action.seconds / 60);
+    return action.seconds < 120 ? `Set a ${action.seconds}-second timer` : `Set a ${minutes}-minute timer`;
+  }
+  if (action.type === "set_alarm") {
+    return `Set an alarm for ${String(action.hour).padStart(2, "0")}:${String(action.minute).padStart(2, "0")}`;
+  }
+  return `Add “${action.title}” to your calendar (${action.start.replace("T", " ")})`;
+}
+
+// The card on a reply that proposed a phone action. The page only names the block; the
+// app fetches the action from the server, checks it and gives the label shown here.
+BLOCKS.phone_action = (block, m) => {
+  if (block.state === "done") return `<div class="upload-done">✓ ${esc(block.result || "Done")}</div>`;
+  if (block.state === "cancelled") return `<div class="phone-action-note">Cancelled</div>`;
+  if (!phone.bridge) {
+    return `<div class="phone-action-note">📱 ${esc(describePhoneAction(block.action))}:`
+      + ` open the assistant on your phone to do it.</div>`;
+  }
+  const offer = phone.offers[block.id];
+  if (!offer) {
+    phone.offers[block.id] = { pending: true };
+    phoneSend({ type: "offer_message_action", id: block.id, text: `${state.chatId}/${m.id}` });
+    return `<div class="phone-action-note">Checking on the phone…</div>`;
+  }
+  if (offer.pending) return `<div class="phone-action-note">Checking on the phone…</div>`;
+  if (offer.error) return `<div class="phone-action-note">${esc(offer.error)}</div>`;
+  const busy = offer.running ? "disabled" : "";
+  return `<div class="phone-action-card"><div>${esc(offer.label)}?</div><div class="choices">`
+    + `<button type="button" data-message-action="${esc(block.id)}" data-message="${esc(m.id)}" ${busy}>Do it</button>`
+    + `<button type="button" class="quiet" data-message-cancel="${esc(block.id)}" data-message="${esc(m.id)}" ${busy}>Cancel</button>`
+    + `</div></div>`;
+};
+
+function settleMessageAction(blockId, messageId, settled, result) {
+  return api(`/chat-sessions/${state.chatId}/messages/${messageId}/phone-actions/${blockId}`, {
+    method: "POST", body: JSON.stringify({ state: settled, result: result || "" }),
+  }).then(() => refreshTranscript()).catch(fail);
+}
+
+function runMessageAction(blockId, messageId) {
+  const offer = phone.offers[blockId];
+  if (!offer || !offer.action || offer.running) return;
+  offer.running = true;
+  offer.message = messageId;
+  phoneSend({ type: "run_action", id: offer.action });
+  renderTranscript();
+}
+
+function cancelMessageAction(blockId, messageId) {
+  delete phone.offers[blockId];
+  settleMessageAction(blockId, messageId, "cancelled");
+}
 
 // Spoken replies: the phone does not say when it finishes, so "speaking" is an estimate
 // from the text length (it speaks at most 2,000 characters). Muting keeps the text only.
@@ -229,7 +288,22 @@ function onPhoneMessage(message) {
     const resolve = phone.routes.get(message.id);
     phone.routes.delete(message.id);
     if (resolve) resolve(message);
+  } else if (message.type === "message_action") {
+    // The app checked a reply's phone action: show its label with Do it / Cancel.
+    phone.offers[message.id] = message.error ? { error: message.error }
+      : { action: message.action, label: message.label };
+    renderTranscript();
   } else if (message.type === "action_result") {
+    const offered = Object.entries(phone.offers).find(([, offer]) => offer.action === message.action);
+    if (offered) {
+      const [blockId, offer] = offered;
+      delete phone.offers[blockId];
+      if (message.error) {
+        phone.offers[blockId] = { error: message.error };
+        renderTranscript();
+      } else settleMessageAction(blockId, offer.message, "done", offer.label);
+      return;
+    }
     addPhoneTurn({ role: "assistant", text: message.error || "Done." });
     renderTranscript();
   }

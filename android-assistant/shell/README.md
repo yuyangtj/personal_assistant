@@ -16,7 +16,10 @@ offered to the console through a small bridge (`ConsoleBridge`):
 
 The bridge is registered only for the console's own origin, and the page can never
 describe a phone action itself: the app proposes actions and the page can only confirm
-one by the id the app gave it.
+one by the id the app gave it. When a server reply proposes one (a calendar draft the
+phone didn't catch itself, say), the page names only the reply's card; the app reads the
+action from the server with the console login (`ServerActions`), checks it like its own,
+and shows its own label to confirm.
 
 ## Build and run
 
