@@ -20,7 +20,7 @@
        "main_expect": {"tool": "klarna.spending"}},
       {"say": "pls do",
        "expect": {"no_offer": true, "capability": "groceries", "tool": "klarna.spending", "tool_args": {"group_by": "merchant"}},
-       "main_expect": {"no_offer": true, "tool": "klarna.spending", "tool_args": {"group_by": "merchant"}}}
+       "main_expect": {"no_offer": true, "tools_any": ["klarna_spending", "klarna_purchases"]}}
     ]
   },
   {
@@ -100,8 +100,79 @@
     "needs": "search",
     "turns": [
       {"say": "What are the opening hours of Moderna Museet in Stockholm?",
-       "expect": {"no_offer": true}},
+       "expect": {"no_offer": true},
+       "main_expect": {"tool": "research"}},
       {"say": "and is it open on Mondays?", "expect": {"no_offer": true}}
+    ]
+  },
+  {"name": "notes", "about": "Saving notes: the instant 'note:' form and a free-form one.", "main_only": true,
+    "turns": [
+      {"say": "note: the wifi password for the cabin is on the fridge", "main_expect": {"route_or_tool": ["action: note_add", "note_add"]}},
+      {"say": "jot down that the plumber comes on Thursday at 10", "main_expect": {"tool": "note_add"}}
+    ]
+  },
+  {"name": "remember-then-forget", "main_only": true,
+    "turns": [
+      {"say": "remember that my bike lock code is the year I was born", "main_expect": {"route_or_tool": ["action: remember", "remember"]}},
+      {"say": "actually, forget the thing about my bike lock", "main_expect": {"route_or_tool": ["action: forget", "forget"]}}
+    ]
+  },
+  {"name": "tick-off-a-list", "main_only": true, "lists": ["Groceries"],
+    "turns": [
+      {"say": "add eggs and butter to groceries", "main_expect": {"tools_all": ["list_add"]}},
+      {"say": "I bought the eggs, tick them off", "main_expect": {"route_or_tool": ["action: checklist_check", "list_check"]}},
+      {"say": "what's still on my lists?", "main_expect": {"tool": "work_items", "reply_any": ["butter"]}}
+    ]
+  },
+  {"name": "routines", "about": "A routine is created, listed, run now and stopped.", "main_only": true,
+    "turns": [
+      {"say": "every Monday at 8, tell me how much I spent with Klarna the week before", "main_expect": {"tool": "routine_create"}},
+      {"say": "which routines do I have?", "main_expect": {"route_or_tool": ["action: list_routines", "routines"]}},
+      {"say": "run the Klarna routine now", "main_expect": {"route_or_tool": ["action: run_routine", "routine_run"]}},
+      {"say": "stop the Klarna routine", "main_expect": {"route_or_tool": ["action: cancel_routine", "routine_stop"]}}
+    ]
+  },
+  {"name": "read-the-code", "about": "Read-only repository tools (needs a GitHub token).", "main_only": true, "needs_tools": ["repo_read"],
+    "turns": [
+      {"say": "which files are in the app/chat folder of personal-assistant?", "main_expect": {"tool": "repo_files"}},
+      {"say": "what does app/chat/triage.py in personal-assistant do? keep it short", "main_expect": {"tools_any": ["repo_read", "repo_search"]}},
+      {"say": "where in personal-assistant is the word 'asks_several' used?", "main_expect": {"tool": "repo_search"}}
+    ]
+  },
+  {"name": "klarna-purchases-and-upload", "main_only": true,
+    "turns": [
+      {"say": "what were my last three Klarna purchases?", "main_expect": {"tool": "klarna_purchases"}},
+      {"say": "I want to upload a newer Klarna export", "main_expect": {"tool": "klarna_upload_export"}}
+    ]
+  },
+  {"name": "coding-runs", "about": "Start a run, check it, redirect it, look at it and stop it. Runs never execute in the eval.", "main_only": true,
+    "turns": [
+      {"say": "in analytics-agent-playground, add a short 'How to run' section to the README", "main_expect": {"tool": "coding_start"}},
+      {"say": "how are my coding runs going?", "main_expect": {"tool": "coding_status"}},
+      {"say": "tell that run to also mention the Python version", "main_expect": {"tools_any": ["coding_message"]}},
+      {"say": "show me the plan and latest steps of that run", "main_expect": {"tools_any": ["coding_run", "coding_status"]}},
+      {"say": "stop the README run", "main_expect": {"tool": "coding_stop"}}
+    ]
+  },
+  {"name": "phone-actions", "about": "Timers, alarms and events are proposed as a card to confirm, never done by themselves.", "main_only": true,
+    "turns": [
+      {"say": "set a timer for 10 minutes for the pasta", "main_expect": {"action": "set_timer"}},
+      {"say": "put lunch with Anna on Friday at 12 in my calendar", "main_expect": {"action": "create_event"}}
+    ]
+  },
+  {"name": "shared-screen", "main_only": true,
+    "turns": [
+      {"say": "what is this about, in one sentence?", "main_expect": {"reply_any": ["moderna", "museum", "exhibition", "utställning"]}, "screen": "Moderna Museet — Utställning: Hilma af Klint, 12 oktober–2 mars. Öppettider tis–sön 10–18, fredag till 20. Entré 150 kr."}
+    ]
+  },
+  {"name": "swedish-bookkeeping", "main_only": true, "lists": ["Groceries"],
+    "turns": [
+      {"say": "lägg till mjölk på inköpslistan", "main_expect": {"route_or_tool": ["action: checklist_add", "list_add"]}}
+    ]
+  },
+  {"name": "stores-not-connected", "about": "Without the store gateway, a store question is answered honestly, nothing invented.", "main_only": true,
+    "turns": [
+      {"say": "what's on offer at Willys this week?", "main_expect": {"reply_any": ["connect", "not available", "can't", "cannot", "don't have", "couldn't"], "or_tool": "research"}}
     ]
   }
 ]

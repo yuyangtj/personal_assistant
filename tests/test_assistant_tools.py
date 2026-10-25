@@ -205,6 +205,16 @@ def test_saying_it_is_done_without_a_tool_call_gets_one_nudge(
     executor, chat = agent(client, reply("Added it."), reply("Added it."))
     assert run(executor, chat_id, "add it").output["reply"] == "Added it."
     assert len(chat.requests) == 2
+    # Nor may it report a state it never looked up.
+    executor, chat = agent(client, reply("That run is already stopped."), reply("Let me check."))
+    run(executor, chat_id, "stop that run")
+    assert "made no tool call" in chat.requests[1][-1].content
+    # A lookup is not enough: saying it stopped something needs a tool that changes things.
+    executor, chat = agent(
+        client, call("coding_status"), reply("I've stopped the README run."), reply("Checking.")
+    )
+    run(executor, chat_id, "stop the README run")
+    assert "made no tool call" in chat.requests[2][-1].content
     # A plain answer is never questioned.
     executor, chat = agent(client, reply("Good morning!"))
     run(executor, chat_id, "good morning")

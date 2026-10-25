@@ -93,7 +93,8 @@ class Harness:
             database_url=f"sqlite+pysqlite:///{directory / 'eval.sqlite3'}",
             auto_create_schema=True,
             mcp_gateway_url=None,
-            github_token=None,
+            # Kept when set, so the read-only repository tools can be tested; nothing in the
+            # eval pushes (coding runs are never executed here).
             ntfy_topic_url=None,
             brief_writeback_enabled=False,
             main_agent_enabled=main_agent,
@@ -128,12 +129,13 @@ class Harness:
     def messages(self, chat: str) -> list[dict]:
         return self.client.get(f"/chat-sessions/{chat}/messages").json()["messages"]
 
-    def say(self, chat: str, text: str) -> dict:
+    def say(self, chat: str, text: str, *, screen: str | None = None) -> dict:
         """One turn: post it, queue a reply if nothing handled it, let the worker finish."""
         started = time.monotonic()
-        posted = self.client.post(
-            f"/chat-sessions/{chat}/messages", json={"content": text, **CLOCK}
-        ).json()
+        body: dict[str, Any] = {"content": text, **CLOCK}
+        if screen:  # the phone's screen, shared with the message
+            body["attachments"] = [{"kind": "screen", "app": "Chrome", "text": screen}]
+        posted = self.client.post(f"/chat-sessions/{chat}/messages", json=body).json()
         message_id = posted["message"]["id"]
         if not posted["decision"]["handled"]:
             self.client.post(
@@ -164,16 +166,30 @@ class Harness:
                 for task in tasks
             ],
             "tool_calls": self._tool_calls([task["id"] for task in tasks]),
+            "actions": [
+                output["action"].get("type")
+                for output in self._outputs([task["id"] for task in tasks])
+                if isinstance(output.get("action"), dict)
+            ],
         }
 
-    def _tool_calls(self, task_ids: list[str]) -> list[dict]:
+    def _outputs(self, task_ids: list[str]) -> list[dict]:
         with self.app.state.database.session() as session:
             outputs = session.scalars(
                 select(ExecutionModel.output).where(ExecutionModel.task_id.in_(task_ids))
             ).all()
+        return [output or {} for output in outputs]
+
+    def tool_names(self) -> list[str]:
+        """The chat agent's tools in this harness (store tools need the gateway)."""
+        agent = self.worker.executors.get("model-conversation")
+        return list(agent.toolbox.names) if agent is not None and agent.toolbox else []
+
+    def _tool_calls(self, task_ids: list[str]) -> list[dict]:
+        outputs = self._outputs(task_ids)
         calls = []
         for output in outputs:
-            calls += (output or {}).get("tool_calls") or []
+            calls += output.get("tool_calls") or []
             calls += [
                 {"tool": "search", "arguments": s} for s in (output or {}).get("searches") or []
             ]
@@ -224,10 +240,22 @@ def check(turn: dict, expect: dict) -> list[str]:
         if missing := [tool for tool in expect["tools_all"] if tool not in done]:
             called = [c.get("tool") for c in tools]
             problems.append(f"did not {', '.join(missing)}; calls: {called}")
+    if "tools_any" in expect:
+        called = {str(c.get("tool")).replace(".", "_") for c in tools if c.get("ok", True)}
+        if not called.intersection(expect["tools_any"]):
+            problems.append(f"called none of {expect['tools_any']}; calls: {sorted(called)}")
+    if "action" in expect and expect["action"] not in turn.get("actions", []):
+        problems.append(f"proposed no {expect['action']} card; actions: {turn.get('actions')}")
     if expect.get("chart") and not any(b.get("type") == "chart" for b in turn["blocks"]):
         problems.append("no chart")
     text = " ".join(replies).lower()
-    if "reply_any" in expect and not any(word.lower() in text for word in expect["reply_any"]):
+    # "or_tool": looking it up with that tool is as good as saying those words.
+    looked_up = expect.get("or_tool") in {c.get("tool") for c in turn["tool_calls"]}
+    if (
+        "reply_any" in expect
+        and not looked_up
+        and not any(word.lower() in text for word in expect["reply_any"])
+    ):
         problems.append(f"reply mentions none of {expect['reply_any']}")
     return problems
 
@@ -241,17 +269,23 @@ def _percentile(values: list[float], share: float) -> float:
     return ordered[min(len(ordered) - 1, int(len(ordered) * share))]
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("names", nargs="*", help="scenarios to run (default: all)")
-    parser.add_argument("--json", type=Path, help="save every turn here")
-    parser.add_argument(
-        "--main-agent", action="store_true", help="every message to the chat agent, no triage"
-    )
-    args = parser.parse_args()
-    scenarios = json.loads(SCENARIOS.read_text())
-    if args.names:
-        scenarios = [s for s in scenarios if s["name"] in args.names]
+def covered_tools(scenarios: list[dict]) -> set[str]:
+    """The tools some scenario expects to be called, in the chat agent's names."""
+    names: set[str] = set()
+    for scenario in scenarios:
+        for step in scenario["turns"]:
+            for expect in (step.get("expect") or {}, step.get("main_expect") or {}):
+                if "tool" in expect:
+                    names.add(expect["tool"])
+                names.update(expect.get("tools_all", []))
+                names.update(expect.get("tools_any", []))
+                if "route_or_tool" in expect:
+                    names.add(expect["route_or_tool"][1])
+    return {name.replace(".", "_") for name in names}
+
+
+def run_scenarios(args: argparse.Namespace, scenarios: list[dict]) -> dict[str, Any]:
+    """One pass over the scenarios on a fresh database."""
     with tempfile.TemporaryDirectory() as directory:
         harness = Harness(Path(directory), main_agent=args.main_agent)
         settings = harness.settings
@@ -269,13 +303,19 @@ def main() -> None:
                 if scenario.get("needs") == "search" and not harness.search:
                     print(f"- {scenario['name']}: skipped (no search key)")
                     continue
+                if scenario.get("main_only") and not args.main_agent:
+                    continue  # only the one-assistant path has these tools
+                needed = scenario.get("needs_tools", [])
+                if missing := [name for name in needed if name not in harness.tool_names()]:
+                    print(f"- {scenario['name']}: skipped (no {', '.join(missing)} here)")
+                    continue
                 chat = harness.client.post("/chat-sessions", json={}).json()["id"]
                 for title in scenario.get("lists", []):
                     harness.client.post("/work-items", json={"title": title, "kind": "list"})
                 ok = True
                 print(f"- {scenario['name']}")
                 for step in scenario["turns"]:
-                    turn = harness.say(chat, step["say"])
+                    turn = harness.say(chat, step["say"], screen=step.get("screen"))
                     expect = step.get("expect") or {}
                     if args.main_agent and "main_expect" in step:
                         expect = step["main_expect"]
@@ -305,8 +345,70 @@ def main() -> None:
         "p90_s": round(_percentile(seconds, 0.9), 1) if seconds else None,
     }
     print(json.dumps(summary))
+    return {"summary": summary, "turns": results, "seconds": seconds}
+
+
+def coverage(args: argparse.Namespace, scenarios: list[dict]) -> int:
+    """Every chat-agent tool in this setup should be expected by some scenario."""
+    with tempfile.TemporaryDirectory() as directory:
+        harness = Harness(Path(directory), main_agent=True)
+        try:
+            tools = harness.tool_names()
+        finally:
+            harness.close()
+    covered = covered_tools(scenarios)
+    missing = [name for name in tools if name not in covered]
+    print(f"{len(tools) - len(missing)}/{len(tools)} chat-agent tools have a scenario")
+    for name in missing:
+        print(f"  no scenario: {name}")
+    return 1 if missing else 0
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("names", nargs="*", help="scenarios to run (default: all)")
+    parser.add_argument("--json", type=Path, help="save every turn here")
+    parser.add_argument(
+        "--main-agent", action="store_true", help="every message to the chat agent, no triage"
+    )
+    parser.add_argument("--repeat", type=int, default=1, help="run everything this many times")
+    parser.add_argument(
+        "--coverage", action="store_true", help="list chat-agent tools no scenario tests"
+    )
+    args = parser.parse_args()
+    scenarios = json.loads(SCENARIOS.read_text())
+    if args.coverage:
+        sys.exit(coverage(args, scenarios))
+    if args.names:
+        scenarios = [s for s in scenarios if s["name"] in args.names]
+    runs = []
+    for number in range(args.repeat):
+        if args.repeat > 1:
+            print(f"== run {number + 1} of {args.repeat}")
+        runs.append(run_scenarios(args, scenarios))
+    if args.repeat > 1:
+        # The release gate: a turn that failed in any run is a flaky one.
+        flaky: dict[str, int] = {}
+        for run in runs:
+            for turn in run["turns"]:
+                if turn["problems"]:
+                    key = f"{turn['scenario']}: {turn['said'][:60]!r}"
+                    flaky[key] = flaky.get(key, 0) + 1
+        seconds = [value for run in runs for value in run["seconds"]]
+        print(
+            json.dumps(
+                {
+                    "runs": args.repeat,
+                    "all_green": not flaky,
+                    "median_s": round(statistics.median(seconds), 1) if seconds else None,
+                    "p90_s": round(_percentile(seconds, 0.9), 1) if seconds else None,
+                }
+            )
+        )
+        for key, count in sorted(flaky.items()):
+            print(f"  failed in {count} of {args.repeat} runs: {key}")
     if args.json:
-        args.json.write_text(json.dumps({"summary": summary, "turns": results}, indent=2))
+        args.json.write_text(json.dumps([run | {"seconds": None} for run in runs], indent=2))
 
 
 if __name__ == "__main__":
