@@ -5,7 +5,7 @@
   ]},
   {"name": "klarna-pls-do", "about": "The assistant offers something; the user just says 'pls do'.", "turns": [
     {"say": "What did I spend with Klarna in September? Should I look at it per merchant too?", "expect": {"tool": "klarna.spending"}},
-    {"say": "pls do", "expect": {"no_offer": true, "tools_any": ["klarna_spending", "klarna_purchases"]}}
+    {"say": "pls do", "expect": {"no_offer": true, "tools_any": ["klarna_spending", "klarna_purchases", "note_add"]}}
   ]},
   {"name": "reminder-in-a-shopping-chat", "about": "A bookkeeping action in the middle of a Klarna conversation must not go to the shopping agent.", "turns": [
     {"say": "How much have I spent at Lidl with Klarna?", "expect": {"tool": "klarna.spending", "reply_any": ["Lidl"]}},

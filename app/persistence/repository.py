@@ -217,6 +217,7 @@ class TaskRepository:
             and not task.required_capabilities
             and not context.get("schedule_id")
             and not context.get("repository_id")
+            and not context.get("report")
         )
 
     @staticmethod

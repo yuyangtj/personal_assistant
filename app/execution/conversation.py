@@ -46,6 +46,8 @@ _CLAIMS_DONE = re.compile(
     # A promise it ends the turn on ("I'll stop the README run now"), without a call.
     r"\bi(?:'ll| will)\s+(?:now\s+)?(?:stop|cancel|start|add|save|note|remind|remember)\b"
     r"[^?]*\bnow\b[^?]*$|"
+    # A promise to look that ends the turn ("let me get the actual status for you").
+    r"\blet me (?:get|check|look|find|pull|fetch|see)\b|"
     # A state it can only know from a tool ("that run is already stopped").
     r"\b(?:i've|i have)\s+(?:stopped|cancell?ed|forgotten|deleted|removed)\b|"
     # A reply that opens with the result ("Stopped, the README run won't go further.").
@@ -53,6 +55,15 @@ _CLAIMS_DONE = re.compile(
     r"forgotten|deleted|removed|started)\b(?:\s*[,.!:—-]|\s+(?:it|that|the|your)\b)|"
     r"\b(?:is|was|has been)\s+already\s+(?:stopped|cancell?ed|done|finished)\b",
     re.IGNORECASE,
+)
+#: A report of finished background work, written for the Assistant conversation.
+REPORT = (
+    "This is not a message from the user: background work they asked for has finished, "
+    "and you are telling them about it in your main conversation. In a few short lines, "
+    "in your own voice, say what came back and what needs them (a PR to review, something "
+    "that failed). Don't repeat full results: they are in the chat each piece came from, "
+    'and links to them are added under your message. Add "notable": true to your JSON '
+    "only when something here is worth a phone notification right now; otherwise false."
 )
 #: Said only in the one "Assistant" conversation the app opens in.
 HOME_CONVERSATION = (
@@ -369,6 +380,8 @@ class ConversationExecutor:
         routine = routine_prompt(context)
         if routine:
             messages.append(ChatMessage("system", routine))
+        if context.get("report"):
+            messages.append(ChatMessage("system", REPORT))
         attached = attachments_prompt(context)
         if attached:
             messages.append(ChatMessage("system", attached))

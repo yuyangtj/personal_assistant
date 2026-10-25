@@ -43,7 +43,16 @@ flowchart LR
   the avatar on by default. The agent is told there that it speaks for everything, and in
   every chat it can look across all of them: `overview` (background work, coding runs and
   PRs waiting for review, routines; `app/assistant/everything.py`), `chats` and `chat_read`.
-  Results still post in the chat that started the work; reporting them to Assistant is next.
+  Results still post in full in the chat that started the work.
+- **Workers report to Assistant** (`app/assistant/reporter.py`, run on the scheduler loop).
+  - Finished background work (research, routine runs, coding runs: completed, failed or with
+    a PR to review) is gathered once nothing new has finished for 30 s, or after 2 minutes at
+    most. `tasks.reported_at` marks what was told.
+  - It becomes one report in Assistant, written by the chat agent in a few lines, with links
+    to each result.
+  - It pushes to the phone only for the must-knows (a PR to review, a failure, a watch that
+    triggered) or when the agent marks the report notable.
+  - If no model can write it, a plain list is posted instead. Deployments keep their own push.
 - **Coding runs** are started, inspected, steered and stopped through the agent's coding
   tools. No tool can merge or deploy; those stay behind the approval token in the console.
 - **The reply agent knows the repositories.** Every chat reply is told which repositories

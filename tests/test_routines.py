@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
+from app.assistant.reporter import Reporter
 from app.capabilities import CapabilityRegistry
 from app.chat.routines import start_routine
 from app.execution.conversation import ConversationExecutor
@@ -71,7 +72,7 @@ def test_a_routine_saved_in_chat_runs_the_chat_agent_and_a_watch_is_quiet(
     assert not client.app.state.task_service.get_task(task_id).required_capabilities
 
 
-def test_a_run_compares_with_earlier_runs_and_pushes_its_result(service: TaskService) -> None:
+def test_a_run_compares_with_earlier_runs(service: TaskService) -> None:
     routine = _routine(service, "Summarize my Klarna spending this month")
     model = RecordingChatClient(
         ['{"reply": "4,213 kr so far."}', '{"reply": "4,980 kr, up 18% on last time."}']
@@ -86,14 +87,11 @@ def test_a_run_compares_with_earlier_runs_and_pushes_its_result(service: TaskSer
 
     second_prompt = "\n".join(message.content for message in model.calls[1])
     assert "Earlier runs of this routine" in second_prompt and "4,213 kr so far." in second_prompt
-    assert [body for _, body, _ in notifier.sent] == [
-        "4,213 kr so far.",
-        "4,980 kr, up 18% on last time.",
-    ]
-    assert notifier.sent[0][0] == "Routine: Summarize my Klarna spending this month"
+    # No push of its own: the result goes to the Assistant's report (see test_reporter.py).
+    assert notifier.sent == []
 
 
-def test_a_watch_pushes_only_when_the_result_is_notable(service: TaskService) -> None:
+def test_only_a_watch_that_triggered_is_a_must_know(service: TaskService) -> None:
     routine = _routine(service, "tell me when coffee is under 50 kr", quiet=True)
     model = RecordingChatClient(
         [
@@ -109,7 +107,14 @@ def test_a_watch_pushes_only_when_the_result_is_notable(service: TaskService) ->
         worker.run_once()
 
     assert "This routine is a watch" in "\n".join(m.content for m in model.calls[0])
-    assert [body for _, body, _ in notifier.sent] == ["Down to 45 kr this week!"]
+    assert notifier.sent == []
+    # The run that triggered is a must-know in the Assistant's report; the other is not.
+    report = Reporter(service, service.database).run_due(now=datetime.now(UTC) + timedelta(hours=1))
+    items = service.get_task(report).source_context["report"]
+    assert [(item["result"], item["must_push"]) for item in items] == [
+        ("Still 54 kr.", False),
+        ("Down to 45 kr this week!", True),
+    ]
 
 
 def test_an_old_routine_goes_to_the_chat_agent_unless_it_is_research(
