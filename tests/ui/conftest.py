@@ -31,8 +31,20 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 @pytest.fixture
-def live_server(tmp_path: Path) -> Iterator[str]:
-    """The app on a free port with an empty database; yields its address."""
+def live_server(server: tuple[str, object]) -> str:
+    """The app's address (see ``server``)."""
+    return server[0]
+
+
+@pytest.fixture
+def live_app(server: tuple[str, object]):
+    """The running app itself, to put a test's data straight into its services."""
+    return server[1]
+
+
+@pytest.fixture
+def server(tmp_path: Path) -> Iterator[tuple[str, object]]:
+    """The app on a free port with an empty database; yields its address and the app."""
     app = create_app(
         Settings(
             database_url=f"sqlite+pysqlite:///{tmp_path / 'ui.sqlite3'}", auto_create_schema=True
@@ -47,7 +59,7 @@ def live_server(tmp_path: Path) -> Iterator[str]:
             raise RuntimeError("the test server did not start")
         time.sleep(0.02)
     port = server.servers[0].sockets[0].getsockname()[1]
-    yield f"http://127.0.0.1:{port}"
+    yield f"http://127.0.0.1:{port}", app
     server.should_exit = True
     thread.join(10)
     app.state.database.dispose()
