@@ -61,10 +61,6 @@ document.addEventListener("click", (e) => {
   if (messageAction) return runMessageAction(messageAction.dataset.messageAction, messageAction.dataset.message);
   const messageCancel = e.target.closest("[data-message-cancel]");
   if (messageCancel) return cancelMessageAction(messageCancel.dataset.messageCancel, messageCancel.dataset.message);
-  const phoneAction = e.target.closest("[data-phone-action]");
-  if (phoneAction) return runPhoneAction(phoneAction.dataset.phoneAction);
-  const phoneCancel = e.target.closest("[data-phone-cancel]");
-  if (phoneCancel) return cancelPhoneAction(phoneCancel.dataset.phoneCancel);
   const removeEntry = e.target.closest("[data-remove-entry]");
   if (removeEntry && state.itemId) {
     return api(`/work-items/${state.itemId}/checklist/${removeEntry.dataset.removeEntry}`, { method: "DELETE" })
@@ -76,7 +72,7 @@ document.addEventListener("click", (e) => {
   if (choice && !choice.disabled && !state.busy) {
     // Picking a choice is just saying it: the label goes in as your next message.
     clearError();
-    return send(choice.dataset.choice, { local: false });
+    return send(choice.dataset.choice);
   }
 
 });
