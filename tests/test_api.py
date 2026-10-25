@@ -442,7 +442,7 @@ def test_chat_session_can_be_created_listed_resumed_and_populated(client: TestCl
     assert resumed.status_code == 200
     assert resumed.json()["title"] == "Plan my afternoon"
 
-    sessions = client.get("/chat-sessions").json()["sessions"]
+    sessions = [c for c in client.get("/chat-sessions").json()["sessions"] if not c["home"]]
     assert [session["id"] for session in sessions] == [chat["id"]]
 
     tasks = client.get(f"/chat-sessions/{chat['id']}/tasks").json()["tasks"]

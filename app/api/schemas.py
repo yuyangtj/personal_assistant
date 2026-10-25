@@ -90,6 +90,8 @@ class ChatSessionResponse(BaseModel):
     title: str
     archived: bool
     pinned: bool = False
+    #: The one "Assistant" conversation the app opens in.
+    home: bool = False
     #: Where its latest coding work was, for grouping the chat list.
     repository_id: str | None = None
     created_at: datetime

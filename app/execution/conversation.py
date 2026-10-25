@@ -54,6 +54,13 @@ _CLAIMS_DONE = re.compile(
     r"\b(?:is|was|has been)\s+already\s+(?:stopped|cancell?ed|done|finished)\b",
     re.IGNORECASE,
 )
+#: Said only in the one "Assistant" conversation the app opens in.
+HOME_CONVERSATION = (
+    "This is the user's main conversation with you, the one the app opens in. They talk to "
+    "you here about everything: their other chats, the work running in the background, "
+    'what is waiting for them. For "what\'s going on" and the like, look with overview; '
+    "to see what was said in another chat, use chats and chat_read."
+)
 DID_NOTHING = (
     "You said that is done, but you made no tool call, so nothing happened. If the user "
     "asked for it, make the tool calls now; otherwise answer again without claiming it."
@@ -311,6 +318,8 @@ class ConversationExecutor:
             + (RESEARCH_HANDOFF if self.research_available and not research_tool else "")
         )
         messages = [ChatMessage("system", f"{prompt}\n{self._clock(context)}")]
+        if context.get("home"):
+            messages.append(ChatMessage("system", HOME_CONVERSATION))
         parent = context.get("parent_task")
         if isinstance(parent, dict):
             # A curated snapshot assembled by the backend, never raw task output.

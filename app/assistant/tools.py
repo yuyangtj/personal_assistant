@@ -463,3 +463,50 @@ def store_tools(gateway: Any, toolset: Any) -> list[AssistantTool]:
                 )
             )
     return tools
+
+
+def overview_tools(database: Any, supervisor: Any) -> list[AssistantTool]:
+    """Look across every chat: the work going on, the routines, other conversations."""
+    from app.assistant.everything import background_work, read_chat, recent_chats, routines
+
+    def overview(arguments: dict[str, Any], context: ToolContext) -> str:
+        coding, _ = supervisor.overview(context.chat_session_id)
+        return "\n\n".join([background_work(database), coding, routines(database)])
+
+    def chat_read(arguments: dict[str, Any], context: ToolContext) -> str:
+        wanted = _text(arguments, "chat")
+        found = read_chat(database, wanted)
+        if found is None:
+            raise ToolError(f"no chat is called anything like {wanted!r}; look with chats")
+        return found
+
+    return [
+        AssistantTool(
+            "overview",
+            "overview",
+            "{}",
+            "everything going on across all the user's chats: background work in progress "
+            "or finished today, coding runs and PRs waiting for review, and routines",
+            overview,
+            lambda a: "Looking at everything going on",
+            changes=False,
+        ),
+        AssistantTool(
+            "chats",
+            "overview",
+            "{}",
+            "the user's recent conversations, with the last reply in each",
+            lambda a, c: recent_chats(database),
+            lambda a: "Looking at your chats",
+            changes=False,
+        ),
+        AssistantTool(
+            "chat_read",
+            "overview",
+            '{"chat": "<its title, or words from it>"}',
+            "the latest messages of another conversation",
+            chat_read,
+            lambda a: f"Reading “{_short(str(a.get('chat') or 'a chat'), 40)}”",
+            changes=False,
+        ),
+    ]

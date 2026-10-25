@@ -35,6 +35,7 @@ from app.chat.uploads import MAX_UPLOAD_CHARACTERS, TARGETS, UploadError, detect
 from app.services import (
     ChatMessageNotFoundError,
     ChatSessionNotFoundError,
+    HomeChatError,
     MessageHasWorkflowError,
     TaskNotFoundError,
 )
@@ -68,6 +69,10 @@ def list_chat_sessions(
 ) -> ChatSessionListResponse:
     service = task_service(request)
     sessions = service.list_chat_sessions(limit=limit, archived=archived)
+    if not archived:
+        # Assistant always comes first, however long ago it was last used.
+        home = service.home_chat()
+        sessions = [home, *[chat for chat in sessions if chat.id != home.id]]
     repositories = service.chat_repositories([chat.id for chat in sessions])
     return ChatSessionListResponse(
         sessions=[
@@ -90,7 +95,15 @@ def update_chat_session(
         )
     except ChatSessionNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error
+    except HomeChatError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return ChatSessionResponse.model_validate(chat)
+
+
+@router.get("/chat-sessions/home", response_model=ChatSessionResponse)
+def get_home_chat(request: Request) -> ChatSessionResponse:
+    """The one "Assistant" conversation the app opens in (made on first use)."""
+    return ChatSessionResponse.model_validate(task_service(request).home_chat())
 
 
 @router.delete("/chat-sessions/{chat_session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -100,6 +113,8 @@ def delete_chat_session(chat_session_id: str, request: Request) -> None:
         task_service(request).delete_chat_session(chat_session_id)
     except ChatSessionNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error
+    except HomeChatError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.get("/chat-sessions/{chat_session_id}", response_model=ChatSessionResponse)

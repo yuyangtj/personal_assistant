@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 
 from app.chat.blocks import validate_blocks
 from app.domain.enums import EventType, TaskStatus
@@ -26,9 +27,11 @@ from app.persistence.repository import ChatMessageRepository, ChatSessionReposit
 from app.services.base import ServiceBase
 from app.services.common import (
     DEFAULT_CHAT_TITLE,
+    HOME_CHAT_TITLE,
     MAX_HISTORY_TURNS,
     ChatMessageNotFoundError,
     ChatSessionNotFoundError,
+    HomeChatError,
     MessageHasWorkflowError,
     PostedMessage,
     _chat_title,
@@ -68,6 +71,28 @@ class ChatOperations(ServiceBase):
             session.flush()
             return chat_session
 
+    def home_chat(self) -> ChatSessionModel:
+        """The one "Assistant" conversation, created the first time it is asked for."""
+        with self.database.session() as session:
+            found = session.scalars(
+                select(ChatSessionModel).where(ChatSessionModel.home.is_(True))
+            ).first()
+            if found is not None:
+                return found
+        try:
+            with self.database.session() as session, session.begin():
+                home = ChatSessionModel(id=str(uuid4()), title=HOME_CHAT_TITLE, home=True)
+                session.add(home)
+                session.flush()
+                return home
+        except IntegrityError:  # two first calls at once: the other one made it
+            return self.home_chat()
+
+    def is_home_chat(self, chat_session_id: str) -> bool:
+        with self.database.session() as session:
+            chat = ChatSessionRepository.get(session, chat_session_id)
+            return bool(chat and chat.home)
+
     def get_chat_session(self, chat_session_id: str) -> ChatSessionModel:
         with self.database.session() as session:
             chat_session = ChatSessionRepository.get(session, chat_session_id)
@@ -93,8 +118,11 @@ class ChatOperations(ServiceBase):
             if archived:
                 changes["pinned"] = False
         with self.database.session() as session, session.begin():
-            if ChatSessionRepository.get(session, chat_session_id) is None:
+            chat_session = ChatSessionRepository.get(session, chat_session_id)
+            if chat_session is None:
                 raise ChatSessionNotFoundError(chat_session_id)
+            if chat_session.home and archived:
+                raise HomeChatError("The Assistant conversation can't be archived.")
             if changes:
                 # Keeping updated_at as it is stops the column's onupdate from bumping it.
                 session.execute(
@@ -111,6 +139,8 @@ class ChatOperations(ServiceBase):
             chat_session = ChatSessionRepository.get(session, chat_session_id)
             if chat_session is None:
                 raise ChatSessionNotFoundError(chat_session_id)
+            if chat_session.home:
+                raise HomeChatError("The Assistant conversation can't be deleted.")
             for model in (TaskModel, WorkflowRunModel, MemoryModel, ScheduleModel):
                 column = (
                     model.source_chat_session_id if model is MemoryModel else model.chat_session_id

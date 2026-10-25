@@ -150,7 +150,8 @@ function setScreen(screen) {
 // so the chat box and the chip are on screen.
 async function ensureChatOpen() {
   if (state.chatId && parseRoute().id === state.chatId) return;
-  const chat = state.chatId || (await api("/chat-sessions", { method: "POST", body: "{}" })).id;
+  // With no chat open, what arrives from other apps goes to Assistant.
+  const chat = state.chatId || state.homeId || (await api("/chat-sessions/home")).id;
   go({ section: "chats", id: chat });
   await render();
   loadChats();

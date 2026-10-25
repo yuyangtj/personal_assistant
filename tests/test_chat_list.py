@@ -10,7 +10,8 @@ def _chat(client: TestClient, title: str) -> str:
 
 
 def _listed(client: TestClient, query: str = "") -> dict[str, dict]:
-    return {c["title"]: c for c in client.get(f"/chat-sessions{query}").json()["sessions"]}
+    sessions = client.get(f"/chat-sessions{query}").json()["sessions"]
+    return {c["title"]: c for c in sessions if not c["home"]}  # Assistant always leads
 
 
 def test_pinning_and_archiving_keep_a_chat_in_its_place_in_time(client: TestClient) -> None:

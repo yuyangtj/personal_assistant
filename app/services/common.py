@@ -21,6 +21,10 @@ class ChatSessionNotFoundError(LookupError):
     pass
 
 
+class HomeChatError(ValueError):
+    """The home conversation ("Assistant") can't be archived or deleted."""
+
+
 class ChatMessageNotFoundError(LookupError):
     pass
 
@@ -57,6 +61,7 @@ MAX_HISTORY_TURNS = 6
 
 
 DEFAULT_CHAT_TITLE = "New conversation"
+HOME_CHAT_TITLE = "Assistant"
 
 
 def _reply_payload(text: str, *, emotion: str, intensity: float, outcome: str) -> dict[str, Any]:

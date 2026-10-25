@@ -13,6 +13,7 @@ async function openChat(id) {
     renderFocusBar();
   }
   await Promise.all([loadChats(), refreshTranscript()]);
+  window.applyAvatarForChat?.();
 }
 
 // While something runs the page looks again quickly at first, then gently; it doesn't look

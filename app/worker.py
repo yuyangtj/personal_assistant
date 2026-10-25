@@ -18,6 +18,7 @@ from app.assistant.tools import (
     bookkeeping_tools,
     coding_tools,
     job_tools,
+    overview_tools,
     repository_tools,
     store_tools,
 )
@@ -572,6 +573,9 @@ class TaskWorker:
             # relevance.
             if self.memory_service is not None and executor.id == "model-conversation":
                 execution_context["memories"] = self.memory_service.for_model()
+            # The one "Assistant" conversation: the reply is told it speaks for everything.
+            if task.chat_session_id and self.service.is_home_chat(task.chat_session_id):
+                execution_context["home"] = True
             result = executor.execute(
                 task_id=task.id,
                 request=task.original_request,
@@ -819,9 +823,9 @@ def build_toolbox(
     tools += shopping
     tools += job_tools(task_service, research=settings.web_search_available)
     if not settings.worker_coding_only:
-        tools += coding_tools(
-            SupervisorTools(database, task_service, workflow_service, repositories)
-        )
+        supervisor = SupervisorTools(database, task_service, workflow_service, repositories)
+        tools += coding_tools(supervisor)
+        tools += overview_tools(database, supervisor)
     return Toolbox(tools, abilities=abilities)
 
 

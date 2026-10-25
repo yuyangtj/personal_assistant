@@ -38,6 +38,12 @@ flowchart LR
   decides: it listens, speaks, and runs the timers, alarms and events a reply proposes as
   a card. (Triage, offers and the phone's on-device router were removed on 2026-10-25:
   most small bugs came from handing messages between deciders.)
+- **One Assistant conversation.** The app opens in "Assistant", a permanent conversation
+  (`chat_sessions.home`, `GET /chat-sessions/home`) that can't be archived or deleted, with
+  the avatar on by default. The agent is told there that it speaks for everything, and in
+  every chat it can look across all of them: `overview` (background work, coding runs and
+  PRs waiting for review, routines; `app/assistant/everything.py`), `chats` and `chat_read`.
+  Results still post in the chat that started the work; reporting them to Assistant is next.
 - **Coding runs** are started, inspected, steered and stopped through the agent's coding
   tools. No tool can merge or deploy; those stay behind the approval token in the console.
 - **The reply agent knows the repositories.** Every chat reply is told which repositories

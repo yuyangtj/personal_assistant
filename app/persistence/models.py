@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -31,12 +32,24 @@ class Base(DeclarativeBase):
 
 class ChatSessionModel(Base):
     __tablename__ = "chat_sessions"
+    __table_args__ = (
+        # At most one home conversation ("Assistant").
+        Index(
+            "ux_chat_sessions_home",
+            "home",
+            unique=True,
+            postgresql_where=text("home"),
+            sqlite_where=text("home"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     #: Hidden from the chat list; still works, and a new user message brings it back.
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: The one "Assistant" conversation the app opens in; it can't be archived or deleted.
+    home: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
