@@ -313,10 +313,14 @@ def test_runtime_coding_agent_is_opt_in_and_requires_scoped_configuration() -> N
 def test_runtime_builds_configured_coding_pull_request_executor(tmp_path) -> None:
     repository = tmp_path / "repository"
     repository.mkdir()
+    codex_home = tmp_path / "codex-home"  # Codex is offered only with a ChatGPT login
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text("{}")
     executor = build_coding_executor(
         Settings(
             code_agent_enabled=True,
             code_agent_providers="codex",
+            codex_home=codex_home,
             code_repository_path=repository,
             code_worktree_root=tmp_path / "worktrees",
             code_agent_executable="/opt/codex",
