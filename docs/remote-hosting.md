@@ -466,3 +466,24 @@ the PostgreSQL container.
 For a public multi-user service, replace this single-operator login with real accounts,
 per-user authorization, rate limiting, and audit/retention policies. The stack is
 intended for one trusted operator.
+
+## The Live2D avatar (Ren)
+
+The console's avatar can be a Live2D model instead of its own drawing. Live2D's SDK and the
+model are under Live2D's licences and must not go into this (public) repository, so they
+are built on your Mac and copied to the server by hand. Without them, the console draws its
+own avatar.
+
+1. Download the **Cubism SDK for Web** and a model (for example the sample model Ren) from
+   live2d.com, accepting their licences.
+2. Build and copy, from the repository on your Mac:
+
+   ```bash
+   scripts/build_live2d.sh ~/Downloads/CubismSdkForWeb-5-r.5 ~/Downloads/ren_en/runtime ./avatar-assets
+   rsync -a --delete ./avatar-assets/ assistant-deploy@<server>:/srv/personal-assistant/avatar-assets/
+   ```
+
+3. Nothing to restart: the API serves the folder at `/ui/avatar-assets/` (read-only mount,
+   `ASSISTANT_AVATAR_ASSETS_DIR`), behind the console's login. Reload the console.
+
+To swap the model, build again with another model's `runtime` folder and copy again.

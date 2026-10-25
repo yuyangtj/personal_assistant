@@ -15,3 +15,6 @@ backups/
 .coding-worktrees/
 hetzner-mcp/
 .deploy-current-tag
+
+# Built Live2D avatar (scripts/build_live2d.sh): Live2D's files, never committed.
+avatar-assets/

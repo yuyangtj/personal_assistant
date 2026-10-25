@@ -66,6 +66,7 @@ services:
       # The passkey (WebAuthn) site: approvals can be signed with Touch ID or a fingerprint.
       ASSISTANT_PUBLIC_URL: https://${ASSISTANT_DOMAIN}
       ASSISTANT_DEPLOY_SPOOL_DIRECTORY: /deploy
+      ASSISTANT_AVATAR_ASSETS_DIR: /avatar-assets
       ASSISTANT_DEFAULT_TIMEZONE: ${ASSISTANT_DEFAULT_TIMEZONE:-Europe/Stockholm}
       # Presence enables "research on the web" proposals; searches run in the worker.
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
@@ -95,6 +96,12 @@ services:
       - type: bind
         source: ${ASSISTANT_HOST_DEPLOY_SPOOL:-/srv/personal-assistant/deploy}/status
         target: /deploy/status
+        read_only: true
+      # The Live2D avatar's files (scripts/build_live2d.sh), kept out of the public repo.
+      # Empty: the console draws its own avatar instead.
+      - type: bind
+        source: ${ASSISTANT_AVATAR_ASSETS_HOST:-/srv/personal-assistant/avatar-assets}
+        target: /avatar-assets
         read_only: true
     networks:
       - private
