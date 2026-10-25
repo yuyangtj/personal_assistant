@@ -21,6 +21,13 @@ class RecordingNotifier:
         return True
 
 
+class FailingNotifier:
+    """A push that never reaches the phone (ntfy down, topic misconfigured, etc)."""
+
+    def send(self, title: str, message: str, *, priority: int = 3, path: str = "") -> bool:
+        return False
+
+
 # --- recurrence -------------------------------------------------------------------
 
 
@@ -82,6 +89,37 @@ def test_reminders_post_push_and_close_or_repeat(database: Database, service: Ta
     assert once.id not in active
     assert active[daily.id].next_run_at.replace(tzinfo=UTC) > now
     assert later.id in active
+
+
+def test_failed_reminder_push_is_logged_with_the_schedule_id(
+    database: Database, service: TaskService, caplog
+) -> None:
+    chat = service.create_chat_session()
+    schedules = ScheduleService(database)
+    now = datetime(2026, 10, 5, 7, 0, tzinfo=UTC)
+    reminder = schedules.create(
+        kind=ScheduleKind.REMINDER,
+        message="Call mum",
+        run_at=now - timedelta(minutes=1),
+        chat_session_id=chat.id,
+    )
+
+    scheduler = Scheduler(
+        database, start_run=lambda _s: None, notifier=FailingNotifier(), clock=lambda: now
+    )
+    with caplog.at_level("WARNING"):
+        assert scheduler.run_due() == 1
+
+    assert any(reminder.id in record.message for record in caplog.records)
+
+    # With push turned off there is nothing to report.
+    caplog.clear()
+    schedules.create(
+        kind=ScheduleKind.REMINDER, message="Water plants", run_at=now - timedelta(minutes=1)
+    )
+    with caplog.at_level("WARNING"):
+        assert Scheduler(database, start_run=lambda _s: None, clock=lambda: now).run_due() == 1
+    assert not [r for r in caplog.records if "push failed" in r.message]
 
 
 def test_routines_start_a_run(database: Database, service: TaskService) -> None:
