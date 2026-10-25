@@ -28,7 +28,7 @@ import sys
 import tempfile
 import time
 from dataclasses import replace
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -119,7 +119,19 @@ class Harness:
             supports_coding=False,
         )
         self.search = ToolAgentExecutor.id in executors
+        self.executors = executors
         PurchaseService(state.database).import_klarna_csv(klarna_export())
+
+    def summarize_recent_days(self) -> bool:
+        """Run the recent-days summary now, as if the chats had gone quiet a while ago."""
+        from app.work.digest import QUIET_FOR, DigestJob, DigestWriter
+
+        chat = self.executors.get("model-conversation")
+        if chat is None:
+            return False
+        later = datetime.now(UTC) + QUIET_FOR + timedelta(minutes=1)
+        job = DigestJob(self.app.state.database, DigestWriter(chat.client), clock=lambda: later)
+        return job.run_due()
 
     def messages(self, chat: str) -> list[dict]:
         return self.client.get(f"/chat-sessions/{chat}/messages").json()["messages"]
@@ -303,6 +315,10 @@ def run_scenarios(args: argparse.Namespace, scenarios: list[dict]) -> dict[str, 
                 ok = True
                 print(f"- {scenario['name']}")
                 for step in scenario["turns"]:
+                    if step.get("summarize"):  # the recent-days summary, then a fresh chat
+                        harness.summarize_recent_days()
+                        chat = harness.client.post("/chat-sessions", json={}).json()["id"]
+                        continue
                     turn = harness.say(chat, step["say"], screen=step.get("screen"))
                     expect = step.get("expect") or {}
                     problems = check(turn, expect)

@@ -9,6 +9,19 @@ async function loadMemories() {
     $("memory-error").textContent = "";
   } catch (error) { $("memory-error").textContent = error.message || String(error); }
   renderMemories();
+  loadRecentDays();
+}
+
+// What the assistant remembers of recent days across all chats; it keeps this itself.
+async function loadRecentDays() {
+  try {
+    const digest = await api("/digest");
+    $("recent-days").hidden = !digest.content;
+    $("recent-days-text").textContent = digest.content;
+    $("recent-days-when").textContent = digest.updated_at
+      ? `Kept up to date by the assistant · last updated ${new Date(digest.updated_at).toLocaleString()}`
+      : "";
+  } catch (_) { $("recent-days").hidden = true; }
 }
 
 function memoryCard(memory) {

@@ -66,6 +66,8 @@ from app.tools.mcp import McpGateway, Toolset
 from app.tools.search import build_search
 from app.validation import ValidationProfileRegistry
 from app.work.briefs import BriefWritebackJob, BriefWriter
+from app.work.digest import DigestJob, DigestWriter
+from app.work.digest import current as current_digest
 from app.work.items import WorkItemService, configure_spaces
 from app.work.memory import MemoryService
 from app.work.notes import NoteService
@@ -452,6 +454,7 @@ class TaskWorker:
         deployment_sync_interval_seconds: float = 10.0,
         brief_writeback: BriefWritebackJob | None = None,
         brief_writeback_interval_seconds: float = 30.0,
+        digest: DigestJob | None = None,
         scheduler: Scheduler | None = None,
         reporter: Reporter | None = None,
         scheduler_interval_seconds: float = 20.0,
@@ -475,6 +478,8 @@ class TaskWorker:
         self.brief_writeback = brief_writeback
         self.brief_writeback_interval_seconds = brief_writeback_interval_seconds
         self._brief_writeback_thread: threading.Thread | None = None
+        self.digest = digest
+        self._digest_thread: threading.Thread | None = None
         self.scheduler = scheduler
         self.reporter = reporter
         self.scheduler_interval_seconds = scheduler_interval_seconds
@@ -579,6 +584,9 @@ class TaskWorker:
             # relevance.
             if self.memory_service is not None and executor.id == "model-conversation":
                 execution_context["memories"] = self.memory_service.for_model()
+                recent = current_digest(self.service.database)
+                if recent is not None and recent.content:
+                    execution_context["recent"] = recent.content
             # The one "Assistant" conversation: the reply is told it speaks for everything.
             if task.chat_session_id and self.service.is_home_chat(task.chat_session_id):
                 execution_context["home"] = True
@@ -777,6 +785,28 @@ class TaskWorker:
                 if report:
                     logger.info("Started report %s", report)
 
+    def start_digest(self) -> threading.Thread | None:
+        """Keep the summary of recent days current, on its own thread (general worker only)."""
+        if self.digest is None or self.coding_only:
+            return None
+        if self._digest_thread is None or not self._digest_thread.is_alive():
+            self._digest_thread = threading.Thread(
+                target=self._digest_loop, name="recent-days", daemon=True
+            )
+            self._digest_thread.start()
+        return self._digest_thread
+
+    def _digest_loop(self) -> None:
+        job = self.digest
+        if job is None:
+            return
+        while not self._stop_event.wait(60):
+            try:
+                if job.run_due():
+                    logger.info("Updated the summary of recent days")
+            except Exception:
+                logger.exception("Could not update the summary of recent days")
+
     def _brief_writeback_loop(self) -> None:
         job = self.brief_writeback
         if job is None:
@@ -793,6 +823,7 @@ class TaskWorker:
     def run_forever(self) -> None:
         logger.info("Worker %s started", self.worker_id)
         self.start_brief_writeback()
+        self.start_digest()
         self.start_scheduler()
         self.start_pull_request_sync()
         while not self._stop_event.is_set():
@@ -976,6 +1007,11 @@ def main() -> None:
                 idle_seconds=settings.brief_writeback_idle_seconds,
             )
             if settings.brief_writeback_enabled and conversation_executor is not None
+            else None
+        ),
+        digest=(
+            DigestJob(database, DigestWriter(conversation_executor.client))
+            if conversation_executor is not None
             else None
         ),
         scheduler=Scheduler(database, start_run=start_routine, notifier=notifier),

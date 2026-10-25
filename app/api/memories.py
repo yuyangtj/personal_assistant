@@ -59,3 +59,15 @@ def archive_memory(memory_id: str, request: Request) -> MemoryResponse:
         return MemoryResponse.model_validate(request.app.state.memory_service.archive(memory_id))
     except LookupError as error:
         raise HTTPException(status_code=404, detail="Memory not found") from error
+
+
+@router.get("/digest")
+def get_recent_days(request: Request) -> dict:
+    """The assistant's rolling summary of recent days across all chats (read-only)."""
+    from app.work.digest import current
+
+    digest = current(request.app.state.database)
+    return {
+        "content": digest.content if digest else "",
+        "updated_at": digest.updated_at.isoformat() if digest else None,
+    }

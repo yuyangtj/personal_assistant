@@ -220,6 +220,8 @@ def test_saying_it_is_done_without_a_tool_call_gets_one_nudge(
         "Stopped, the README run won't go any further.",
         "Done — it's forgotten.",
         "I've passed this along, but let me get the actual status for you.",
+        "Noted down: the plumber comes on Thursday at 10.",
+        "Got it, I jotted that down.",
     ):
         executor, chat = agent(client, reply(claim), reply("Checking."))
         run(executor, chat_id, "stop the README run")
