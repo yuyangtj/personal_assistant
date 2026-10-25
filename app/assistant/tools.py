@@ -134,7 +134,8 @@ def bookkeeping_tools(
             "remember",
             "memories",
             '{"text": "<the fact, as one sentence>", "kind": "<fact, preference or project>"}',
-            "save something the user asked you to remember",
+            "save something the user asked you to remember, as they said it; never ask for "
+            'details they didn\'t give ("my code is my birth year" is saved as it is)',
             lambda a, c: act(
                 {"type": "remember", "text": _text(a), "kind": a.get("kind") or "fact"}, c
             ),
