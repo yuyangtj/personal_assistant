@@ -76,6 +76,9 @@
     {"say": "show me the plan and latest steps of that run", "expect": {"tools_any": ["coding_run", "coding_status"]}},
     {"say": "stop the README run", "expect": {"tool": "coding_stop"}}
   ]},
+  {"name": "a-finished-runs-findings", "about": "What a finished run found is answered from its saved summary, not deferred to GitHub.", "finished_run": {"goal": "Investigate how reminder push notifications reach the Android app", "summary": "Pushes go through ntfy, not Firebase. The Android app never subscribes itself; the separate ntfy app on the phone receives them. A failed reminder push was not traceable to its reminder, so it now logs the schedule id."}, "turns": [
+    {"say": "what was the conclusion of the push notification investigation?", "expect": {"tools_any": ["coding_run", "coding_status", "overview"], "reply_any": ["ntfy"]}}
+  ]},
   {"name": "phone-actions", "about": "Timers, alarms and events are proposed as a card to confirm, never done by themselves.", "turns": [
     {"say": "set a timer for 10 minutes for the pasta", "expect": {"action": "set_timer"}},
     {"say": "put lunch with Anna on Friday at 12 in my calendar", "expect": {"action": "create_event"}}

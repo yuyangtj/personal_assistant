@@ -356,7 +356,9 @@ def coding_tools(supervisor: Any) -> list[AssistantTool]:
             "coding_run",
             "coding",
             '{"run": "<run id from coding_status>"}',
-            "one run's plan, latest steps and pull request",
+            "one run's plan, latest steps and pull request; for a finished run also its "
+            "summary (what the agent found and changed, as in the PR description), tests "
+            "and notes. Answer questions about a run's findings from this",
             lambda a, c: data(supervisor.run_detail(a.get("run"), c.chat_session_id)),
             lambda a: "Looking at a coding run",
             changes=False,
