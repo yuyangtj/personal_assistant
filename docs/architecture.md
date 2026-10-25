@@ -53,6 +53,13 @@ flowchart LR
   - It pushes to the phone only for the must-knows (a PR to review, a failure, a watch that
     triggered) or when the agent marks the report notable.
   - If no model can write it, a plain list is posted instead. Deployments keep their own push.
+  - It follows up on its own:
+    - a failed research or routine run is tried once more after a minute, and only a second
+      failure is reported;
+    - work still queued after 15 minutes, or with no progress for 20 (coding: 45), is raised
+      once, with a push;
+    - a PR waiting for review gets one quiet reminder a day (`tasks.followed_up_at`).
+  - When the agent promises to check something later, it sets a one-off routine then.
 - **Coding runs** are started, inspected, steered and stopped through the agent's coding
   tools. No tool can merge or deploy; those stay behind the approval token in the console.
 - **The reply agent knows the repositories.** Every chat reply is told which repositories

@@ -49,12 +49,13 @@ def _finish(service: TaskService, task_id: str, reply: str, *, fail: bool = Fals
     service.complete_task(task_id, execution, reply=reply)
 
 
-def _research(service: TaskService, chat: str, question: str) -> str:
+def _research(service: TaskService, chat: str, question: str, **context) -> str:
     return service.create_task(
         request=question,
         required_capabilities=["web_research"],
         chat_session_id=chat,
         post_request=False,
+        source_context=context or None,
     ).id
 
 
@@ -120,16 +121,19 @@ def test_replies_cancelled_work_and_work_from_assistant_are_not_reported(
 def test_the_must_knows_are_a_pr_and_a_failure(service: TaskService) -> None:
     chat = service.create_chat_session(title="Theme").id
     _ready_pr(service, chat)
-    failed = _research(service, chat, "train prices")
+    failed = _research(service, chat, "train prices", retry_of="first-try")  # already a retry
     _finish(service, failed, "", fail=True)
 
     report = Reporter(service, service.database).run_due(now=LATER)
 
     items = service.get_task(report).source_context["report"]
-    assert [(i["kind"], i["status"], i["pull_request"], i["must_push"]) for i in items] == [
-        ("coding run", "waiting_for_approval", 41, True),
-        ("research", "failed", None, True),
+    assert [
+        (i["kind"], i["status"], i["pull_request"], i["must_push"], i["tried_twice"]) for i in items
+    ] == [
+        ("coding run", "waiting_for_approval", 41, True, False),
+        ("research", "failed", None, True, True),
     ]
+    assert "FAILED, after being tried twice" in service.get_task(report).original_request
 
 
 def test_the_report_lands_in_assistant_with_links_and_pushes_only_when_it_should(
@@ -178,3 +182,98 @@ def test_without_a_model_the_report_is_still_told_plainly(service: TaskService) 
     assert "Ready for your review: PR #41" in message.content
     assert message.blocks[-1]["href"] == f"#/chats/{chat}?task={task}"
     assert [(title, priority) for title, _, priority in notifier.sent] == [("Assistant", 4)]
+
+
+def test_a_failed_research_run_is_tried_once_more_on_its_own(service: TaskService) -> None:
+    chat = service.create_chat_session(title="Trains").id
+    first = _research(service, chat, "cheapest train to Copenhagen")
+    _finish(service, first, "", fail=True)
+    reporter = Reporter(service, service.database)
+
+    assert reporter.run_due() is None  # a moment's pause first
+    assert reporter.run_due(now=LATER) is None  # retried, so nothing to tell yet
+    (retry,) = [t for t in service.list_tasks(limit=50) if (t.source_context or {}).get("retry_of")]
+    assert (retry.original_request, retry.chat_session_id) == ("cheapest train to Copenhagen", chat)
+    assert retry.source_context["retry_of"] == first
+
+    _finish(service, retry.id, "SJ at 06:12, 395 kr.")
+    report = reporter.run_due(now=LATER + timedelta(minutes=10))
+    (item,) = service.get_task(report).source_context["report"]
+    assert (item["status"], item["tried_twice"], item["must_push"]) == ("completed", True, False)
+    # The first failure is never told: only the retry's result is.
+    assert "FAILED" not in service.get_task(report).original_request
+    assert reporter.run_due(now=LATER + timedelta(hours=1)) is None
+
+
+def test_coding_failures_are_not_retried_but_reported(service: TaskService) -> None:
+    chat = service.create_chat_session(title="Theme").id
+    task = service.create_task(
+        request="Fix the toggle",
+        required_capabilities=["coding", "pull_request_creation"],
+        source_context={"repository_id": "personal-assistant"},
+        chat_session_id=chat,
+    )
+    service.claim_next_task(worker_id="w", lease_seconds=30)
+    service.fail_task(task.id, error="agent gave up")
+
+    report = Reporter(service, service.database).run_due(now=LATER)
+
+    (item,) = service.get_task(report).source_context["report"]
+    assert (item["kind"], item["status"], item["must_push"]) == ("coding run", "failed", True)
+    assert not [t for t in service.list_tasks(limit=50) if (t.source_context or {}).get("retry_of")]
+
+
+def test_work_that_never_starts_or_stops_moving_is_raised_once(service: TaskService) -> None:
+    chat = service.create_chat_session(title="Museum").id
+    queued = _research(service, chat, "opening hours")
+    running = _research(service, chat, "ticket prices")
+    service.claim_next_task(worker_id="w", lease_seconds=30)  # takes the oldest: "opening hours"
+    service.start_execution(
+        queued, capability_id="tool-agent", executor_id="tool-agent", execution_input={}
+    )
+    reporter = Reporter(service, service.database)
+
+    soon = datetime.now(UTC) + timedelta(minutes=5)
+    assert reporter.run_due(now=soon) is None  # neither has waited long enough
+    report = reporter.run_due(now=datetime.now(UTC) + timedelta(minutes=30))
+
+    items = {i["goal"]: i for i in service.get_task(report).source_context["report"]}
+    assert (items["ticket prices"]["status"], items["ticket prices"]["must_push"]) == (
+        "not_started",
+        True,
+    )
+    assert (items["opening hours"]["status"], items["opening hours"]["must_push"]) == (
+        "stalled",
+        True,
+    )
+    assert reporter.run_due(now=datetime.now(UTC) + timedelta(hours=2)) is None  # once only
+    del running
+
+
+def test_a_waiting_pr_gets_one_quiet_reminder_a_day(service: TaskService) -> None:
+    chat = service.create_chat_session(title="Theme").id
+    _ready_pr(service, chat)
+    reporter = Reporter(service, service.database)
+    first = reporter.run_due(now=LATER)  # "ready for review": a must-know
+    assert service.get_task(first).source_context["report"][0]["must_push"] is True
+
+    assert reporter.run_due(now=LATER + timedelta(hours=5)) is None
+    day = datetime.now(UTC) + timedelta(hours=25)
+    reminder = reporter.run_due(now=day)
+    (item,) = service.get_task(reminder).source_context["report"]
+    assert (item["status"], item["must_push"]) == ("review_waiting", False)
+    assert reporter.run_due(now=day + timedelta(hours=3)) is None  # not again the same day
+    assert reporter.run_due(now=day + timedelta(hours=25)) is not None  # but the next day
+
+
+def test_promises_to_check_later_are_scheduled_not_just_said(service: TaskService) -> None:
+    from app.assistant.toolbox import Toolbox
+    from app.assistant.tools import bookkeeping_tools
+    from app.execution.conversation import FOLLOW_UPS
+
+    executor = ConversationExecutor(RecordingChatClient([]))
+    executor.toolbox = Toolbox(bookkeeping_tools(items=None, memory=None, schedules=object()))
+    system = executor._messages("check again tomorrow", [], {})[0].content
+    assert FOLLOW_UPS.strip() in system
+    executor.toolbox = None
+    assert FOLLOW_UPS.strip() not in executor._messages("hi", [], {})[0].content
