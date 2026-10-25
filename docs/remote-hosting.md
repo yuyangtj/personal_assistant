@@ -246,8 +246,9 @@ Neither needs a browser on the server, and neither uses an API key:
   ```bash
   UID_=$(sed -n 's/^ASSISTANT_CODING_WORKER_UID=//p' .env.remote)
   GID_=$(sed -n 's/^ASSISTANT_CODING_WORKER_GID=//p' .env.remote)
-  docker run --rm -v /srv/personal-assistant:/srv alpine \
-    install -d -o "$UID_" -g "$GID_" -m 700 /srv/codex-home
+  # mkdir and chown, not install -d: a deploy may already have created it as root.
+  docker run --rm -v /srv/personal-assistant:/srv alpine sh -c \
+    "mkdir -p /srv/codex-home && chown $UID_:$GID_ /srv/codex-home && chmod 700 /srv/codex-home"
   echo 'ASSISTANT_HOST_CODEX_HOME=/srv/personal-assistant/codex-home' >> .env.remote
   docker compose --env-file .env.remote -f compose.remote.yaml run --rm --no-deps \
     coding-worker codex login --device-auth
