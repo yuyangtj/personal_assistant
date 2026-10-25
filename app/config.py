@@ -33,11 +33,6 @@ class Settings:
     spaces_directory: Path = Path("spaces")
     deploy_spool_directory: Path | None = None
     brief_writeback_enabled: bool = False
-    #: Messages about work go to the supervisor, which can start and inspect coding runs.
-    supervisor_enabled: bool = True
-    triage_model_enabled: bool = False
-    #: Every message goes to the chat agent and its tools, without triage.
-    main_agent_enabled: bool = False
     ntfy_topic_url: str | None = None
     #: Web search for the research agent: DeepSeek, Tavily or Brave, the first key set wins.
     deepseek_api_key: str | None = None
@@ -51,9 +46,6 @@ class Settings:
     public_url: str | None = None
     default_timezone: str = "UTC"
     scheduler_interval_seconds: float = 20.0
-    triage_provider: str = "kimi"
-    triage_timeout_seconds: float = 8.0
-    triage_min_confidence: float = 0.6
     brief_writeback_idle_seconds: int = 600
     default_repository_id: str | None = None
     kimi_api_key: str | None = None
@@ -222,19 +214,10 @@ class Settings:
             deploy_spool_directory=(
                 Path(value) if (value := os.getenv("ASSISTANT_DEPLOY_SPOOL_DIRECTORY")) else None
             ),
-            supervisor_enabled=_as_bool(
-                os.getenv("ASSISTANT_SUPERVISOR_ENABLED", str(defaults.supervisor_enabled))
-            ),
-            main_agent_enabled=_as_bool(
-                os.getenv("ASSISTANT_MAIN_AGENT_ENABLED", str(defaults.main_agent_enabled))
-            ),
             brief_writeback_enabled=_as_bool(
                 os.getenv(
                     "ASSISTANT_BRIEF_WRITEBACK_ENABLED", str(defaults.brief_writeback_enabled)
                 )
-            ),
-            triage_model_enabled=_as_bool(
-                os.getenv("ASSISTANT_TRIAGE_MODEL_ENABLED", str(defaults.triage_model_enabled))
             ),
             ntfy_topic_url=os.getenv("ASSISTANT_NTFY_TOPIC_URL") or None,
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
@@ -272,13 +255,6 @@ class Settings:
                     "ASSISTANT_SCHEDULER_INTERVAL_SECONDS",
                     str(defaults.scheduler_interval_seconds),
                 )
-            ),
-            triage_provider=os.getenv("ASSISTANT_TRIAGE_PROVIDER", defaults.triage_provider),
-            triage_timeout_seconds=float(
-                os.getenv("ASSISTANT_TRIAGE_TIMEOUT_SECONDS", str(defaults.triage_timeout_seconds))
-            ),
-            triage_min_confidence=float(
-                os.getenv("ASSISTANT_TRIAGE_MIN_CONFIDENCE", str(defaults.triage_min_confidence))
             ),
             brief_writeback_idle_seconds=int(
                 os.getenv(

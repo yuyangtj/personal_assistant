@@ -104,10 +104,9 @@ A routine is a saved instruction the assistant carries out on a schedule, or on 
 me when Zoégas coffee is under 50 kr at Willys". It is the assistant's equivalent of a
 skill; there is no separate workflow engine (`app/chat/routines.py`).
 
-- **Routed once.** When a routine is saved, its instruction is triaged like a chat
-  message. The route is stored on the schedule (`capabilities`): Klarna and the stores go to
-  the shopping agent, web questions to research, coding work to the supervisor. Every run
-  goes there. Routines saved before this use the keyword rules when they fire.
+- **Run by the chat agent.** Each run goes to the chat agent, with its tools (Klarna, the
+  stores, research, coding runs). Routines saved before 2026-10-25 may name a specialist
+  in `capabilities`; they still go there.
 - **Compares with itself.** Each run gets the last three results of the same routine
   (`routine_results`), so it can say "up 18% on last month" or "down from 54 to 45 kr".
 - **Delivers.** The result posts in the routine's chat and is pushed to the phone. A

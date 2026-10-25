@@ -6,12 +6,10 @@ from pathlib import Path
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 
-from app.chat.triage import Triager
 from app.execution.grocery_agent import GroceryAgentExecutor
 from app.tools.mcp import McpError, McpGateway, Toolset, condense
-from tests.test_triage import ScriptedChat, suggestion
+from tests.fakes import ScriptedChat
 
 TOOLSET = Toolset.load(Path("toolsets/groceries.yaml"))
 
@@ -158,46 +156,6 @@ def test_a_failing_tool_is_reported_to_the_model() -> None:
 
     assert "ERROR:" in model.requests[1][-1].content
     assert output["tool_calls"] == [{"tool": "lidl.get_historical_receipts", "arguments": {}}]
-
-
-# --- routing from chat ------------------------------------------------------------------
-
-
-def test_grocery_questions_go_to_the_grocery_agent(client: TestClient) -> None:
-    state = client.app.state
-    state.triager = Triager(state.repository_registry, groceries_available=True)
-    chat = client.post("/chat-sessions", json={}).json()["id"]
-
-    posted = client.post(
-        f"/chat-sessions/{chat}/messages", json={"content": "What's on offer at Willys this week?"}
-    ).json()
-
-    assert posted["decision"]["handled"] is True
-    (task,) = client.get(f"/chat-sessions/{chat}/tasks").json()["tasks"]
-    assert task["required_capabilities"] == ["groceries"]
-
-
-def test_the_model_can_flag_grocery_questions() -> None:
-    from app.repositories import RepositoryRegistry
-
-    repositories = RepositoryRegistry.from_directory("repositories")
-    chat = ScriptedChat(suggestion(intent="answer", needs_grocery_tools=True))
-
-    decision = Triager(repositories, chat, groceries_available=True).decide(
-        "how much did I spend on food last month?"
-    )
-
-    assert decision.capabilities == ("groceries",)
-
-
-def test_without_the_gateway_grocery_questions_are_ordinary_chat() -> None:
-    from app.repositories import RepositoryRegistry
-
-    decision = Triager(RepositoryRegistry.from_directory("repositories")).decide(
-        "What's on offer at Willys this week?"
-    )
-
-    assert "groceries" not in decision.capabilities
 
 
 def test_the_grocery_agent_is_routable() -> None:

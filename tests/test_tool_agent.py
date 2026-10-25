@@ -6,10 +6,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.chat.triage import Triager
 from app.config import Settings
 from app.execution.tool_agent import ToolAgentExecutor
-from app.repositories import RepositoryRegistry
 from app.tools.search import (
     BraveSearch,
     DeepSeekSearch,
@@ -18,7 +16,7 @@ from app.tools.search import (
     TavilySearch,
     build_search,
 )
-from tests.test_triage import ScriptedChat, suggestion
+from tests.fakes import ScriptedChat
 
 
 class FakeSearch:
@@ -155,17 +153,6 @@ def test_the_first_search_key_set_wins() -> None:
     assert name(tavily_api_key="t", brave_search_api_key="b") == "tavily"
     assert name(deepseek_api_key="d", tavily_api_key="t") == "deepseek"
     assert Settings(deepseek_api_key="d").web_search_available
-
-
-def test_triage_routes_research_to_the_agent_only_when_available() -> None:
-    repositories = RepositoryRegistry.from_directory("repositories")
-    reply = suggestion(intent="propose_task", needs_web_search=True, confidence=0.9)
-
-    with_search = Triager(repositories, ScriptedChat(reply), research_available=True)
-    without = Triager(repositories, ScriptedChat(reply), research_available=False)
-
-    assert with_search.decide("compare desks").capabilities == ("web_research",)
-    assert without.decide("compare desks").capabilities == ()
 
 
 def test_research_tasks_pass_the_coding_gate(client: TestClient) -> None:

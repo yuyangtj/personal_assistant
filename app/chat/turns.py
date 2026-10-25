@@ -1,19 +1,19 @@
-"""What a posted chat message needs: a choice answered, an action done, an offer, or a reply."""
+"""What a posted chat message needs: an explicit note saved at once, or the chat agent.
+
+The chat agent (with its tools) is the only thing that decides what a message means. The
+server does without a model only "note: …" and "remember privately …" (see the API).
+"""
 
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 from fastapi import Request
 
 from app.api.schemas import AppendChatMessageRequest, TriageDecisionResponse
-from app.chat.direct_actions import run_direct_action
-from app.chat.offers import match_choice, offer_for, pending_choices, settle
-from app.chat.routines import routine_capabilities
-from app.chat.triage import DirectAction, TriageIntent, rule_action
-from app.coding.flow import start_coding_run
+from app.chat.blocks import pending_choices, settle
+from app.chat.direct_actions import DirectAction, note_rule, run_direct_action
 from app.schedules import zone
 
 
@@ -39,80 +39,6 @@ def propose_coding_run(
     )
 
 
-def resolve_choice(
-    request: Request, chat_session_id: str, option: dict, body: AppendChatMessageRequest
-) -> TriageDecisionResponse:
-    """Carry out the option the user picked from an assistant's choices."""
-    service = request.app.state.task_service
-    payload = option.get("payload") or {}
-    origin = payload.get("origin_message_id")
-    # The same context the console sends with a chat turn, so times resolve locally.
-    source_context = {
-        key: value
-        for key, value in {
-            "client": "chat-choice",
-            "local_time": body.local_time,
-            "timezone": body.timezone,
-        }.items()
-        if value
-    }
-    action = option["action"]
-    reply: str | None = None
-    blocks: list[dict] = []
-    try:
-        if action == "start_coding":
-            # Agreeing in the chat is enough to start: the agent only works on a branch and
-            # opens a draft pull request; merging still needs the approval token.
-            message = service.get_user_chat_message(chat_session_id, origin)
-            goal = str(payload.get("goal") or "").strip()
-            run = start_coding_run(
-                service,
-                request.app.state.workflow_service,
-                request.app.state.repository_registry,
-                repository_id=payload["repository_id"],
-                request=(
-                    f"{goal}\n\nOriginal request: {message.content}"
-                    if goal and goal != message.content
-                    else message.content
-                ),
-                chat_session_id=chat_session_id,
-                origin_message_id=origin,
-                approved_by="chat",
-            )
-            reply = "Started a coding agent on it. I'll report back here."
-            blocks = [{"type": "workflow", "workflow_run_id": run.id}]
-        elif action in ("start_research", "start_task"):
-            task = service.create_task_from_message(
-                chat_session_id,
-                origin,
-                goal=payload.get("goal"),
-                required_capabilities=list(payload.get("capabilities") or []),
-                source_context=source_context,
-                create_work_item=True,
-                space=payload.get("space"),
-            )
-            reply = "Researching it now." if action == "start_research" else "Started on it."
-            if task.work_item_id:
-                item = request.app.state.work_item_service.get(task.work_item_id)
-                blocks = [{"type": "item", "slug": item.slug}]
-        else:  # answer: the original message gets an ordinary chat reply
-            service.create_task_from_message(chat_session_id, origin, source_context=source_context)
-    except (LookupError, ValueError) as error:
-        reply, blocks = f"I couldn't set that up: {error}", []
-    if reply:
-        service.append_chat_message(chat_session_id, content=reply, role="assistant", blocks=blocks)
-    return TriageDecisionResponse(
-        route=f"choice: {option['label']}",
-        intent="direct_action" if action != "answer" else "answer",
-        goal=str(payload.get("goal") or ""),
-        reason=f"Picked “{option['label']}”",
-        confidence=1.0,
-        result=reply,
-        handled=True,
-        source="rules",
-    )
-
-
 logger = logging.getLogger(__name__)
 
 _PRIVATE = re.compile(
@@ -126,25 +52,6 @@ def private_memory_text(content: str) -> str | None:
     """The text of "remember privately …", which is handled before any model sees it."""
     match = _PRIVATE.match(content.strip())
     return match["text"].strip() if match and match["text"].strip() else None
-
-
-#: A coding request this clear starts work right away; less clear ones are offered.
-SUPERVISOR_CONFIDENCE = 0.85
-
-
-def _last_turn_was_groceries(service: Any, history: list[Any]) -> bool:
-    """Whether the assistant's latest reply came from the shopping agent (so a short
-    follow-up like "yes" or "show it weekly" belongs there too)."""
-    for message in reversed(history):
-        if message.role == "assistant" and message.linked_task_id:
-            try:
-                task = service.get_task(message.linked_task_id)
-            except Exception:  # a task that is gone just means no stickiness
-                return False
-            return "groceries" in (task.required_capabilities or [])
-        if message.role == "assistant":
-            return False
-    return False
 
 
 def triage_message(
@@ -184,126 +91,26 @@ def _route_message(
     request: Request, chat_session_id: str, body: AppendChatMessageRequest, message_id: str
 ) -> TriageDecisionResponse:
     service = request.app.state.task_service
-    messages = service.list_chat_messages(chat_session_id, limit=500)
-    # An answer to the assistant's open choices (a click sends the label; "yes" or "no"
-    # pick the primary or decline option). Anything else lets the choices lapse.
-    pending = pending_choices(messages[-10:], current_message_id=message_id)
+    # The assistant's suggestion buttons are only suggestions: a tap sends the label as an
+    # ordinary message. Whatever is said next settles them, so they can't be tapped twice.
+    pending = pending_choices(
+        service.list_chat_messages(chat_session_id, limit=500)[-10:],
+        current_message_id=message_id,
+    )
     if pending is not None:
         offer_message, block = pending
-        option = match_choice(body.content, block)
+        said = " ".join(body.content.split()).lower()
+        chosen = next(
+            (o["label"] for o in block.get("options", []) if o["label"].lower() == said), None
+        )
         service.set_message_blocks(
-            offer_message.id,
-            settle(offer_message.blocks or [], block["id"], chosen=option and option["label"]),
+            offer_message.id, settle(offer_message.blocks or [], block["id"], chosen=chosen)
         )
-        if option is not None and option["action"] != "reply":
-            return resolve_choice(request, chat_session_id, option, body)
-    work_items = request.app.state.work_item_service
-    open_items = [
-        {"slug": item.slug, "title": item.title, "kind": item.kind}
-        for item in work_items.list(limit=50)
-        if item.status != "done"
-    ]
-    if request.app.state.settings.main_agent_enabled:
-        return _main_agent_route(request, chat_session_id, body, open_items)
-    focused = work_items.focused(chat_session_id)
-    spaces = work_items.space_slugs(focused)
-    history = messages[-13:-1]
-    follow_up = _last_turn_was_groceries(service, history)
-    decision = request.app.state.triager.decide(
-        body.content,
-        after_groceries=follow_up,
-        selected_repository_id=body.repository_id,
-        focused_items=[
-            {"slug": item.slug, "title": item.title, "space": spaces.get(item.space_id)}
-            for item in focused
-        ],
-        recent_turns=[
-            (message.role, message.content)
-            for message in history
-            if message.role in ("user", "assistant")
-        ],
-        work_items=open_items,
-        local_time=body.local_time,
-        timezone=body.timezone,
-        screen=body.attachments[0].text if body.attachments else None,
-    )
-    response = TriageDecisionResponse.model_validate(decision.model_dump(mode="json"))
-    response.follow_up = follow_up
-    if decision.action is not None:
-        return _run_instantly(request, chat_session_id, body, decision.action, response)
-    # Questions about the user's grocery stores run the grocery agent right away: it only
-    # reads offers, receipts and purchases, so there is nothing to confirm.
-    if "groceries" in decision.capabilities:
-        service.create_task_from_message(
-            chat_session_id,
-            message_id,
-            required_capabilities=["groceries"],
-            source_context={"client": "web-console"},
-        )
-        response.handled = True
-        response.route = "shopping agent"
-        return response
-    # Work goes to the supervisor, which sees every run and can start, inspect or stop
-    # them: a clear request for a code change, or any message about coding work.
-    if request.app.state.settings.supervisor_enabled and (
-        decision.about_work
-        or (
-            decision.intent == TriageIntent.PROPOSE_CODING
-            and decision.repository_id
-            and decision.confidence >= SUPERVISOR_CONFIDENCE
-        )
-    ):
-        service.create_task_from_message(
-            chat_session_id,
-            message_id,
-            required_capabilities=["supervision"],
-            source_context={
-                key: value
-                for key, value in {
-                    "client": "web-console",
-                    "local_time": body.local_time,
-                    "timezone": body.timezone,
-                }.items()
-                if value
-            },
-        )
-        response.handled = True
-        response.route = "supervisor"
-        return response
-    # Proposals are asked in the conversation, with the options as choices to pick.
-    offer = offer_for(
-        decision,
-        origin_message_id=message_id,
-        repository_names={
-            manifest.id: manifest.name for manifest in request.app.state.repository_registry.list()
-        },
-    )
-    if offer is not None:
-        service.append_chat_message(
-            chat_session_id, content=offer.reply, role="assistant", blocks=offer.blocks
-        )
-        response.result = offer.reply
-        response.handled = True
-        response.route = f"offer ({decision.intent.value})"
-    else:
-        # The client queues an ordinary chat reply for it.
-        response.route = "chat reply"
-    return response
-
-
-def _main_agent_route(
-    request: Request,
-    chat_session_id: str,
-    body: AppendChatMessageRequest,
-    open_items: list[dict[str, Any]],
-) -> TriageDecisionResponse:
-    """The one-assistant path: no triage model, no offers; the chat agent and its tools
-    handle the message. Only the plainest bookkeeping phrasings are still done at once."""
-    action = rule_action(body.content, open_items)
+    action = note_rule(body.content)
     response = TriageDecisionResponse(
         intent="direct_action" if action else "answer",
         goal=body.content[:500],
-        reason="A plain bookkeeping request." if action else "The main agent answers.",
+        reason="An explicit note." if action else "The chat agent answers.",
         confidence=1.0,
         source="rules" if action else "main-agent",
     )
@@ -337,11 +144,6 @@ def _run_instantly(
         schedules=request.app.state.schedule_service,
         timezone=timezone,
         tasks=service,
-        route=lambda instruction: routine_capabilities(
-            request.app.state.triager,
-            instruction,
-            supervision=request.app.state.settings.supervisor_enabled,
-        ),
     )
     service.append_chat_message(
         chat_session_id, content=result.reply, role="assistant", blocks=result.blocks or None

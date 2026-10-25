@@ -2,8 +2,8 @@
 
 Routing is only half the story: a message can be routed "right" and still get a wrong or
 empty answer, and follow-ups depend on everything said before. Each scenario in
-scenarios.json is a short conversation; every turn goes through the real API (triage,
-offers, choices) and the real worker and agents, with real models, against a fresh SQLite
+scenarios.json is a short conversation; every turn goes through the real API and the
+real worker and chat agent, with real models, against a fresh SQLite
 database holding a made-up Klarna history. Each turn is then checked: where it was
 routed, which tools ran with which arguments, whether a chart came back, and that there
 is a real reply.
@@ -11,12 +11,10 @@ is a real reply.
     python scripts/chat_eval/run.py                  # every scenario
     python scripts/chat_eval/run.py klarna-by-week   # only the named ones
     python scripts/chat_eval/run.py --json out.json  # also save every turn
-    python scripts/chat_eval/run.py --main-agent     # the one-assistant path, no triage
-
-With --main-agent, a turn's "main_expect" (when it has one) replaces its "expect".
+    python scripts/chat_eval/run.py --repeat 3       # the release gate: all pass, 3 times
 
 Models and keys come from the environment like the server (ASSISTANT_*, KIMI_API_KEY,
-MINIMAX_API_KEY). Unset choices default to production's: Kimi triage on, MiniMax answers.
+MINIMAX_API_KEY, DEEPSEEK_API_KEY, ...), as on the server.
 No store accounts are connected, so the shopping agent has Klarna only.
 """
 
@@ -41,8 +39,6 @@ os.chdir(ROOT)  # capabilities/, toolsets/ and the rest are found relative to th
 
 # Production's choices (.env.remote.example), unless the environment says otherwise.
 for key, value in {
-    "ASSISTANT_TRIAGE_MODEL_ENABLED": "true",
-    "ASSISTANT_TRIAGE_PROVIDER": "kimi",
     "ASSISTANT_CONVERSATION_MODEL_PROVIDER": "minimax",
 }.items():
     os.environ.setdefault(key, value)
@@ -87,7 +83,7 @@ def klarna_export() -> str:
 class Harness:
     """The API and a worker on one fresh database, driven like the console drives them."""
 
-    def __init__(self, directory: Path, *, main_agent: bool = False):
+    def __init__(self, directory: Path):
         self.settings = replace(
             Settings.from_env(),
             database_url=f"sqlite+pysqlite:///{directory / 'eval.sqlite3'}",
@@ -97,7 +93,6 @@ class Harness:
             # eval pushes (coding runs are never executed here).
             ntfy_topic_url=None,
             brief_writeback_enabled=False,
-            main_agent_enabled=main_agent,
         )
         self.app = create_app(self.settings)
         self.client = TestClient(self.app).__enter__()
@@ -274,26 +269,21 @@ def covered_tools(scenarios: list[dict]) -> set[str]:
     names: set[str] = set()
     for scenario in scenarios:
         for step in scenario["turns"]:
-            for expect in (step.get("expect") or {}, step.get("main_expect") or {}):
-                if "tool" in expect:
-                    names.add(expect["tool"])
-                names.update(expect.get("tools_all", []))
-                names.update(expect.get("tools_any", []))
-                if "route_or_tool" in expect:
-                    names.add(expect["route_or_tool"][1])
+            expect = step.get("expect") or {}
+            if "tool" in expect:
+                names.add(expect["tool"])
+            names.update(expect.get("tools_all", []))
+            names.update(expect.get("tools_any", []))
+            if "route_or_tool" in expect:
+                names.add(expect["route_or_tool"][1])
     return {name.replace(".", "_") for name in names}
 
 
 def run_scenarios(args: argparse.Namespace, scenarios: list[dict]) -> dict[str, Any]:
     """One pass over the scenarios on a fresh database."""
     with tempfile.TemporaryDirectory() as directory:
-        harness = Harness(Path(directory), main_agent=args.main_agent)
-        settings = harness.settings
-        triage = settings.triage_provider if settings.triage_model_enabled else "rules"
-        if args.main_agent:
-            triage = "none (main agent)"
+        harness = Harness(Path(directory))
         print(
-            f"triage: {triage}, "
             f"answers: {harness.settings.conversation_model_provider}, "
             f"search: {'on' if harness.search else 'off'}"
         )
@@ -303,8 +293,6 @@ def run_scenarios(args: argparse.Namespace, scenarios: list[dict]) -> dict[str, 
                 if scenario.get("needs") == "search" and not harness.search:
                     print(f"- {scenario['name']}: skipped (no search key)")
                     continue
-                if scenario.get("main_only") and not args.main_agent:
-                    continue  # only the one-assistant path has these tools
                 needed = scenario.get("needs_tools", [])
                 if missing := [name for name in needed if name not in harness.tool_names()]:
                     print(f"- {scenario['name']}: skipped (no {', '.join(missing)} here)")
@@ -317,8 +305,6 @@ def run_scenarios(args: argparse.Namespace, scenarios: list[dict]) -> dict[str, 
                 for step in scenario["turns"]:
                     turn = harness.say(chat, step["say"], screen=step.get("screen"))
                     expect = step.get("expect") or {}
-                    if args.main_agent and "main_expect" in step:
-                        expect = step["main_expect"]
                     problems = check(turn, expect)
                     ok &= not problems
                     seconds.append(turn["seconds"])
@@ -351,7 +337,7 @@ def run_scenarios(args: argparse.Namespace, scenarios: list[dict]) -> dict[str, 
 def coverage(args: argparse.Namespace, scenarios: list[dict]) -> int:
     """Every chat-agent tool in this setup should be expected by some scenario."""
     with tempfile.TemporaryDirectory() as directory:
-        harness = Harness(Path(directory), main_agent=True)
+        harness = Harness(Path(directory))
         try:
             tools = harness.tool_names()
         finally:
@@ -368,9 +354,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("names", nargs="*", help="scenarios to run (default: all)")
     parser.add_argument("--json", type=Path, help="save every turn here")
-    parser.add_argument(
-        "--main-agent", action="store_true", help="every message to the chat agent, no triage"
-    )
     parser.add_argument("--repeat", type=int, default=1, help="run everything this many times")
     parser.add_argument(
         "--coverage", action="store_true", help="list chat-agent tools no scenario tests"

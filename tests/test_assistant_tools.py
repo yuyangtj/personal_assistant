@@ -215,7 +215,17 @@ def test_saying_it_is_done_without_a_tool_call_gets_one_nudge(
     )
     run(executor, chat_id, "stop the README run")
     assert "made no tool call" in chat.requests[2][-1].content
-    # A plain answer is never questioned.
+    # Nor open with the result ("Stopped, ..."), as one eval run did.
+    for claim in ("Stopped, the README run won't go any further.", "Done — it's forgotten."):
+        executor, chat = agent(client, reply(claim), reply("Checking."))
+        run(executor, chat_id, "stop the README run")
+        assert "made no tool call" in chat.requests[1][-1].content, claim
+    # A plain answer is never questioned, even one starting with such a word.
+    for text in ("Good morning!", "Set aside 20 minutes for the salmon at 200°C."):
+        executor, chat = agent(client, reply(text))
+        run(executor, chat_id, "hi")
+        assert len(chat.requests) == 1, text
+    # Nor is this one.
     executor, chat = agent(client, reply("Good morning!"))
     run(executor, chat_id, "good morning")
     assert len(chat.requests) == 1

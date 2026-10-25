@@ -13,18 +13,15 @@ This is the request path in the code today.
 flowchart LR
     client[Web console · Android app] --> caddy[Caddy HTTPS + login]
     caddy --> api[FastAPI · app/api]
-    api --> turns[app/chat/turns: what the message needs]
-    turns -->|open choices| choice[Resolve the picked option]
-    turns -->|quick action| t0[T0 direct action]
-    turns -->|about coding work| sup[Supervisor task]
-    turns -->|needs a decision| offer[Offer with choices]
-    turns -->|everything else| chat[Chat reply task]
+    api --> turns[app/chat/turns]
+    turns -->|"note: …"| t0[Saved at once]
+    turns -->|every other message| chat[Chat agent task]
 
-    worker[General worker] -->|claims| sup
-    worker -->|claims| chat
-    sup --> tools[Supervisor tools: overview · start · steer · stop]
+    worker[General worker] -->|claims| chat
+    chat --> llm{DeepSeek · Kimi · MiniMax · Gemini}
+    chat --> tools[Its tools: notes · lists · memories · reminders · routines · shopping · code · coding runs]
     tools --> runs[(Coding runs)]
-    chat --> llm{Kimi · MiniMax}
+    tools -->|hands off| bg[Research · shopping agent, in the background]
 
     coding[Coding worker, 2 at once] -->|claims| runs
     coding --> session[Kimi Code ACP session · Claude Code fallback]
@@ -32,16 +29,18 @@ flowchart LR
     session --> pr[Draft PR → exact-SHA approval → merge → deploy]
 
     classDef current fill:#dbeafe,stroke:#2563eb,color:#172554
-    class client,caddy,api,turns,choice,t0,sup,offer,chat,worker,tools,llm,coding,session,progress,pr current
+    class client,caddy,api,turns,t0,chat,worker,tools,bg,llm,coding,session,progress,pr current
 ```
 
-- **Triage** decides per message, with a fast model checked by rules. Small talk gets a
-  chat reply, bookkeeping is done instantly (T0), and anything about coding work goes to
-  the **supervisor**.
-- **The supervisor** sees every run (state, the agent's plan and latest step, PR) and acts
-  through tools. It can start a coding agent, message a running one (a new turn in the
-  same session) or stop it. No tool can merge or deploy; those stay behind the approval
-  token in the console.
+- **One decider.** The chat agent, with its tools, is the only thing that decides what a
+  message means; it sees the whole conversation. The server does without a model only
+  "note: …" and "remember privately …" (which no model may see). The phone app never
+  decides: it listens, speaks, and runs the timers, alarms and events a reply proposes as
+  a card. (Triage, offers and the phone's on-device router were removed on 2026-10-25:
+  most small bugs came from handing messages between deciders.)
+- **Coding runs** are started, inspected, steered and stopped through the agent's coding
+  tools. No tool can merge or deploy; those stay behind the approval token in the console.
+  The supervisor executor still runs routines saved with it.
 - **The reply agent knows the repositories.** Every chat reply is told which repositories
   are registered and what the assistant can really do, and, for the repository selected in
   the console or named in the message, the start of its README and its top-level files, read
@@ -50,7 +49,7 @@ flowchart LR
 - **The reply agent has tools** (`app/assistant/toolbox.py`, `app/assistant/tools.py`). Each
   belongs to an ability in `abilities/`, and is offered only when that ability is available
   on the server:
-  - bookkeeping, through the same code as the instant actions: `remember`, `forget`,
+  - bookkeeping (`app/chat/direct_actions.py`): `remember`, `forget`,
     `list_add`, `list_create`, `list_check`, `work_items`, `note_add` (it can save notes,
     never read them),
     `remind`, and `routine_create`, `routines`, `routine_run`, `routine_stop`;
@@ -68,7 +67,7 @@ flowchart LR
   The tools go to the model through the provider's own tool calling (Kimi, MiniMax,
   DeepSeek and Gemini all take the OpenAI format); calls a model still writes as text run
   too. It may make up to 6 calls before answering, never the same call twice, and each one
-  shows on the reply's card ("Reading app/chat/triage.py"). Results are wrapped as data,
+  shows on the reply's card ("Reading app/chat/turns.py"). Results are wrapped as data,
   never instructions; a refused action comes back as "not done", so it can't claim it.
 - **Replies carry blocks.** These are choices, links, workflow and work-item cards,
   rendered by pre-built console components. A choice is answered by clicking it or by
@@ -81,7 +80,7 @@ flowchart LR
 | Package | What lives there |
 |---|---|
 | `app/api` | One router per resource (chat, tasks, workflows, catalog, web, …) and shared helpers |
-| `app/chat` | Message handling: triage, offers, choices and other blocks, quick actions |
+| `app/chat` | Message handling: the note rule, reply blocks (choices are suggestions), bookkeeping actions, routines |
 | `app/assistant` | The supervisor and its overview of the work |
 | `app/coding` | Starting runs, the agents (runners, ACP sessions, one-shot processes), git, reports, the PR executor |
 | `app/services` | `TaskService`: chat, tasks, executions, approvals and progress over one database |

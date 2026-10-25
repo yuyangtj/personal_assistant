@@ -1,7 +1,7 @@
 """The chat agent's tools, built from the services that already do the work.
 
-Bookkeeping (notes, memories, lists, reminders, routines) reuses the instant actions in
-app/chat/direct_actions.py, so a tool and the triage fast path behave the same. Research
+Bookkeeping (notes, memories, lists, reminders, routines) reuses the actions in
+app/chat/direct_actions.py, so a tool and an explicit "note: …" behave the same. Research
 and shopping start a background task that posts its answer in the chat; coding reuses the
 supervisor's tools, so a coding run still only ever ends in a draft pull request.
 
@@ -17,8 +17,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.assistant.toolbox import AssistantTool, ToolContext, ToolError, ToolOutcome
-from app.chat.direct_actions import DirectActionResult, run_direct_action
-from app.chat.triage import DirectAction
+from app.chat.direct_actions import DirectAction, DirectActionResult, run_direct_action
 from app.domain.work_items import WorkItemKind, slugify
 from app.work.items import RESUMABLE_STATUSES
 
@@ -53,7 +52,6 @@ def bookkeeping_tools(
     schedules: Any = None,
     notes: Any = None,
     tasks: Any = None,
-    route: Callable[[str], list[str]] | None = None,
 ) -> list[AssistantTool]:
     """Notes, memories, lists, reminders, routines and work items."""
 
@@ -77,7 +75,6 @@ def bookkeeping_tools(
                 schedules=schedules,
                 timezone=context.timezone,
                 tasks=tasks,
-                route=route,
                 notes=notes,
             )
         )

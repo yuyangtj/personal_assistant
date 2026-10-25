@@ -250,7 +250,7 @@ def test_each_lookup_is_shown_on_the_reply_card(reader) -> None:
         call("repo_search", repository="personal-assistant", query="decide"),
         call("repo_read", repository="personal-assistant", path="app/main.py"),
         call("repo_files", repository="personal-assistant", path=""),
-        reply("Done."),
+        reply("It decides in app/main.py."),
     )
     executor = ConversationExecutor(chat)  # type: ignore[arg-type]
     executor.toolbox = Toolbox(repository_tools(reader))

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.assistant.supervisor import SupervisorExecutor, SupervisorTools
 from app.execution.base import ConversationTurn
-from tests.test_triage import ScriptedChat
+from tests.fakes import ScriptedChat
 
 
 def _supervisor(client: TestClient, *replies: str) -> tuple[SupervisorExecutor, ScriptedChat]:

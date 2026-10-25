@@ -1,26 +1,78 @@
-"""T0: small, reversible actions done instantly, without a chat model.
+"""Small, reversible bookkeeping actions: notes, lists, memories, reminders, routines.
 
-Triage decides that a message is a bookkeeping request; this module carries it out
-against the work item and memory services and returns the sentence to reply with.
-Nothing here is irreversible: checklist entries can be unchecked or removed in the
-item page, and memories archived.
+The chat agent's tools carry them out through ``run_direct_action`` (see
+``app/assistant/tools.py``). The one thing done without any model is an explicit note,
+"note: …" (``note_rule``). Nothing here is irreversible: checklist entries can be
+unchecked or removed in the item page, and memories archived.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.chat.routines import describe, find_routines, is_watch, start_routine
-from app.chat.triage import DirectAction
 from app.domain.work_items import GROCERY_LIST, WorkItemKind, is_grocery_list
 from app.persistence.models import utc_now
 from app.schedules import Recurrence, ScheduleKind, ScheduleService, zone
 from app.work.items import RESUMABLE_STATUSES, WorkItemNotFoundError, WorkItemService
 from app.work.memory import MemoryService
 from app.work.notes import NoteService
+
+ACTION_TEXT_LIMIT = 300
+NOTE_TEXT_LIMIT = 4000
+
+
+class DirectAction(BaseModel):
+    """A small, reversible bookkeeping action."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal[
+        "checklist_add",
+        "checklist_check",
+        "remember",
+        "forget",
+        "remind",
+        "routine",
+        "list_routines",
+        "run_routine",
+        "cancel_routine",
+        "note_add",
+    ]
+    #: Most actions are one short phrase; a note may be longer (see the validator).
+    text: str = Field(min_length=1, max_length=NOTE_TEXT_LIMIT)
+    #: For remind/routine: local wall-clock time "YYYY-MM-DDTHH:MM" in the user's zone.
+    at: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
+    recurrence: Literal["none", "daily", "weekdays", "weekly", "monthly"] = "none"
+    #: The work item's #tag for checklist actions; None means "the obvious one".
+    work_item: str | None = Field(default=None, max_length=80)
+    kind: Literal["fact", "preference", "project"] | None = None
+
+    @model_validator(mode="after")
+    def _only_notes_are_long(self) -> DirectAction:
+        if self.type != "note_add" and len(self.text) > ACTION_TEXT_LIMIT:
+            raise ValueError(f"text can be at most {ACTION_TEXT_LIMIT} characters")
+        return self
+
+
+_NOTE = re.compile(
+    r"^(?:please\s+)?(?:(?:make|add|take|write|save|create)\s+(?:a\s+|me\s+a\s+)?(?:new\s+)?note"
+    r"|new\s+note|note(?:\s+to\s+self)?|anteckna|anteckning|ny\s+anteckning)\s*[:：]\s*(?P<text>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def note_rule(text: str) -> DirectAction | None:
+    """ "note: …" (with the colon) is saved at once, without a model; nothing else is."""
+    match = _NOTE.match(text.strip())
+    if match and len(match["text"].strip()) <= NOTE_TEXT_LIMIT:
+        return DirectAction(type="note_add", text=match["text"].strip())
+    return None
 
 
 @dataclass(frozen=True)
@@ -70,7 +122,6 @@ def _schedule(
     schedules: ScheduleService,
     timezone: str,
     now: datetime,
-    route: Callable[[str], list[str]] | None = None,
 ) -> DirectActionResult:
     if not action.at:
         return DirectActionResult(False, "When should that be? Give me a day and time.")
@@ -96,8 +147,6 @@ def _schedule(
         timezone=timezone,
         work_item_id=item.id if item else None,
         chat_session_id=chat_session_id,
-        # Where every run goes is decided once, now, like routing a chat message.
-        capabilities=route(action.text) if routine and route else None,
         quiet=watch,
     )
     when = local.strftime("%a %d %b %H:%M")
@@ -179,7 +228,6 @@ def run_direct_action(
     timezone: str = "UTC",
     now: datetime | None = None,
     tasks: Any = None,
-    route: Callable[[str], list[str]] | None = None,
     notes: NoteService | None = None,
 ) -> DirectActionResult:
     if action.type == "note_add":
@@ -207,7 +255,6 @@ def run_direct_action(
             schedules=schedules,
             timezone=timezone,
             now=now or utc_now(),
-            route=route,
         )
     if action.type == "remember":
         memory.create(

@@ -8,16 +8,14 @@ from fastapi.testclient import TestClient
 
 from app.capabilities import CapabilityRegistry
 from app.chat.routines import start_routine
-from app.chat.triage import Triager
 from app.execution.conversation import ConversationExecutor
 from app.manager import DeterministicManager
-from app.repositories import RepositoryRegistry
 from app.schedules import Recurrence, ScheduleKind, ScheduleService
 from app.services import TaskService
 from app.worker import TaskWorker
 from tests.test_conversation import RecordingChatClient
+from tests.test_direct_actions import _do
 from tests.test_schedules import RecordingNotifier
-from tests.test_triage import ScriptedChat, suggestion
 
 NOW = datetime(2026, 10, 5, 7, 0, tzinfo=UTC)
 
@@ -55,32 +53,22 @@ def _say(client: TestClient, chat: str, text: str) -> dict:
     ).json()
 
 
-def test_a_routine_saved_in_chat_is_routed_once_and_a_watch_is_quiet(client: TestClient) -> None:
+def test_a_routine_saved_in_chat_runs_the_chat_agent_and_a_watch_is_quiet(
+    client: TestClient,
+) -> None:
     watch = "tell me when Zoégas coffee is under 50 kr at Willys"
-    client.app.state.triager = Triager(
-        RepositoryRegistry.from_directory("repositories"),
-        ScriptedChat(
-            suggestion(
-                intent="direct_action",
-                action={
-                    "type": "routine",
-                    "text": watch,
-                    "at": "2026-10-12T08:00",
-                    "recurrence": "weekly",
-                },
-            ),
-            # Routing the instruction itself, once, at creation.
-            suggestion(intent="answer", needs_grocery_tools=True),
-        ),
-        groceries_available=True,
-    )
     chat = client.post("/chat-sessions", json={}).json()["id"]
 
-    reply = _say(client, chat, f"every Monday at 8, {watch}")["decision"]["result"]
+    reply = _do(
+        client, chat, type="routine", text=watch, at="2099-10-12T08:00", recurrence="weekly"
+    )
 
     assert "only notify you when it's worth knowing" in reply
     (routine,) = client.app.state.schedule_service.list()
-    assert routine.capabilities == ["groceries"] and routine.quiet is True
+    assert routine.capabilities is None and routine.quiet is True
+    # Each run is the chat agent, with its tools (the store tools among them).
+    task_id = start_routine(client.app.state.task_service, routine)
+    assert not client.app.state.task_service.get_task(task_id).required_capabilities
 
 
 def test_a_run_compares_with_earlier_runs_and_pushes_its_result(service: TaskService) -> None:
@@ -124,13 +112,15 @@ def test_a_watch_pushes_only_when_the_result_is_notable(service: TaskService) ->
     assert [body for _, body, _ in notifier.sent] == ["Down to 45 kr this week!"]
 
 
-def test_an_old_routine_without_a_route_uses_keyword_rules(service: TaskService) -> None:
+def test_a_routine_saved_with_a_specialist_still_goes_there(service: TaskService) -> None:
     routine = ScheduleService(service.database).create(
-        kind=ScheduleKind.ROUTINE, message="Summarize my Klarna spending", run_at=NOW
+        kind=ScheduleKind.ROUTINE,
+        message="Summarize my Klarna spending",
+        run_at=NOW,
+        capabilities=["groceries"],
     )
-    fallback = Triager(RepositoryRegistry.from_directory("repositories"), groceries_available=True)
 
-    task_id = start_routine(service, routine, fallback=fallback)
+    task_id = start_routine(service, routine)
 
     assert service.get_task(task_id).required_capabilities == ["groceries"]
 
@@ -141,14 +131,11 @@ def test_routines_are_listed_run_and_stopped_from_chat(client: TestClient) -> No
     _routine(service, "analyze my Klarna spending", chat=chat)
     _routine(service, "tell me when coffee is on offer at Willys", quiet=True, chat=chat)
 
-    listed = _say(client, chat, "what routines do I have?")["decision"]["result"]
-    ran = _say(client, chat, "run my klarna spending now")["decision"]["result"]
-    stopped = _say(client, chat, "stop the coffee watch")["decision"]["result"]
+    listed = _do(client, chat, type="list_routines", text="all")
+    ran = _do(client, chat, type="run_routine", text="klarna spending")
+    stopped = _do(client, chat, type="cancel_routine", text="coffee watch")
 
     assert "analyze my Klarna spending" in listed and "(watch:" in listed
-    messages = client.get(f"/chat-sessions/{chat}/messages").json()["messages"]
-    choices = next(m for m in messages if m["content"].startswith("Your routines"))["blocks"]
-    assert choices[0]["options"][0]["label"] == "Run “analyze my Klarna spending” now"
     assert ran == "Running now: analyze my Klarna spending"
     (task,) = client.get(f"/chat-sessions/{chat}/tasks").json()["tasks"]
     assert task["original_request"] == "analyze my Klarna spending"
@@ -164,7 +151,7 @@ def test_an_ambiguous_stop_asks_which_one(client: TestClient) -> None:
     _routine(service, "analyze my Klarna spending", chat=chat)
     _routine(service, "analyze my Willys spending", chat=chat)
 
-    reply = _say(client, chat, "stop the spending routine")["decision"]["result"]
+    reply = _do(client, chat, type="cancel_routine", text="spending routine")
 
     assert reply.startswith("More than one routine matches")
     assert len(client.app.state.schedule_service.list()) == 2
