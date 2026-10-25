@@ -238,8 +238,16 @@ Neither needs a browser on the server, and neither uses an API key:
   whichever side refreshes first logs the other out). Device-code login may first need
   turning on in ChatGPT's security settings.
 
+  The deploy user has no `sudo`, so it creates the folder through Docker, owned by the
+  coding user (as `root`, for example in the Hetzner web console, a plain `install -d -o
+  assistant-coder -g assistant-coder -m 700 /srv/personal-assistant/codex-home` does the
+  same):
+
   ```bash
-  sudo install -d -o assistant-coder -g assistant-coder -m 700 /srv/personal-assistant/codex-home
+  UID_=$(sed -n 's/^ASSISTANT_CODING_WORKER_UID=//p' .env.remote)
+  GID_=$(sed -n 's/^ASSISTANT_CODING_WORKER_GID=//p' .env.remote)
+  docker run --rm -v /srv/personal-assistant:/srv alpine \
+    install -d -o "$UID_" -g "$GID_" -m 700 /srv/codex-home
   echo 'ASSISTANT_HOST_CODEX_HOME=/srv/personal-assistant/codex-home' >> .env.remote
   docker compose --env-file .env.remote -f compose.remote.yaml run --rm --no-deps \
     coding-worker codex login --device-auth
