@@ -160,7 +160,9 @@ class TaskRepository:
         lease_seconds: int,
         supports_coding: bool = True,
         coding_only: bool = False,
+        lane: str = "all",
     ) -> TaskModel | None:
+        """``lane``: "replies" takes only chat replies, "background" everything else."""
         candidates = list(
             session.scalars(
                 select(TaskModel)
@@ -178,6 +180,7 @@ class TaskRepository:
                 candidate
                 for candidate in candidates
                 if not TaskRepository._is_malformed_repository_task(candidate)
+                and (lane == "all" or (lane == "replies") == TaskRepository.is_reply(candidate))
                 and (
                     TaskRepository._is_coding_task(candidate)
                     if coding_only
@@ -199,6 +202,20 @@ class TaskRepository:
             {"worker_id": worker_id},
         )
         return task
+
+    @staticmethod
+    def is_reply(task: TaskModel) -> bool:
+        """A chat reply someone is waiting for: from a chat, needing no specialist.
+
+        Research, shopping, supervision, coding and routine runs are background work.
+        """
+        context = task.source_context or {}
+        return bool(
+            task.chat_session_id
+            and not task.required_capabilities
+            and not context.get("schedule_id")
+            and not context.get("repository_id")
+        )
 
     @staticmethod
     def _is_coding_task(task: TaskModel) -> bool:

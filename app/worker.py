@@ -501,6 +501,9 @@ class TaskWorker:
         memory_service: MemoryService | None = None,
         supports_coding: bool = True,
         coding_only: bool = False,
+        #: "replies": only chat replies (a fast lane nothing else can hold up);
+        #: "background": everything else; "all": both, one at a time.
+        lane: str = "all",
         deployment_sync_interval_seconds: float = 10.0,
         brief_writeback: BriefWritebackJob | None = None,
         brief_writeback_interval_seconds: float = 30.0,
@@ -520,6 +523,7 @@ class TaskWorker:
         self.memory_service = memory_service
         self.supports_coding = supports_coding
         self.coding_only = coding_only
+        self.lane = lane
         self.deployment_sync_interval_seconds = deployment_sync_interval_seconds
         self._last_deployment_sync: float | None = None
         self.brief_writeback = brief_writeback
@@ -543,6 +547,7 @@ class TaskWorker:
             lease_seconds=self.lease_seconds,
             supports_coding=self.supports_coding,
             coding_only=self.coding_only,
+            lane=self.lane,
         )
         if task is None:
             self._sync_deployments()
@@ -735,7 +740,7 @@ class TaskWorker:
 
     def _sync_deployments(self) -> None:
         """Reconcile running deployments while idle; the coding worker leaves this alone."""
-        if self.workflow_service is None or self.coding_only:
+        if self.workflow_service is None or self.coding_only or self.lane == "replies":
             return
         now = monotonic()
         if (
@@ -1067,9 +1072,30 @@ def main() -> None:
         notifier=notifier,
     )
 
+    extra_workers: list[TaskWorker] = []
+    # Chat replies get their own claim loop, so research, routines or the shopping agent
+    # running in the main loop never keep someone waiting for an answer.
+    if not settings.worker_coding_only and settings.worker_reply_lane:
+        worker.lane = "background"
+        extra_workers.append(
+            TaskWorker(
+                service=task_service,
+                manager=manager,
+                executors=executors,
+                worker_id=f"{settings.worker_id}-replies",
+                lease_seconds=settings.worker_lease_seconds,
+                poll_interval_seconds=settings.worker_reply_poll_interval_seconds,
+                workflow_service=workflow_service,
+                memory_service=MemoryService(database),
+                supports_coding=False,
+                lane="replies",
+                notifier=notifier,
+            )
+        )
+        logger.info("Chat replies have their own lane")
+
     # More coding agents at once: extra claim loops, each with its own coding executor
     # (the runner chain keeps per-run state) and its own worker id for leases.
-    extra_workers: list[TaskWorker] = []
     if settings.worker_coding_only and coding_executor is not None:
         for index in range(2, settings.coding_concurrency + 1):
             extra_executor = build_coding_executor(

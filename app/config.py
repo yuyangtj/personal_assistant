@@ -15,6 +15,9 @@ class Settings:
     auto_create_schema: bool = False
     worker_id: str = "worker-local"
     worker_poll_interval_seconds: float = 1.0
+    #: A separate claim loop for chat replies, checked more often than background work.
+    worker_reply_lane: bool = True
+    worker_reply_poll_interval_seconds: float = 0.25
     worker_lease_seconds: int = 60
     worker_coding_only: bool = False
     #: How many coding agents the coding worker runs at once.
@@ -143,6 +146,15 @@ class Settings:
                 os.getenv("ASSISTANT_AUTO_CREATE_SCHEMA", str(defaults.auto_create_schema))
             ),
             worker_id=os.getenv("ASSISTANT_WORKER_ID", defaults.worker_id),
+            worker_reply_lane=_as_bool(
+                os.getenv("ASSISTANT_WORKER_REPLY_LANE", str(defaults.worker_reply_lane))
+            ),
+            worker_reply_poll_interval_seconds=float(
+                os.getenv(
+                    "ASSISTANT_WORKER_REPLY_POLL_INTERVAL_SECONDS",
+                    str(defaults.worker_reply_poll_interval_seconds),
+                )
+            ),
             worker_poll_interval_seconds=float(
                 os.getenv(
                     "ASSISTANT_WORKER_POLL_INTERVAL_SECONDS",

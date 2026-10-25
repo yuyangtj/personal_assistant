@@ -11,6 +11,7 @@ Newer settings, all optional:
 | `ASSISTANT_SUPERVISOR_ENABLED` | `true` | Messages about coding work go to the supervisor |
 | `ASSISTANT_MAIN_AGENT_ENABLED` | `false` | Every message goes to the chat agent and its tools, without triage; plain list, memory and reminder phrasings are still done instantly |
 | `ASSISTANT_CODING_CONCURRENCY` | `2` | Coding agents running at once in the coding worker |
+| `ASSISTANT_WORKER_REPLY_LANE` / `ASSISTANT_WORKER_REPLY_POLL_INTERVAL_SECONDS` | `true` / `0.25` | Chat replies get their own claim loop in the worker, so research, routines and the shopping agent never hold one up |
 | `ASSISTANT_CODE_AGENT_PROVIDERS` | `claude,codex,kimi,minimax-claude` | Coding agents in order; the next takes over when one is rate-limited or can't log in |
 | `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude Code on your Claude subscription (from `claude setup-token`); without it Claude Code is skipped |
 | `CODEX_HOME` / `ASSISTANT_CODEX_OWN_SANDBOX` | `~/.codex` / `true` (`false` in the coding container) | Where Codex's ChatGPT login lives; Codex is skipped without `auth.json` there. In the locked-down container, the container is Codex's sandbox |
