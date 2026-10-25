@@ -56,12 +56,20 @@ _CLAIMS_DONE = re.compile(
     r"\b(?:is|was|has been)\s+already\s+(?:stopped|cancell?ed|done|finished)\b",
     re.IGNORECASE,
 )
+#: Promises become real: "I'll check again tomorrow" is a one-off routine, set now.
+FOLLOW_UPS = (
+    "\nWhen you tell the user you will check something later or come back to it, set it up "
+    "now with routine_create (recurrence none, at that time) so it really happens; never "
+    "promise a later check you haven't scheduled."
+)
 #: A report of finished background work, written for the Assistant conversation.
 REPORT = (
     "This is not a message from the user: background work they asked for has finished, "
     "and you are telling them about it in your main conversation. In a few short lines, "
     "in your own voice, say what came back and what needs them (a PR to review, something "
-    "that failed). Don't repeat full results: they are in the chat each piece came from, "
+    "that failed, work that is stuck or hasn't started, which they may want to stop). A "
+    "failed research or routine run was already tried twice. Don't repeat full results: "
+    "they are in the chat each piece came from, "
     'and links to them are added under your message. Add "notable": true to your JSON '
     "only when something here is worth a phone notification right now; otherwise false."
 )
@@ -323,10 +331,12 @@ class ConversationExecutor:
             else CODING_HANDOFF
         )
         research_tool = bool(self.toolbox) and "research" in self.toolbox.names
+        can_follow_up = bool(self.toolbox) and "routine_create" in self.toolbox.names
         prompt = (
             SYSTEM_PROMPT.replace("{coding}", coding)
             + (f"\n{self.abilities_text}" if self.abilities_text else "")
             + (RESEARCH_HANDOFF if self.research_available and not research_tool else "")
+            + (FOLLOW_UPS if can_follow_up else "")
         )
         messages = [ChatMessage("system", f"{prompt}\n{self._clock(context)}")]
         if context.get("home"):

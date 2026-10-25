@@ -120,6 +120,8 @@ class TaskModel(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     #: When this finished background work was reported to the Assistant conversation.
     reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: When the Assistant last raised it as stuck or still waiting for review.
+    followed_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
