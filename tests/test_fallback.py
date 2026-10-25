@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from app.capabilities import CapabilityRegistry
 from app.integrations.chat import ChatCompletion, ChatMessage, ProviderError
 from app.integrations.fallback import (
     FallbackChatClient,
-    FallbackManagerModelClient,
     ProviderChainError,
 )
-from app.manager.model import ModelInvocation, ValidatedManagerModelAdapter
 from app.persistence.models import TaskModel
 
 
@@ -27,24 +24,6 @@ class StubChatClient:
         *,
         max_tokens: int = 700,
     ) -> ChatCompletion:
-        self.calls += 1
-        if isinstance(self.result, Exception):
-            raise self.result
-        return self.result
-
-    def close(self) -> None:
-        self.closed = True
-
-
-class StubManagerClient:
-    def __init__(self, provider: str, result: ModelInvocation | Exception):
-        self.provider = provider
-        self.model = f"{provider}-manager"
-        self.result = result
-        self.calls = 0
-        self.closed = False
-
-    def generate(self, request, *, timeout_seconds: float) -> ModelInvocation:
         self.calls += 1
         if isinstance(self.result, Exception):
             raise self.result
@@ -117,28 +96,3 @@ def test_chat_chain_reports_sanitized_exhaustion() -> None:
 
     assert str(captured.value) == "Chat provider chain exhausted: kimi->minimax"
     assert "secret" not in str(captured.value)
-
-
-def test_manager_chain_uses_fallback_and_records_actual_provider() -> None:
-    primary = StubManagerClient("kimi", ProviderError("sanitized failure"))
-    fallback = StubManagerClient(
-        "minimax",
-        ModelInvocation(
-            raw_output=_analysis(),
-            input_tokens=22,
-            output_tokens=8,
-            provider="minimax",
-            model="MiniMax-M3",
-        ),
-    )
-    chain = FallbackManagerModelClient([primary, fallback])
-    registry = CapabilityRegistry.from_directory("capabilities")
-
-    result = ValidatedManagerModelAdapter(chain).analyze(_task(), registry.list())
-
-    assert result.provider == "minimax"
-    assert result.model == "MiniMax-M3"
-    assert primary.calls == fallback.calls == 1
-    chain.close()
-    assert primary.closed is True
-    assert fallback.closed is True

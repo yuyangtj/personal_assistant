@@ -156,8 +156,7 @@ The coding runner settings are:
 
 The setting can narrow the allowed runner set, for example `minimax-claude,codex`.
 Ranking within that set comes from `coding-runners/*.yaml`, task fit, and runtime state.
-A provider is only a coding runner here; MiniMax remains independently configurable as
-the manager model that infers required capabilities.
+A provider is only a coding runner here; the chat model is configured separately.
 
 For a personal installation, use a fine-grained token scoped to the configured repository.
 It needs **Pull requests: write** to create PRs, **Contents: write** to push and merge, and

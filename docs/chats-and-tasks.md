@@ -4,18 +4,15 @@ Chats are where you think and communicate; tasks are work launched from them. Th
 linked by id, never by copying content, so task status is never duplicated or stale and
 the task event stream stays authoritative.
 
-Talking in a chat launches nothing. Posting a message stores the turn and, when it reads
-as a request for work, returns a `proposal` the client offers as "create a task?":
+Posting a message stores the turn and says what the server did with it (`decision`):
+usually "main agent", and the console then queues the chat agent's reply as a task, which
+links it to the message it came from (`origin_message_id`):
 
 ```bash
 MESSAGE=$(curl -s -X POST http://localhost:8000/chat-sessions/$CHAT_ID/messages \
   -H 'content-type: application/json' \
-  -d '{"content":"Add authentication to the API"}')
-echo "$MESSAGE" | jq .proposal
+  -d '{"content":"How much did I spend at Lidl last month?"}')
 ```
-
-A proposal is advisory. Work starts only when the message is confirmed, which links the
-task to the message it came from (`origin_message_id`):
 
 ```bash
 MESSAGE_ID=$(echo "$MESSAGE" | jq -r .message.id)
@@ -23,9 +20,9 @@ curl -X POST http://localhost:8000/chat-sessions/$CHAT_ID/messages/$MESSAGE_ID/t
   -H 'content-type: application/json' -d '{}'
 ```
 
-Confirming the same message twice returns the original task rather than starting the work
-again. A proposal marked `consequential` — anything touching a repository or a deployment
-— is the case clients must confirm before a conversation launches costly work.
+Asking for the same message's task twice returns the original task rather than starting
+the work again. Coding work is started only by the chat agent's `coding_start` tool, and
+only ever ends in a draft pull request.
 
 Going the other way, `POST /tasks/TASK_ID/chat-session` opens a task's conversation
 (backfilling one for older tasks) and posts a reference to the task: its status, result
@@ -132,9 +129,8 @@ Both ways in are started by the user, and nothing is sent until they send it.
   visible text is attached (password fields are skipped, and secure windows such as
   banking apps share nothing; `ScreenText.kt`). It shows as a removable chip and goes with
   the next message as an `attachment` block.
-- **Where it goes.** Routing gets the first 600 characters. The answering agents
-  (conversation, shopping, research) get the attachment as untrusted data. The supervisor
-  and coding agents never get it (`UNTRUSTED_CONTEXT_EXCLUDED`).
+- **Where it goes.** The chat agent and research get the attachment as untrusted data.
+  Coding agents never get it (`UNTRUSTED_CONTEXT_EXCLUDED`).
 - The assistant role requires a speech recognizer in the app. `AssistantRecognitionService`
   forwards to Google's, so making the app the assistant doesn't break voice input
   elsewhere.

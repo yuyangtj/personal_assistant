@@ -1,4 +1,4 @@
-"""Klarna purchases as tools for the shopping agent, answered from the server's own database.
+"""Klarna purchases as tools for the chat agent, answered from the server's own database.
 
 They look like an MCP server ("klarna") to the agent, so it uses them the same way as the
 Willys and Lidl tools; nothing leaves the server except the rows a question needs.

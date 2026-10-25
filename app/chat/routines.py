@@ -3,7 +3,8 @@
 A routine is the assistant's "skill": "every 1st of the month, analyze my Klarna spending",
 "every Monday, tell me when Zoégas is under 50 kr at Willys". Each run goes to the chat
 agent, with its tools, and the routine's earlier results to compare against. (Routines
-saved before that may name a specialist in ``capabilities``; they still go there.)
+saved before 2026-10-25 may name a specialist in ``capabilities``; only research is still
+one, so the rest go to the chat agent.)
 A watch ("tell me when ...") posts each result to its chat but only pushes to the phone
 when the agent marks it notable.
 """
@@ -47,6 +48,11 @@ _FILLER = {
 }
 
 
+#: Agents a routine may still be saved with; the shopping agent and the supervisor are gone,
+#: and the chat agent has their tools.
+SPECIALISTS = frozenset({"web_research"})
+
+
 def is_watch(instruction: str) -> bool:
     """Whether a routine should only push when something is worth knowing."""
     return bool(_WATCH.search(instruction))
@@ -58,13 +64,13 @@ def start_routine(
     *,
     chat_session_id: str | None = None,
 ) -> str:
-    """Start one run of a routine (the chat agent, or the specialist it was saved with).
+    """Start one run of a routine: the chat agent, or research when it was saved with it.
 
     ``chat_session_id`` runs it in another chat, e.g. the one where "run it now" was said.
     """
     task = tasks.create_task(
         request=schedule.message,
-        required_capabilities=schedule.capabilities or None,
+        required_capabilities=[c for c in schedule.capabilities or [] if c in SPECIALISTS] or None,
         chat_session_id=chat_session_id or schedule.chat_session_id,
         work_item_id=schedule.work_item_id,
         source_context={"schedule_id": schedule.id, "timezone": schedule.timezone},

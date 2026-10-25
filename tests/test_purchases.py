@@ -6,12 +6,12 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.assistant.toolbox import Toolbox, ToolContext, ToolOutcome
+from app.assistant.tools import store_tools
 from app.chat.uploads import upload_block
-from app.execution.grocery_agent import GroceryAgentExecutor
 from app.tools.klarna import KlarnaTools, ToolGateway
 from app.tools.mcp import Toolset
 from app.work.purchases import PurchaseService
-from tests.fakes import ScriptedChat
 
 HEADER = "date,time,merchant,amount,currency,original_amount,payment_type,status,date_display\n"
 EXPORT = HEADER + (
@@ -28,18 +28,11 @@ def _service(client: TestClient) -> PurchaseService:
     return PurchaseService(client.app.state.database)
 
 
-def _agent(client: TestClient, *replies: str, today=date(2026, 9, 25)):
+def _klarna(client: TestClient, tool: str, today=date(2026, 9, 25), **arguments) -> ToolOutcome:
+    """One Klarna tool, as the chat agent runs it: what the model sees, and the blocks."""
     gateway = ToolGateway(KlarnaTools(_service(client), today=lambda: today))
-    model = ScriptedChat(*replies)
-    return GroceryAgentExecutor(model, gateway, TOOLSET), model
-
-
-def _call(tool: str, **arguments) -> str:
-    return json.dumps({"action": "tool", "tool": f"klarna.{tool}", "arguments": arguments})
-
-
-def _finish(answer: str) -> str:
-    return json.dumps({"action": "finish", "answer": answer})
+    box = Toolbox(store_tools(gateway, TOOLSET))
+    return box.run(f"klarna_{tool}", arguments, ToolContext(chat_session_id="c"))
 
 
 def _offer(client: TestClient) -> tuple[str, str, str]:
@@ -119,75 +112,44 @@ def test_spending_leaves_out_cancelled_purchases(client: TestClient) -> None:
     assert service.spending()["pending"] == 1
 
 
-def test_with_no_purchases_the_agent_offers_an_upload(client: TestClient) -> None:
-    agent, _ = _agent(client, _call("spending"), _finish("Upload your Klarna export first."))
+def test_with_no_purchases_the_reply_offers_an_upload(client: TestClient) -> None:
+    (block,) = _klarna(client, "spending").blocks
 
-    output = agent.execute(task_id="t", request="Klarna spending?", is_cancelled=lambda: False)
-
-    (block,) = output.output["blocks"]
     assert (block["type"], block["target"]) == ("upload", "klarna-purchases")
-
-
-def test_the_agent_answers_from_klarna_without_the_store_gateway(client: TestClient) -> None:
-    _service(client).import_klarna_csv(EXPORT)
-    agent, model = _agent(client, _call("spending", merchant="uniqlo"), _finish("499 kr."))
-
-    output = agent.execute(task_id="t", request="Uniqlo spending?", is_cancelled=lambda: False)
-
-    assert output.output["reply"] == "499 kr." and "blocks" not in output.output
-    catalog = model.requests[0][1].content
-    assert "klarna.spending" in catalog and "willys." not in catalog  # stores not connected
-    seen = model.requests[1][-1].content
-    assert '"total":"499.00"' in seen and "data_covers" in seen
 
 
 def test_stale_data_and_asking_to_upload_both_offer_the_button(client: TestClient) -> None:
     _service(client).import_klarna_csv(EXPORT)
-    stale, _ = _agent(client, _call("purchases"), _finish("ok"), today=date(2026, 11, 1))
-    asked, _ = _agent(client, _call("upload_export"), _finish("Use the button."))
+    stale = _klarna(client, "purchases", today=date(2026, 11, 1))
+    asked = _klarna(client, "upload_export")
 
-    for agent in (stale, asked):
-        output = agent.execute(task_id="t", request="q", is_cancelled=lambda: False)
-        assert output.output["blocks"][0]["target"] == "klarna-purchases"
+    for outcome in (stale, asked):
+        assert outcome.blocks[0]["target"] == "klarna-purchases"
 
 
 def test_monthly_spending_comes_with_a_chart_the_model_cannot_alter(client: TestClient) -> None:
     rows = "2026-07-03,10:00,Apotea,100,SEK,,Pay in 30 days,,3 Jul\n"
     _service(client).import_klarna_csv(EXPORT + rows)
-    agent, model = _agent(
-        client, _call("spending", group_by="month"), _finish("Spending dipped in July.")
-    )
+    outcome = _klarna(client, "spending", group_by="month")
 
-    output = agent.execute(task_id="t", request="Spending over time?", is_cancelled=lambda: False)
-
-    (chart,) = output.output["blocks"]
+    (chart,) = outcome.blocks
     assert (chart["type"], chart["kind"], chart["x"]["type"]) == ("chart", "bar", "time")
     assert chart["series"][0]["points"] == [
         ["2026-07", 100.0],
         ["2026-08", 776.0],
         ["2026-09", 672.0],
     ]
-    assert output.output["reply"] == "Spending dipped in July."
-    seen = model.requests[1][-1].content
-    assert '"total":"776.00"' in seen and '"blocks"' not in seen  # numbers shown once
+    assert '"total":"776.00"' in outcome.text and '"blocks"' not in outcome.text  # shown once
 
 
 def test_two_months_or_an_ungrouped_total_get_no_chart(client: TestClient) -> None:
     _service(client).import_klarna_csv(EXPORT)
-    agent, _ = _agent(client, _call("spending", group_by="month"), _finish("Two months."))
-
-    output = agent.execute(task_id="t", request="Per month?", is_cancelled=lambda: False)
-
-    assert "blocks" not in output.output
+    assert _klarna(client, "spending", group_by="month").blocks == []
 
 
 def test_spending_per_merchant_is_a_category_chart(client: TestClient) -> None:
     _service(client).import_klarna_csv(EXPORT)
-    agent, _ = _agent(client, _call("spending", group_by="merchant"), _finish("SJ leads."))
-
-    output = agent.execute(task_id="t", request="Per merchant?", is_cancelled=lambda: False)
-
-    (chart,) = output.output["blocks"]
+    (chart,) = _klarna(client, "spending", group_by="merchant").blocks
     assert chart["x"]["type"] == "category" and chart["series"][0]["points"][0] == ["SJ", 776.0]
 
 
@@ -204,9 +166,7 @@ def test_weekly_spending_groups_by_monday_and_gets_a_chart(client: TestClient) -
         ("2026-09-07", "100.00"),
         ("2026-09-14", "499.00"),
     ]
-    agent, _ = _agent(client, _call("spending", group_by="week"), _finish("Four weeks."))
-    output = agent.execute(task_id="t", request="Weekly total?", is_cancelled=lambda: False)
-    (chart,) = output.output["blocks"]
+    (chart,) = _klarna(client, "spending", group_by="week").blocks
     assert chart["title"] == "Klarna spending per week" and len(chart["series"][0]["points"]) == 4
 
 
@@ -238,51 +198,6 @@ def test_each_message_keeps_how_it_was_routed(client: TestClient) -> None:
         "action: note_add",
         "rules",
     )
-
-
-def test_an_answer_without_any_tool_result_is_sent_back_once(client: TestClient) -> None:
-    _service(client).import_klarna_csv(EXPORT)
-    agent, model = _agent(
-        client,
-        _finish("You spent 3 240 kr at IKEA."),  # made up: no tool was called
-        _call("spending", group_by="merchant"),
-        _finish("SJ 776 kr, Apotea 173 kr, Uniqlo 499 kr."),
-    )
-
-    output = agent.execute(task_id="t", request="Klarna per merchant?", is_cancelled=lambda: False)
-
-    assert output.output["reply"].startswith("SJ 776 kr")
-    assert "without calling any tool" in model.requests[1][-1].content
-
-
-def test_a_message_that_needs_no_data_is_answered_after_one_nudge(client: TestClient) -> None:
-    agent, _ = _agent(client, _finish("You're welcome!"), _finish("You're welcome!"))
-
-    output = agent.execute(task_id="t", request="thanks!", is_cancelled=lambda: False)
-
-    assert output.output["reply"] == "You're welcome!"
-
-
-def test_figures_given_without_looking_anything_up_are_never_shown(client: TestClient) -> None:
-    _service(client).import_klarna_csv(EXPORT)
-    made_up = _finish("You spent 3 240 kr at IKEA.")
-    agent, _ = _agent(client, made_up, made_up)  # ignores the nudge too
-
-    output = agent.execute(task_id="t", request="Klarna total?", is_cancelled=lambda: False)
-
-    assert "3 240" not in output.output["reply"]
-    assert output.output["reply"].startswith("Sorry, I couldn't look that up")
-
-
-def test_the_agent_is_told_every_way_spending_can_be_grouped(client: TestClient) -> None:
-    agent, model = _agent(client, _finish("ok"), _finish("ok"))
-
-    agent.execute(task_id="t", request="Klarna?", is_cancelled=lambda: False)
-
-    catalog = model.requests[0][1].content
-    spending = next(line for line in catalog.splitlines() if "klarna.spending" in line)
-    assert "group_by (one of: merchant, month, week)" in spending
-    assert "merchant, month or week" in spending
 
 
 def test_the_chat_agent_has_the_shopping_tools_itself(client: TestClient) -> None:

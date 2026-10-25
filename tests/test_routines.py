@@ -112,17 +112,20 @@ def test_a_watch_pushes_only_when_the_result_is_notable(service: TaskService) ->
     assert [body for _, body, _ in notifier.sent] == ["Down to 45 kr this week!"]
 
 
-def test_a_routine_saved_with_a_specialist_still_goes_there(service: TaskService) -> None:
-    routine = ScheduleService(service.database).create(
-        kind=ScheduleKind.ROUTINE,
-        message="Summarize my Klarna spending",
-        run_at=NOW,
-        capabilities=["groceries"],
-    )
+def test_an_old_routine_goes_to_the_chat_agent_unless_it_is_research(
+    service: TaskService,
+) -> None:
+    schedules = ScheduleService(service.database)
 
-    task_id = start_routine(service, routine)
+    def started(capabilities: list[str]):
+        routine = schedules.create(
+            kind=ScheduleKind.ROUTINE, message="x", run_at=NOW, capabilities=capabilities
+        )
+        return service.get_task(start_routine(service, routine)).required_capabilities
 
-    assert service.get_task(task_id).required_capabilities == ["groceries"]
+    # The shopping agent and the supervisor are gone; the chat agent has their tools.
+    assert not started(["groceries"]) and not started(["supervision"])
+    assert started(["web_research"]) == ["web_research"]
 
 
 def test_routines_are_listed_run_and_stopped_from_chat(client: TestClient) -> None:

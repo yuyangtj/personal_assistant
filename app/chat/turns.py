@@ -76,7 +76,6 @@ def triage_message(
                     "reason",
                     "confidence",
                     "source",
-                    "follow_up",
                     "about_work",
                     "repository_id",
                 },

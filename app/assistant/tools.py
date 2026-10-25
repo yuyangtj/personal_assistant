@@ -268,8 +268,8 @@ def repository_tools(reader: Any) -> list[AssistantTool]:
     return tools
 
 
-def job_tools(tasks: Any, *, research: bool, shopping: bool) -> list[AssistantTool]:
-    """Hand a question to a specialist in the background; its answer is posted in the chat."""
+def job_tools(tasks: Any, *, research: bool) -> list[AssistantTool]:
+    """Hand a question to the research agent in the background; its answer is posted in the chat."""
 
     def start(capability: str, label: str) -> Callable[[dict[str, Any], ToolContext], str]:
         def run(arguments: dict[str, Any], context: ToolContext) -> str:
@@ -311,18 +311,6 @@ def job_tools(tasks: Any, *, research: bool, shopping: bool) -> list[AssistantTo
                 "general knowledge (cooking, how things work) yourself",
                 start("web_research", "research agent"),
                 lambda a: "Starting the research",
-            )
-        )
-    if shopping:
-        tools.append(
-            AssistantTool(
-                "shopping",
-                "shopping",
-                "{}",
-                "ask the shopping agent about Klarna purchases and spending (with charts), "
-                "or grocery offers and receipts; its answer is posted in this chat",
-                start("groceries", "shopping agent"),
-                lambda a: "Asking the shopping agent",
             )
         )
     return tools
@@ -416,8 +404,7 @@ def store_tools(gateway: Any, toolset: Any) -> list[AssistantTool]:
     """
     from app.chat.blocks import take_tool_blocks
     from app.chat.uploads import offered_uploads, upload_blocks
-    from app.execution.grocery_agent import _not_connected, server_unavailable
-    from app.tools.mcp import McpError, condense
+    from app.tools.mcp import McpError, condense, not_connected, server_unavailable
 
     def runner(server: str, tool: str) -> Callable[[dict[str, Any], ToolContext], ToolOutcome]:
         def run(arguments: dict[str, Any], context: ToolContext) -> ToolOutcome:
@@ -427,7 +414,7 @@ def store_tools(gateway: Any, toolset: Any) -> list[AssistantTool]:
                 raise ToolError(str(error)) from error
             uploads = upload_blocks(offered_uploads(result))
             charts, result = take_tool_blocks(result)
-            if _not_connected(result):
+            if not_connected(result):
                 # The server's own advice (a setup command on a Mac) is wrong here.
                 return ToolOutcome(f"not done: the user's {server} account isn't connected yet")
             return ToolOutcome(f"{STORE_DATA}\n{condense(result)}", [*charts[-2:], *uploads])

@@ -1,15 +1,14 @@
+"""The store gateway the chat agent's shopping tools go through."""
+
 from __future__ import annotations
 
 import json
-from datetime import date
 from pathlib import Path
 
 import httpx
 import pytest
 
-from app.execution.grocery_agent import GroceryAgentExecutor
 from app.tools.mcp import McpError, McpGateway, Toolset, condense
-from tests.fakes import ScriptedChat
 
 TOOLSET = Toolset.load(Path("toolsets/groceries.yaml"))
 
@@ -43,18 +42,6 @@ class FakeGateway:
         if result is None:
             raise McpError(f"/{server}/tools/call failed (502): boom")
         return result
-
-
-def _agent(gateway, *replies) -> tuple[GroceryAgentExecutor, ScriptedChat]:
-    model = ScriptedChat(*replies)
-    return GroceryAgentExecutor(model, gateway, TOOLSET, today=lambda: date(2026, 10, 5)), model
-
-
-def _run(agent: GroceryAgentExecutor, request: str) -> dict:
-    return agent.execute(task_id="t", request=request, is_cancelled=lambda: False).output
-
-
-# --- condensing store results -------------------------------------------------------
 
 
 def test_store_results_are_condensed_for_the_model() -> None:
@@ -103,139 +90,3 @@ def test_the_gateway_client_sends_the_token_and_reports_failures() -> None:
 
 
 # --- the grocery agent ------------------------------------------------------------------
-
-
-def test_the_agent_answers_from_the_store_tools() -> None:
-    gateway = FakeGateway(
-        {"willys.get_promotions": _text({"offers": [{"name": "Kaffe", "price": "49,90 kr"}]})}
-    )
-    agent, model = _agent(
-        gateway,
-        json.dumps(
-            {"action": "tool", "tool": "willys.get_promotions", "arguments": {"query": "kaffe"}}
-        ),
-        json.dumps({"action": "finish", "answer": "Willys has coffee at 49,90 kr this week."}),
-    )
-
-    output = _run(agent, "is coffee on offer at willys?")
-
-    assert output["reply"] == "Willys has coffee at 49,90 kr this week."
-    assert gateway.calls == [("willys", "get_promotions", {"query": "kaffe"})]
-    catalog = model.requests[0][1].content
-    assert "willys.get_promotions" in catalog and "query (string)" in catalog
-    assert "lidl.get_historical_receipts" in catalog
-    assert "Today is 2026-10-05" in model.requests[0][0].content
-    assert "Kaffe" in model.requests[1][-1].content
-
-
-def test_the_agent_cannot_call_tools_outside_its_toolset() -> None:
-    gateway = FakeGateway({})
-    agent, model = _agent(
-        gateway,
-        json.dumps({"action": "tool", "tool": "lidl.resolve_store", "arguments": {}}),
-        json.dumps({"action": "tool", "tool": "willys.add_to_cart", "arguments": {}}),
-        json.dumps({"action": "finish", "answer": "I can't do that."}),
-    )
-
-    _run(agent, "add milk to my cart")
-
-    assert gateway.calls == []
-    assert "not an available tool" in model.requests[1][-1].content
-    assert "not an available tool" in model.requests[2][-1].content
-
-
-def test_a_failing_tool_is_reported_to_the_model() -> None:
-    gateway = FakeGateway({})
-    agent, model = _agent(
-        gateway,
-        json.dumps({"action": "tool", "tool": "lidl.get_historical_receipts", "arguments": {}}),
-        json.dumps({"action": "finish", "answer": "Lidl isn't reachable right now."}),
-    )
-
-    output = _run(agent, "what did I buy at lidl?")
-
-    assert "ERROR:" in model.requests[1][-1].content
-    assert output["tool_calls"] == [{"tool": "lidl.get_historical_receipts", "arguments": {}}]
-
-
-def test_the_grocery_agent_is_routable() -> None:
-    from app.capabilities import CapabilityRegistry
-
-    chosen = CapabilityRegistry.from_directory("capabilities").select(["groceries"])
-
-    assert chosen.id == "grocery-agent"
-
-
-def test_minimax_native_tool_calls_are_understood() -> None:
-    gateway = FakeGateway({"willys.get_purchase_history": _text({"configured": False})})
-    agent, _ = _agent(
-        gateway,
-        '[TOOL_CALL] {tool => "willys.get_purchase_history", arguments => '
-        '{"fromDate": "2026-09-28", "toDate": "2026-10-04"}} [/TOOL_CALL]',
-        json.dumps({"action": "finish", "answer": "Your Willys account isn't connected yet."}),
-    )
-
-    output = _run(agent, "what did I buy at willys last week?")
-
-    assert gateway.calls == [
-        ("willys", "get_purchase_history", {"fromDate": "2026-09-28", "toDate": "2026-10-04"})
-    ]
-    assert output["reply"] == "Your Willys account isn't connected yet."
-
-
-def test_an_agent_that_never_answers_gets_a_polite_reply_not_a_failure() -> None:
-    call = json.dumps({"action": "tool", "tool": "willys.get_promotions", "arguments": {}})
-    gateway = FakeGateway({"willys.get_promotions": _text({"offers": []})})
-    agent, model = _agent(gateway, *[call] * 10)
-
-    output = _run(agent, "offers?")
-
-    assert output["reply"].startswith("Sorry, I couldn't get a clear answer")
-    assert len(gateway.calls) == 1  # repeats are answered from the earlier result
-    assert "Last step" in model.requests[-1][-1].content
-
-
-def test_answers_follow_the_questions_language() -> None:
-    gateway = FakeGateway({})
-    finish = json.dumps({"action": "finish", "answer": "ok"})
-    # Answering with no tool result is sent back once, so each answers twice.
-    english, english_model = _agent(gateway, finish, finish)
-    swedish, swedish_model = _agent(gateway, finish, finish)
-
-    _run(english, "What did I buy at Willys last week?")
-    _run(swedish, "Vad köpte jag på Willys förra veckan?")
-
-    assert english_model.requests[0][-1].content.endswith("(Answer in English.)")
-    assert swedish_model.requests[0][-1].content.endswith("(Answer in Swedish.)")
-
-
-def test_a_missing_store_login_never_reaches_the_model_as_setup_advice() -> None:
-    not_configured = _text(
-        {"configured": False, "message": "Run `npm run setup-login` to store your password"}
-    )
-    gateway = FakeGateway({"willys.get_purchase_history": not_configured})
-    agent, model = _agent(
-        gateway,
-        json.dumps({"action": "tool", "tool": "willys.get_purchase_history", "arguments": {}}),
-        json.dumps({"action": "finish", "answer": "Your Willys account isn't connected yet."}),
-    )
-
-    _run(agent, "what did I buy at willys?")
-
-    seen = model.requests[1][-1].content
-    assert "NOT CONNECTED" in seen and "npm" not in seen
-
-
-def test_food_preferences_reach_the_grocery_agent() -> None:
-    gateway = FakeGateway({})
-    finish = json.dumps({"action": "finish", "answer": "ok"})
-    agent, model = _agent(gateway, finish, finish)
-
-    agent.execute(
-        task_id="t",
-        request="any good offers this week?",
-        is_cancelled=lambda: False,
-        context={"memories": ["I'm vegetarian"]},
-    )
-
-    assert any("I'm vegetarian" in message.content for message in model.requests[0])

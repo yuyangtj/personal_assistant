@@ -103,37 +103,6 @@ class ExecutionOperations(ServiceBase):
                 decision,
             )
 
-    def record_task_analysis(self, task_id: str, result: dict[str, Any]) -> None:
-        with self.database.session() as session, session.begin():
-            task = self._require_task(session, task_id, for_update=True)
-            if TaskStatus(task.status) != TaskStatus.PLANNING:
-                return
-            analysis = result["analysis"]
-            task.current_goal = analysis["goal"]
-            task.required_capabilities = analysis["required_capabilities"]
-            TaskRepository.append_event(
-                session,
-                task,
-                EventType.TASK_ANALYZED,
-                result,
-            )
-
-    def record_task_analysis_failure(
-        self,
-        task_id: str,
-        failure: dict[str, Any],
-    ) -> None:
-        with self.database.session() as session, session.begin():
-            task = self._require_task(session, task_id, for_update=True)
-            if TaskStatus(task.status) != TaskStatus.PLANNING:
-                return
-            TaskRepository.append_event(
-                session,
-                task,
-                EventType.TASK_ANALYSIS_FAILED,
-                failure,
-            )
-
     def start_execution(
         self,
         task_id: str,

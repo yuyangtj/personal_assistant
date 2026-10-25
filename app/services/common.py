@@ -6,7 +6,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.domain.proposals import TaskProposal
 from app.domain.work_items import mentioned_slugs
 from app.persistence.models import ChatMessageModel
 from app.work.items import focus_chat, get_work_item
@@ -29,7 +28,6 @@ class ChatMessageNotFoundError(LookupError):
 @dataclass(frozen=True)
 class PostedMessage:
     message: ChatMessageModel
-    proposal: TaskProposal | None
     focused_work_items: list[str] = field(default_factory=list)
 
 

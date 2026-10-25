@@ -112,13 +112,6 @@ class Settings:
     conversation_model_base_url: str | None = None
     conversation_model_name: str | None = None
     conversation_model_timeout_seconds: float | None = None
-    manager_model_enabled: bool = False
-    manager_model_provider: str = "kimi"
-    manager_model_fallback_provider: str | None = "auto"
-    manager_model_base_url: str | None = None
-    manager_model_name: str | None = None
-    manager_model_timeout_seconds: float = 30.0
-    manager_model_minimum_confidence: float = 0.5
     slack_signing_secret: str | None = None
     slack_bot_token: str | None = None
 
@@ -418,35 +411,6 @@ class Settings:
                 float(value)
                 if (value := os.getenv("ASSISTANT_CONVERSATION_MODEL_TIMEOUT_SECONDS"))
                 else None
-            ),
-            manager_model_enabled=_as_bool(
-                os.getenv(
-                    "ASSISTANT_MANAGER_MODEL_ENABLED",
-                    str(defaults.manager_model_enabled),
-                )
-            ),
-            manager_model_provider=os.getenv(
-                "ASSISTANT_MANAGER_MODEL_PROVIDER",
-                defaults.manager_model_provider,
-            ),
-            manager_model_fallback_provider=os.getenv(
-                "ASSISTANT_MANAGER_MODEL_FALLBACK_PROVIDER",
-                defaults.manager_model_fallback_provider,
-            )
-            or None,
-            manager_model_base_url=os.getenv("ASSISTANT_MANAGER_MODEL_BASE_URL") or None,
-            manager_model_name=os.getenv("ASSISTANT_MANAGER_MODEL") or None,
-            manager_model_timeout_seconds=float(
-                os.getenv(
-                    "ASSISTANT_MANAGER_MODEL_TIMEOUT_SECONDS",
-                    str(defaults.manager_model_timeout_seconds),
-                )
-            ),
-            manager_model_minimum_confidence=float(
-                os.getenv(
-                    "ASSISTANT_MANAGER_MODEL_MINIMUM_CONFIDENCE",
-                    str(defaults.manager_model_minimum_confidence),
-                )
             ),
             slack_signing_secret=os.getenv("ASSISTANT_SLACK_SIGNING_SECRET") or None,
             slack_bot_token=os.getenv("ASSISTANT_SLACK_BOT_TOKEN") or None,
