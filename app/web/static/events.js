@@ -247,6 +247,15 @@ async function setAvatar(on, { remember = true } = {}) {
   window.avatar.mount(stage);
   window.avatarEvent("transcript", avatarTranscriptState());
   if (phone.listening) window.avatarEvent("listening", { on: true });
+  if (remember && !stage.offsetParent) showAvatarConversation();
+}
+// The face lives above a conversation. Switched on from somewhere else (the chat list on a
+// phone, Notes, Stats), it opens the last conversation, or the newest, so the tap shows it.
+async function showAvatarConversation() {
+  if (!state.chatId && !state.chats.length) await loadChats().catch(() => {});
+  const id = state.chatId || state.chats[0]?.id;
+  if (id) goChat(id);
+  else $("status").textContent = "The avatar shows in a conversation.";
 }
 $("avatar-toggle").onclick = () => setAvatar($("avatar-toggle").getAttribute("aria-pressed") !== "true");
 if (avatarWanted()) setAvatar(true, { remember: false });

@@ -81,7 +81,7 @@
   :root:not([data-theme]) button.icon-btn .icon-sun { display: inline; }
   :root[data-theme="light"] button.icon-btn .icon-moon { display: inline; }
   button.icon-btn .icon-face { display: inline; }
-  button.icon-btn[aria-pressed="true"] .icon-face { fill: var(--quiet-bg); }
+  button.icon-btn[aria-pressed="true"] .icon-face { fill: var(--quiet-bg); color: var(--accent); }
   button:disabled { opacity: .45; cursor: not-allowed; }
   button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px;
