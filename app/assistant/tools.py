@@ -131,6 +131,7 @@ def bookkeeping_tools(
             "the open work items with their #tags, and the unchecked entries on each list",
             work_items,
             lambda a: "Looking at your work items",
+            changes=False,
         ),
         AssistantTool(
             "remember",
@@ -219,6 +220,7 @@ def bookkeeping_tools(
                 "the saved routines and when they run",
                 lambda a, c: act({"type": "list_routines", "text": "routines"}, c),
                 lambda a: "Looking at your routines",
+                changes=False,
             ),
             AssistantTool(
                 "routine_run",
@@ -263,6 +265,7 @@ def repository_tools(reader: Any) -> list[AssistantTool]:
                 f"{does} (repository ids: {ids}; results are the repository's text)",
                 lambda a, c, name=name: reader.run(name, a),
                 shows[name],
+                changes=False,
             )
         )
     return tools
@@ -361,6 +364,7 @@ def coding_tools(supervisor: Any) -> list[AssistantTool]:
             "the coding runs: what each is doing, its state and pull request",
             status,
             lambda a: "Checking the coding runs",
+            changes=False,
         ),
         AssistantTool(
             "coding_run",
@@ -369,6 +373,7 @@ def coding_tools(supervisor: Any) -> list[AssistantTool]:
             "one run's plan, latest steps and pull request",
             lambda a, c: data(supervisor.run_detail(a.get("run"), c.chat_session_id)),
             lambda a: "Looking at a coding run",
+            changes=False,
         ),
         AssistantTool(
             "coding_start",
@@ -394,7 +399,7 @@ def coding_tools(supervisor: Any) -> list[AssistantTool]:
             "coding_stop",
             "coding",
             '{"run": "<run id>"}',
-            "stop a run, only when the user asks",
+            "stop a run, queued or working, only when the user asks",
             lambda a, c: data(supervisor.stop_run(a.get("run"), c.chat_session_id)),
             lambda a: "Stopping a coding run",
         ),
@@ -468,6 +473,8 @@ def store_tools(gateway: Any, toolset: Any) -> list[AssistantTool]:
                     runner(server, tool),
                     lambda a, server=server: f"Looking at {server.capitalize()}",
                     schema=schema,
+                    # Only reads; showing an upload button changes nothing either.
+                    changes=False,
                 )
             )
     return tools

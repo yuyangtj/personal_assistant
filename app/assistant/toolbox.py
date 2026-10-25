@@ -88,6 +88,9 @@ class AssistantTool:
     run: Callable[[dict[str, Any], ToolContext], ToolOutcome | str]
     #: The line shown on the reply's card while it runs ("Reading app/main.py").
     shows: Callable[[dict[str, Any]], str] | None = None
+    #: False for a tool that only looks things up. A reply that says something was
+    #: saved, set or stopped needs a tool that changes something to have run.
+    changes: bool = True
     #: Its JSON schema when it has a real one (an MCP tool's, fetched when first needed);
     #: otherwise one is built from ``arguments``.
     schema: Callable[[], dict[str, Any] | None] | None = None
@@ -110,6 +113,10 @@ class Toolbox:
     @property
     def names(self) -> list[str]:
         return list(self._tools)
+
+    def changes(self, name: str) -> bool:
+        tool = self._find(name)
+        return tool is not None and tool.changes
 
     @property
     def abilities(self) -> set[str]:

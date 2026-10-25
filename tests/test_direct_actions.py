@@ -212,6 +212,15 @@ def test_a_message_asking_for_several_things_is_not_one_instant_action() -> None
     assert rule_action("note: buy bread, and remind me later").type == "note_add"
 
 
+def test_several_entries_go_to_the_agent_to_add_one_by_one() -> None:
+    from app.chat.triage import rule_action
+
+    groceries = [{"slug": "groceries", "title": "Groceries", "kind": "list"}]
+    for text in ["add eggs and butter to groceries", "add eggs, butter to #groceries"]:
+        assert rule_action(text, groceries) is None, text
+    assert rule_action("add oat milk to groceries", groceries).text == "oat milk"
+
+
 def test_only_a_note_may_be_longer_than_300_characters() -> None:
     from pydantic import ValidationError
 

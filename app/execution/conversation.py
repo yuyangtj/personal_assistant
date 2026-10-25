@@ -42,7 +42,13 @@ _CLAIMS_DONE = re.compile(
     r"\b(?:i've|i have)\s+(?:also\s+)?(?:added|saved|set|noted|created|started|put|"
     r"remembered|scheduled)\b|\bi(?:'ll| will)\s+remember\b|"
     r"\b(?:added|saved|noted)\s+(?:it|that|“|\"|to|on|in)\b|"
-    r"\breminder(?:'s| is)?\s+(?:is\s+)?(?:now\s+)?set\b|\bi've got it saved\b",
+    r"\breminder(?:'s| is)?\s+(?:is\s+)?(?:now\s+)?set\b|\bi've got it saved\b|"
+    # A promise it ends the turn on ("I'll stop the README run now"), without a call.
+    r"\bi(?:'ll| will)\s+(?:now\s+)?(?:stop|cancel|start|add|save|note|remind|remember)\b"
+    r"[^?]*\bnow\b[^?]*$|"
+    # A state it can only know from a tool ("that run is already stopped").
+    r"\b(?:i've|i have)\s+(?:stopped|cancell?ed)\b|"
+    r"\b(?:is|was|has been)\s+already\s+(?:stopped|cancell?ed|done|finished)\b",
     re.IGNORECASE,
 )
 DID_NOTHING = (
@@ -58,9 +64,11 @@ Your reply is read aloud by text-to-speech, so:
 - Answer in plain spoken English: one to three short sentences, at most 60 words.
 - No markdown, lists, code, emoji, URLs, or stage directions.
 - Be warm, direct, and useful. Ask one short question when you need details.
+- Offer at most one next step, so a plain "yes" or "pls do" is never ambiguous.
 You can propose exactly one phone action when the user clearly asks for it. The phone shows
-a confirmation card and only acts after the user taps Confirm, so never say it is done;
-say what you will set up and ask them to confirm. Supported actions:
+a confirmation card and only acts after the user taps Confirm, so never say it is done.
+Put the action in this reply (don't ask first whether to: the card is the question) and
+say what it will set up. Supported actions:
 - {"type": "set_timer", "seconds": <1-86400>, "label": "<short label or empty>"}
 - {"type": "set_alarm", "hour": <0-23>, "minute": <0-59>, "label": "<short label>",
   "days": [<repeat days, 1=Sunday ... 7=Saturday>], "date": "YYYY-MM-DD or null"}
@@ -71,7 +79,8 @@ say what you will set up and ask them to confirm. Supported actions:
 - {"type": "create_event", "title": "<title>", "start": "YYYY-MM-DDTHH:MM",
   "end": "YYYY-MM-DDTHH:MM or null", "location": "<optional>"}
   Times are in the user's local time; resolve words like "tomorrow" from the local date below.
-If details are missing (for example no time), ask a short question and propose no action.
+If a needed detail is missing (a timer's length, an alarm's or event's start), ask a short
+question and propose no action. An event's end and location are optional: never ask for them.
 You cannot read calendars, email, messages, files, or accounts, and you cannot browse the web.
 {coding}Answer questions about the work from the work item summaries you are given.
 When it helps the user pick or open something, you may add up to four short "choices" (the
@@ -91,7 +100,8 @@ can just say "set up a coding workflow" for it; never say you cannot work on the
 #: With them, the agent starts the run itself; it still ends in a pull request to review.
 CODING_WITH_TOOLS = """Code changes in the user's registered projects are made by a coding agent
 you start with coding_start; it opens a draft pull request the user reviews, so nothing changes
-without them. Never say you cannot work on their projects. """
+without them. Start it straight away, without reading the code first: the coding agent reads
+it. Never say you cannot work on their projects. """
 
 
 #: With the shopping tools: what the shopping agent's own prompt used to say.
@@ -176,7 +186,12 @@ class ConversationExecutor:
         nudged = False
         while self.toolbox and (
             (batch := calls_in(completion))
-            or (not nudged and not calls and _claims_done(completion.text, context or {}))
+            or (
+                not nudged
+                # Only lookups so far (or nothing), yet it says it saved, set or stopped.
+                and not any(self.toolbox.changes(c["tool"]) for c in tool_calls if c["ok"])
+                and _claims_done(completion.text, context or {})
+            )
         ):
             if is_cancelled():
                 raise ExecutionCancelled(f"Task {task_id} was cancelled")

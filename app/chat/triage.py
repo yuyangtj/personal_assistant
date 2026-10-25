@@ -303,7 +303,9 @@ def rule_action(text: str, work_items: Sequence[dict] = ()) -> DirectAction | No
         return DirectAction(type="forget", text=match["text"])
     if (match := _ADD.match(normalized)) and len(match["text"]) <= 300:
         tag = _known_tag(match["tag"] or match["name"], work_items)
-        if tag is not None:
+        # "eggs and butter", "eggs, butter": several entries, which the agent adds one by one.
+        several = bool(re.search(r",|\band\b|\boch\b|&", match["text"]))
+        if tag is not None and not several:
             return DirectAction(type="checklist_add", text=match["text"], work_item=tag)
     if (match := _CHECK.match(normalized)) and len(match["text"]) <= 300:
         tag = _known_tag(match["tag"], work_items) if match["tag"] else None
