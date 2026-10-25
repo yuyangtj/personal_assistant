@@ -75,7 +75,7 @@ phone.muted = readMuted();
 
 function showSpeaking(on) {
   $("stop-speaking").hidden = !on;
-  if (!on) { clearTimeout(speakingTimer); speakingTimer = null; }
+  if (!on) { clearTimeout(speakingTimer); speakingTimer = null; window.avatarEvent?.("stop"); }
 }
 
 function phoneSpeak(text) {
@@ -83,7 +83,9 @@ function phoneSpeak(text) {
   phoneSend({ type: "speak", text });
   showSpeaking(true);
   clearTimeout(speakingTimer);
-  speakingTimer = setTimeout(() => showSpeaking(false), Math.min(text.length, 2000) * SPEECH_MS_PER_CHARACTER + 1500);
+  const ms = Math.min(text.length, 2000) * SPEECH_MS_PER_CHARACTER;
+  window.avatarEvent?.("speak", { text, ms });
+  speakingTimer = setTimeout(() => showSpeaking(false), ms + 1500);
 }
 
 function stopSpeaking() {
@@ -179,6 +181,7 @@ const withDictation = (text) =>
 
 function showListening(listening) {
   phone.listening = listening;
+  window.avatarEvent?.("listening", { on: listening });
   $("mic").classList.toggle("listening", listening);
   $("mic").setAttribute("aria-label", listening ? "Stop listening" : "Speak");
   $("input").placeholder = listening ? "Listening…"

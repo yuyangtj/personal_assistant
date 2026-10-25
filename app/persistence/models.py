@@ -62,6 +62,8 @@ class ChatMessageModel(Base):
     blocks: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     #: For a user message: the routing decision and where it led (kept to explain it).
     routing: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    #: For an assistant reply: how it feels (Warm, Curious, ...), which the avatar shows.
+    emotion: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )

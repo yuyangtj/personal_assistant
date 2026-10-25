@@ -211,3 +211,42 @@ const theme = {
 };
 theme.init();
 $("theme-toggle").onclick = () => theme.toggle();
+
+// The avatar: off unless switched on on this device; its script loads only then.
+const AVATAR_STORAGE_KEY = "assistantAvatar";
+function avatarWanted() {
+  try { return localStorage.getItem(AVATAR_STORAGE_KEY) === "1"; } catch (_) { return false; }
+}
+function loadAvatar() {
+  if (window.avatar) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/ui/static/avatar.js";
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.append(script);
+  });
+}
+async function setAvatar(on, { remember = true } = {}) {
+  if (remember) { try { localStorage.setItem(AVATAR_STORAGE_KEY, on ? "1" : "0"); } catch (_) {} }
+  const button = $("avatar-toggle");
+  button.setAttribute("aria-pressed", String(on));
+  button.setAttribute("aria-label", on ? "Hide the avatar" : "Show the avatar");
+  const stage = $("avatar-stage");
+  if (!on) {
+    if (window.avatar) window.avatar.unmount();
+    stage.hidden = true;
+    return;
+  }
+  stage.hidden = false;
+  try { await loadAvatar(); } catch (_) {
+    stage.hidden = true;
+    fail(new Error("The avatar couldn't load. Try again."));
+    return;
+  }
+  window.avatar.mount(stage);
+  window.avatarEvent("transcript", avatarTranscriptState());
+  if (phone.listening) window.avatarEvent("listening", { on: true });
+}
+$("avatar-toggle").onclick = () => setAvatar($("avatar-toggle").getAttribute("aria-pressed") !== "true");
+if (avatarWanted()) setAvatar(true, { remember: false });
