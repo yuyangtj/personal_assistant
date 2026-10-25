@@ -30,7 +30,7 @@ function memoryCard(memory) {
     <div class="row wrap memory-meta">
       <span class="status-pill">${esc(memory.kind)}</span>
       ${food ? `<span class="status-pill">food</span>` : ""}
-      ${memory.private ? `<span class="status-pill warn" title="Never sent to any AI model">🔒 private</span>` : ""}
+      ${memory.private ? `<span class="status-pill warn" title="Never sent to any AI model">private</span>` : ""}
       <span class="sub">${esc(String(memory.created_at).slice(0, 10))}</span>
       <span class="grow"></span>
       <button type="button" class="quiet" data-memory-action="edit">Edit</button>

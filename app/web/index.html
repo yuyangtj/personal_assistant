@@ -1,85 +1,66 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Assistant Console</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#0d8a7e">
+<meta name="theme-color" content="#0c0c0d">
 <link rel="icon" type="image/png" href="/icons/favicon-48.png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d8a7e'/%3E%3Cpath d='M18 16h28a6 6 0 0 1 6 6v14a6 6 0 0 1-6 6H30l-10 9v-9h-2a6 6 0 0 1-6-6V22a6 6 0 0 1 6-6z' fill='%23e6f1f2'/%3E%3Ccircle cx='25' cy='29' r='3' fill='%230d8a7e'/%3E%3Ccircle cx='34' cy='29' r='3' fill='%230d8a7e'/%3E%3Ccircle cx='43' cy='29' r='3' fill='%230d8a7e'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/ui/static/console.css">
 
-<header class="topbar">
-  <span class="brand">Assistant</span>
-  <nav aria-label="Sections"><a href="#/chats" id="nav-chats">Chats</a><a href="#/items" id="nav-items">Work items</a><a href="#/memories" id="nav-memories">Memories</a><a href="#/notes" id="nav-notes">Notes</a><a href="#/stats" id="nav-stats">Stats</a></nav>
-  <span id="error" class="err grow" role="alert"></span>
-  <span id="status" class="sub" style="margin:0"></span>
-  <button class="ghost" id="passkeys-open" type="button" hidden title="Approve with Touch ID or your fingerprint">Passkeys</button>
-    <button class="ghost icon-btn" id="avatar-toggle" type="button" aria-pressed="false"
-      aria-label="Show the avatar" title="Show or hide the avatar">
-      <svg class="icon-face" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="9"></circle><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"></path>
-        <path d="M9 9.5h.01"></path><path d="M15 9.5h.01"></path>
-      </svg>
-    </button>
-    <button class="ghost icon-btn" id="theme-toggle" type="button" aria-label="Toggle theme"
-      title="Toggle bright/dark theme" aria-pressed="false">
-      <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
-        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-      </svg>
-      <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
-        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="4"></circle>
-        <path d="M12 2v2"></path>
-        <path d="M12 20v2"></path>
-        <path d="m4.93 4.93 1.41 1.41"></path>
-        <path d="m17.66 17.66 1.41 1.41"></path>
-        <path d="M2 12h2"></path>
-        <path d="M20 12h2"></path>
-        <path d="m6.34 17.66-1.41 1.41"></path>
-        <path d="m19.07 4.93-1.41 1.41"></path>
-      </svg>
-    </button>
-</header>
+<nav class="rail" aria-label="Sections">
+  <a href="#/chats" id="nav-chats"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l1-4.1A8 8 0 1 1 20 12z"/></svg><span>Chats</span></a>
+  <a href="#/notes" id="nav-notes"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"/><path d="M15 4v4h4"/><path d="M8 13h8M8 16.5h5"/></svg><span>Notes</span></a>
+  <a href="#/items" id="nav-items"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg><span>Work</span></a>
+  <a href="#/memories" id="nav-memories"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.2 5.3L20 9l-4.4 3.8L17 19l-5-3-5 3 1.4-6.2L4 9l5.8-.7z"/></svg><span>Memories</span></a>
+  <button type="button" class="rail-more" id="more-open" aria-haspopup="true" aria-expanded="false" aria-controls="more-sheet"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg><span>More</span></button>
+</nav>
+<div class="more-sheet" id="more-sheet" role="menu" hidden>
+  <a href="#/stats" id="nav-stats" role="menuitem"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 19V11M12 19V5M19 19v-6"/></svg><span>Stats</span></a>
+  <button type="button" role="menuitemcheckbox" id="theme-toggle" aria-pressed="false" aria-label="Light theme"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/></svg><span>Light theme</span><i class="switch" aria-hidden="true"></i></button>
+  <button type="button" role="menuitem" id="passkeys-open" hidden><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8.5" cy="12" r="3.5"/><path d="M12 12h8.5M17 12v3M20 12v2"/></svg><span>Passkeys</span></button>
+</div>
+<div class="toasts" aria-live="polite"><span id="error" class="err" role="alert"></span><span id="status" class="status"></span></div>
 
 <div class="view" id="chat-view">
   <aside aria-label="Conversations">
-    <div class="row"><button id="new-chat">New conversation</button>
-      <button class="ghost" id="reload-chats">Refresh</button></div>
-    <div id="chat-list" style="margin-top:12px"></div>
+    <div class="pane-head"><h1 class="page-title">Chats</h1>
+      <button type="button" class="icon-btn" id="new-chat" aria-label="New conversation" title="New conversation"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h8"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button></div>
+    <div id="chat-list"></div>
   </aside>
   <main>
-    <div class="main-head"><a class="back mobile-only" href="#/chats">‹ Chats</a>
-      <h1 id="chat-title" class="grow">No conversation open</h1>
-      <div class="repo-control"><label for="repository">Coding repo</label>
-      <select id="repository"><option value="">Pick for me</option></select></div></div>
+    <div class="main-head"><a class="back mobile-only" href="#/chats" aria-label="Back to chats"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></a>
+      <h1 id="chat-title" class="grow page-title">No conversation open</h1>
+      <details class="chat-menu"><summary aria-label="Conversation options" title="Conversation options"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></summary>
+        <div class="chat-menu-panel"><button type="button" class="menu-switch" id="avatar-toggle" aria-pressed="false" aria-label="Show the avatar"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8.8 14.2a4.2 4.2 0 0 0 6.4 0"/><path d="M9.2 9.8h.01M14.8 9.8h.01"/></svg><span>Avatar</span><i class="switch" aria-hidden="true"></i></button>
+          <label for="repository">Coding repo</label>
+          <select id="repository"><option value="">Pick for me</option></select>
+          <div class="sub">The assistant picks the repository itself; choose one only to point it at a specific one.</div></div>
+      </details></div>
     <div id="focus-bar" class="focus-bar" aria-label="Work items this chat is about"></div>
     <div id="avatar-stage" class="avatar-stage" hidden></div>
     <div id="transcript"><div class="empty">Start or pick a conversation.</div></div>
     <div id="phone-note" class="sub" hidden></div>
     <div id="screen-chip" class="attachment-chip" hidden></div>
     <form id="composer">
-      <textarea id="input" rows="2" placeholder="Say something — mention a work item with #tag. Nothing runs on its own…"></textarea>
-      <button type="button" class="quiet icon-btn" id="mic" hidden aria-label="Speak" title="Speak">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v1a7 7 0 0 0 14 0v-1"></path>
-          <path d="M12 18v4"></path></svg>
-      </button>
-      <button type="button" class="quiet" id="stop-speaking" hidden aria-label="Stop speaking">■ Stop</button>
-      <button type="button" class="quiet icon-btn" id="mute-voice" hidden aria-pressed="false"
-        aria-label="Mute spoken replies" title="Mute spoken replies">🔊</button>
-      <button id="send" type="submit">Send</button>
+      <div class="composer-pill">
+        <textarea id="input" rows="1" placeholder="Message…" aria-label="Message"></textarea>
+        <button type="button" class="icon-btn" id="mic" hidden aria-label="Speak" title="Speak"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/></svg></button>
+        <button type="button" class="icon-btn" id="stop-speaking" hidden aria-label="Stop speaking" title="Stop speaking"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg></button>
+        <button type="button" class="icon-btn" id="mute-voice" hidden aria-pressed="false"
+          aria-label="Mute spoken replies" title="Mute spoken replies"></button>
+        <button id="send" type="submit" class="send" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+      </div>
     </form>
   </main>
 </div>
 
 <div class="view" id="items-view" hidden>
   <aside aria-label="Work items">
-    <div class="sub">Goals that chats and runs build on. Mention one with #tag.</div>
+    <div class="pane-head"><h1 class="page-title">Work</h1></div>
+    <div class="sub">Goals and lists that chats and runs build on. Mention one with #tag.</div>
     <form id="new-item-form"><input id="new-item-title" maxlength="160" placeholder="New work item…" aria-label="New work item title">
       <select id="new-item-space" aria-label="Space"><option value="general">General</option></select>
       <button type="submit">Add</button></form>
@@ -94,7 +75,7 @@
       <h1>Memories</h1>
       <div class="sub">What the assistant remembers about you. Say “remember that …” or
         “forget …” in chat, or manage them here. Shared memories are given to the chat model
-        with your messages (food ones to the grocery agent too). <strong>Private</strong>
+        with your messages. <strong>Private</strong>
         ones stay on your server and are never sent to any AI model; in chat, say
         “remember privately …”.</div>
       <form id="memory-form" class="memory-form">

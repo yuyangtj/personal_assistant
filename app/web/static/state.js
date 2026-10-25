@@ -43,6 +43,9 @@ async function render() {
   const items = route.section === "items";
   // A view coming back into sight is refreshed even when its route is unchanged.
   const returning = sectionView(route.section).hidden;
+  // For the layout: the phone's tab bar hides inside an open conversation or item.
+  document.body.dataset.section = route.section;
+  document.body.dataset.open = route.id ? "1" : "";
   for (const section of SECTIONS) {
     const shown = section === route.section;
     sectionView(section).hidden = !shown;
@@ -154,6 +157,19 @@ async function taskDeployment(taskId) {
   return res.json();
 }
 
+// "14:05" today, "Yesterday", "Mon" this week, "12 Oct" this year, "12 Oct 2025" before.
+function shortWhen(iso) {
+  const when = new Date(iso);
+  const now = new Date();
+  const day = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((day(now) - day(when)) / 86400000);
+  if (days <= 0) return when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (days === 1) return "Yesterday";
+  if (days < 7) return when.toLocaleDateString([], { weekday: "short" });
+  const sameYear = when.getFullYear() === now.getFullYear();
+  return when.toLocaleDateString([], { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) });
+}
+
 async function loadChats() {
   try {
     state.chats = (await api("/chat-sessions")).sessions;
@@ -179,7 +195,7 @@ function chatRow(c) {
   return `<div class="chat-row">
       <button class="chat-item ${c.id === state.chatId ? "active" : ""}" data-chat="${c.id}" type="button">
         <div>${c.pinned ? "📌 " : ""}${esc(c.title)}</div>
-        <div class="when">${new Date(c.updated_at).toLocaleString()}</div>
+        <div class="when">${esc(shortWhen(c.updated_at))}</div>
       </button>
       <button type="button" class="ghost icon-btn chat-more" data-chat-menu="${c.id}"
         aria-expanded="${open}" aria-label="More for ${esc(c.title)}" title="Pin, archive or delete">⋯</button>

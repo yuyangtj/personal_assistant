@@ -29,3 +29,28 @@ def add_note(api: httpx.Client, **fields: Any) -> dict:
     response = api.post("/notes", json=fields)
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def in_more(page: Any, selector: str) -> None:
+    """Click something in the More sheet (Stats, Avatar, Theme), opening it first."""
+    if page.locator("#more-sheet").is_hidden():
+        page.click("#more-open")
+    page.click(selector)
+    page.keyboard.press("Escape")  # the switches leave the sheet open
+
+
+def pick_repository(page: Any, value: str) -> None:
+    """Choose the coding repo in the conversation's ⋯ menu."""
+    menu = page.locator("details.chat-menu")
+    if menu.get_attribute("open") is None:
+        menu.locator("summary").click()
+    page.select_option("#repository", value)
+
+
+def in_chat_menu(page: Any, selector: str) -> None:
+    """Click something in the open conversation's ⋯ menu, then close the menu."""
+    menu = page.locator("details.chat-menu")
+    if menu.get_attribute("open") is None:
+        menu.locator("summary").click()
+    page.click(selector)
+    page.evaluate("() => document.querySelector('details.chat-menu').open = false")

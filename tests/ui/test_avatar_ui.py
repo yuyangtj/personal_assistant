@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from playwright.sync_api import Page, expect
 
-from tests.ui.helpers import eventually
+from tests.ui.helpers import eventually, in_chat_menu
 from tests.ui.test_chat_ui import new_chat
 from tests.ui.test_reply_blocks_ui import FAKE_PHONE, _chat_id
 
@@ -18,7 +18,7 @@ def _face(page: Page) -> dict:
 
 
 def _switch_on(page: Page) -> None:
-    page.click("#avatar-toggle")
+    in_chat_menu(page, "#avatar-toggle")
     expect(page.locator("#avatar-stage svg")).to_be_visible()
 
 
@@ -40,7 +40,7 @@ def test_off_by_default_and_never_downloaded_until_switched_on(
     page.reload()  # remembered on this device
     expect(page.locator("#avatar-stage svg")).to_be_visible()
 
-    page.click("#avatar-toggle")
+    in_chat_menu(page, "#avatar-toggle")
     expect(page.locator("#avatar-stage")).to_be_hidden()
     after = page.locator("#transcript").bounding_box()
     assert (after["x"], after["y"], after["width"]) == (before["x"], before["y"], before["width"])
@@ -134,22 +134,3 @@ def test_it_fits_a_phone_and_keeps_still_with_reduced_motion(browser, live_serve
     phone.wait_for_timeout(400)
     assert _face(phone)["open"] == first == "0.40"  # a still, open-mouthed pose
     context.close()
-
-
-def test_switched_on_away_from_a_conversation_it_opens_one(
-    phone: Page, live_server: str, api
-) -> None:
-    # On a phone the chat pane is hidden until a conversation is open, so the face would
-    # land there unseen. Without any conversation yet, it says where the face shows.
-    phone.goto(f"{live_server}/ui#/chats")
-    phone.click("#avatar-toggle")
-    expect(phone.locator("#status")).to_have_text("The avatar shows in a conversation.")
-    phone.click("#avatar-toggle")  # off again
-
-    chat = api.post("/chat-sessions", json={}).json()["id"]
-    for start in ("#/chats", "#/notes"):
-        phone.goto(f"{live_server}/ui{start}")
-        phone.click("#avatar-toggle")
-        expect(phone.locator("#avatar-stage svg")).to_be_visible()
-        assert chat in phone.url
-        phone.click("#avatar-toggle")
