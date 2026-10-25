@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.chat.blocks import validate_blocks
+from app.chat.blocks import MAX_BLOCKS, validate_blocks
 from app.domain.enums import EventType, ExecutionStatus
 from app.persistence.database import Database
 from app.persistence.models import ExecutionModel, TaskModel
@@ -35,6 +35,10 @@ class ServiceBase:
             blocks = validate_blocks(payload.get("blocks") or [])
         except ValueError:
             blocks = []
+        if payload.get("action"):
+            # The proposed phone action, as a card the phone confirms (see PhoneActionBlock).
+            card = validate_blocks([{"type": "phone_action", "action": payload["action"]}])
+            blocks = [*card, *blocks][:MAX_BLOCKS]
         ChatMessageRepository.append(
             session,
             chat_session_id=task.chat_session_id,

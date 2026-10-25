@@ -57,6 +57,10 @@ document.addEventListener("click", (e) => {
     return api(`/schedules/${cancelSchedule.dataset.cancelSchedule}`, { method: "DELETE" })
       .then(() => renderWorkItem(state.itemId)).catch(fail);
   }
+  const messageAction = e.target.closest("[data-message-action]");
+  if (messageAction) return runMessageAction(messageAction.dataset.messageAction, messageAction.dataset.message);
+  const messageCancel = e.target.closest("[data-message-cancel]");
+  if (messageCancel) return cancelMessageAction(messageCancel.dataset.messageCancel, messageCancel.dataset.message);
   const phoneAction = e.target.closest("[data-phone-action]");
   if (phoneAction) return runPhoneAction(phoneAction.dataset.phoneAction);
   const phoneCancel = e.target.closest("[data-phone-cancel]");

@@ -136,6 +136,12 @@ class MainActivity : ComponentActivity() {
             stopListening = { voice.stop() },
             isAssistant = ::isPhoneAssistant,
             openAssistantSettings = ::openAssistantSettings,
+            fetchServerAction = { path ->
+                val origin = ConsoleUrls.origin(server)
+                if (origin == null) null else withContext(Dispatchers.IO) {
+                    ServerActions.fetch(origin, path, ServerActions.host(origin)?.let(credentials::load))
+                }
+            },
         )
         voice = VoiceInput(this, bridge)
         val origin = ConsoleUrls.origin(server)
