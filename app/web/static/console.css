@@ -80,6 +80,8 @@
   :root[data-theme="dark"] button.icon-btn .icon-sun,
   :root:not([data-theme]) button.icon-btn .icon-sun { display: inline; }
   :root[data-theme="light"] button.icon-btn .icon-moon { display: inline; }
+  button.icon-btn .icon-face { display: inline; }
+  button.icon-btn[aria-pressed="true"] .icon-face { fill: var(--quiet-bg); }
   button:disabled { opacity: .45; cursor: not-allowed; }
   button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px;
@@ -428,3 +430,25 @@ a.upload-button { display: inline-block; }
 .abilities li .sub { margin: 2px 0 0; }
 .abilities li .status-pill { margin-left: 6px; }
 .abilities li.unavailable strong { color: var(--muted); }
+
+/* The avatar (avatar.js): a small face above the transcript, only when switched on. */
+.avatar-stage { display: flex; justify-content: center; height: 150px; flex: none; margin: 2px 0 6px; }
+.avatar-stage[hidden] { display: none; }
+.avatar-face { height: 100%; overflow: visible; }
+.avatar-head { fill: var(--raised); stroke: var(--accent); stroke-width: 2; }
+.avatar-eye, .avatar-mouth { fill: var(--text); }
+.avatar-brow { fill: none; stroke: var(--text); stroke-width: 3.5; stroke-linecap: round; }
+.avatar-cheek { fill: var(--accent); opacity: .18; }
+.avatar-body { transform-origin: 60px 100px; animation: avatar-breathe 5s ease-in-out infinite; }
+.avatar-ring { fill: none; stroke: var(--accent); stroke-width: 2; opacity: 0; transform-origin: 60px 62px; }
+.avatar-ring.on { opacity: .85; animation: avatar-pulse 1.4s ease-in-out infinite; }
+.avatar-dots { fill: var(--muted); opacity: 0; }
+.avatar-dots.on { opacity: 1; }
+.avatar-dots.on circle { animation: avatar-dot 1.2s ease-in-out infinite; }
+.avatar-dots.on circle:nth-child(2) { animation-delay: .2s; }
+.avatar-dots.on circle:nth-child(3) { animation-delay: .4s; }
+@keyframes avatar-breathe { 50% { transform: scale(1.015); } }
+@keyframes avatar-pulse { 50% { transform: scale(1.06); opacity: .35; } }
+@keyframes avatar-dot { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .avatar-face * { animation: none !important; } }
+@media (max-width: 720px) { .avatar-stage { height: 110px; } }

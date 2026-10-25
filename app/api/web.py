@@ -39,6 +39,8 @@ WEB_STATIC = {
     "stats.js": "text/javascript",
     "events.js": "text/javascript",
     "main.js": "text/javascript",
+    # Loaded only when the avatar is switched on (events.js).
+    "avatar.js": "text/javascript",
 }
 
 

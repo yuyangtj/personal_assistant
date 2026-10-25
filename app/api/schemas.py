@@ -113,6 +113,8 @@ class ChatMessageResponse(BaseModel):
     blocks: list[dict[str, Any]] = Field(default_factory=list)
     #: For a user message: how it was routed and why (see app.chat.turns.triage_message).
     routing: dict[str, Any] | None = None
+    #: For an assistant reply: Warm, Curious, Excited, Concerned or Neutral (the avatar's).
+    emotion: str | None = None
     created_at: datetime
 
     @field_validator("blocks", mode="before")

@@ -72,6 +72,7 @@ class ChatMessageRepository:
         content: str,
         linked_task_id: str | None = None,
         blocks: list[dict[str, Any]] | None = None,
+        emotion: str | None = None,
     ) -> ChatMessageModel:
         message = ChatMessageModel(
             id=str(uuid4()),
@@ -80,6 +81,7 @@ class ChatMessageRepository:
             content=content,
             linked_task_id=linked_task_id,
             blocks=blocks or None,
+            emotion=emotion,
             created_at=utc_now(),
         )
         session.add(message)

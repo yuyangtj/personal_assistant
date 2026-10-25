@@ -170,6 +170,16 @@ function renderTranscript() {
     // Phone turns from before the first saved message (or a chat not saved yet).
     .replace(/^/, phoneTurnsAfter(null)) + pendingTurns() || `<div class="empty">No messages yet.</div>`;
   if (atBottom || state.pending.length) $("transcript").scrollTop = $("transcript").scrollHeight;
+  window.avatarEvent?.("transcript", avatarTranscriptState());
+}
+
+// What the avatar shows from the chat: whether a reply is on its way, and the last reply.
+function avatarTranscriptState() {
+  const waiting = state.pending.some((entry) => entry.chatId === state.chatId)
+    || state.tasks.some((task) => ["created", "planning", "executing", "validating"].includes(task.status)
+      && !workCapabilities(task).length);
+  const last = [...state.messages].reverse().find((m) => m.role === "assistant");
+  return { waiting, last: last ? { id: last.id, emotion: last.emotion } : null };
 }
 
 // Sends what the user said. Returns false when it could not be sent, so the caller can put

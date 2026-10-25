@@ -1,5 +1,11 @@
 # Avatar client (paused)
 
+> **For now the avatar lives in the web console** (`app/web/static/avatar.js`): a small face
+> drawn in SVG, switched on with the face button in the top bar, that shows listening,
+> thinking, speaking and each reply's emotion. It works in the browser and in the phone app
+> and adds nothing when off. A richer character can replace it behind the same events
+> (`avatarEvent`). The Unity project below stays as it is, paused.
+
 The expressive 3D-character client for the Personal Assistant: a Kotlin/Compose host
 (`native/`) embedding a Unity avatar (`unity/`), with lip-sync, expressions and its own task
 screens. It is paused while the backend matures; the everyday app is now the

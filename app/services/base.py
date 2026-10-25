@@ -46,6 +46,7 @@ class ServiceBase:
             content=text,
             linked_task_id=task.id,
             blocks=blocks,
+            emotion=str(payload["emotion"]) if payload.get("emotion") else None,
         )
         chat_session = ChatSessionRepository.get(session, task.chat_session_id)
         if chat_session is not None:
