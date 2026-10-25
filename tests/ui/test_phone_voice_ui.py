@@ -63,7 +63,8 @@ def test_a_spoken_conversation_stays_spoken_and_follow_ups_go_to_the_server(
     # Spoken: the reply is read out.
     page.evaluate("() => onPhoneMessage({ type: 'voice', state: 'listening' })")
     page.evaluate(
-        "() => onPhoneMessage({ type: 'voice', state: 'final', text: 'find street food in Shanghai' })"
+        "() => onPhoneMessage({ type: 'voice', state: 'final',"
+        " text: 'find street food in Shanghai' })"
     )
     page.click("#send")
     _answer(live_app, "Try Yunnan Road. Want me to add sweet dishes?")
@@ -72,14 +73,16 @@ def test_a_spoken_conversation_stays_spoken_and_follow_ups_go_to_the_server(
     # Typed in the same conversation: still read out.
     _type(page, "add street food sweets too")
     _answer(live_app, "Added. Want me to research the best places for these?")
-    eventually(lambda: any("research the best places" in text for text in _spoken(page)), timeout=10)
+    eventually(lambda: any("research the best" in text for text in _spoken(page)), timeout=10)
 
     # "Yes please do" follows that question: the server gets it, not the phone's model.
     _type(page, "Yes please do")
-    eventually(lambda: any(
-        m.content == "Yes please do"
-        for m in live_app.state.task_service.list_chat_messages(chat_id)
-    ))
+    eventually(
+        lambda: any(
+            m.content == "Yes please do"
+            for m in live_app.state.task_service.list_chat_messages(chat_id)
+        )
+    )
     expect(page.locator("#transcript")).not_to_contain_text("ON THIS PHONE")
     _answer(live_app, "Here are the best places.")
     eventually(lambda: "Here are the best places." in _spoken(page), timeout=10)
