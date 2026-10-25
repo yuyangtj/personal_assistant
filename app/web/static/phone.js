@@ -1,11 +1,9 @@
-// Inside the Android app, a native bridge adds what only the phone can do; in a browser
-// this file does nothing.
-
 // Inside the Android app, a native bridge adds what only the phone can do: voice, spoken
-// replies, timers and alarms, and simple answers that stay on the phone. In a browser
-// none of this exists and the console works as before.
-const phone = { bridge: window.AndroidAssistant || null, caps: null, routes: new Map(), next: 0,
-                turns: {}, speakFor: null, voiceChat: null, listening: false, dictated: false, dictationBase: "", screen: null,
+// replies, and running the timers, alarms and events a reply proposes. It never decides
+// what a message means: every message goes to the server. In a browser none of this
+// exists and the console works as before.
+const phone = { bridge: window.AndroidAssistant || null, caps: null,
+                speakFor: null, voiceChat: null, listening: false, dictated: false, dictationBase: "", screen: null,
                 // Phone-action cards on replies, by block id: what the app said after
                 // checking the action itself ({ action, label } or { error }).
                 offers: {} };
@@ -107,66 +105,6 @@ function setMuted(muted) {
 
 function phoneSend(message) { phone.bridge.postMessage(JSON.stringify(message)); }
 
-function phoneRoute(text) {
-  return new Promise((resolve) => {
-    const id = `r${++phone.next}`;
-    phone.routes.set(id, resolve);
-    phoneSend({ type: "route", id, text });
-    // On-device models can be slow to wake; the server answers instead after a while.
-    setTimeout(() => { if (phone.routes.delete(id)) resolve(null); }, 6000);
-  });
-}
-
-// "yes", "Start coding" and the like answer the assistant's open choices on the server.
-function awaitingChoice() {
-  const last = [...state.messages].reverse().find((m) => m.role !== "system");
-  return Boolean(last && last.role === "assistant"
-    && (last.blocks || []).some((block) => block.type === "choices" && block.state === "open"));
-}
-
-const phoneTurns = () => phone.turns[state.chatId || ""] || (phone.turns[state.chatId || ""] = []);
-
-function answerOnPhone(text, route, voice) {
-  addPhoneTurn({ role: "user", text });
-  const answer = route.route === "reply" ? route.text : `${route.label}?`;
-  addPhoneTurn({ role: "assistant", text: answer, action: route.route === "confirm" ? route.action : null });
-  if (voice) phoneSpeak(answer);
-  renderTranscript();
-  $("transcript").scrollTop = $("transcript").scrollHeight;
-}
-
-// Answered on the phone, so not saved in the conversation; they last until the app closes.
-// Each sits right after the saved message that was last when it happened (the phone's
-// and the server's clocks can disagree, so time can't order them).
-function phoneTurnsAfter(messageId) {
-  return (phone.turns[state.chatId || ""] || []).filter((turn) => turn.after === messageId).map((turn) => {
-    const buttons = turn.action ? `<div class="choices">`
-      + `<button type="button" data-phone-action="${esc(turn.action)}" ${turn.settled ? "disabled" : ""}>Do it</button>`
-      + `<button type="button" class="quiet" data-phone-cancel="${esc(turn.action)}" ${turn.settled ? "disabled" : ""}>Cancel</button></div>` : "";
-    return `<div class="msg ${turn.role}"><div class="who">${turn.role === "user" ? "YOU" : "ON THIS PHONE"}</div>`
-      + `<div class="bubble">${esc(turn.text)}${buttons}</div></div>`;
-  }).join("");
-}
-
-function addPhoneTurn(turn) {
-  const last = state.messages[state.messages.length - 1];
-  phoneTurns().push({ ...turn, after: last ? last.id : null });
-}
-
-function settlePhoneAction(id) {
-  const turn = phoneTurns().find((candidate) => candidate.action === id);
-  if (turn) turn.settled = true;
-  return turn;
-}
-
-function runPhoneAction(id) {
-  if (settlePhoneAction(id)) { phoneSend({ type: "run_action", id }); renderTranscript(); }
-}
-
-function cancelPhoneAction(id) {
-  if (settlePhoneAction(id)) { addPhoneTurn({ role: "assistant", text: "OK, cancelled." }); renderTranscript(); }
-}
-
 function speakReplyIfWaiting() {
   if (!phone.speakFor) return;
   const index = state.messages.findIndex((m) => m.id === phone.speakFor);
@@ -222,16 +160,8 @@ async function shareFile(name, text) {
   } catch (error) { fail(error); }
 }
 
-function renderDeviceAi(caps) {
+function renderPhoneHint(caps) {
   const note = $("phone-note");
-  if (caps.onDevice === "downloadable") {
-    note.innerHTML = `Simple requests could stay on this phone.<button type="button" class="quiet" id="enable-on-device">Download on-device AI</button>`;
-    $("enable-on-device").onclick = () => phoneSend({ type: "enable_on_device" });
-  } else if (caps.onDevice === "downloading") {
-    note.textContent = caps.onDeviceDetail || "Downloading on-device AI…";
-  } else {
-    note.textContent = "";
-  }
   // Until it is the phone's assistant, offer the settings page once (dismissable).
   let dismissed = false;
   try { dismissed = localStorage.getItem("assistantHintDismissed") === "1"; } catch (_) {}
@@ -256,7 +186,7 @@ function onPhoneMessage(message) {
       $("mic").hidden = !message.voice;
       $("mute-voice").hidden = !message.voice;
     }
-    renderDeviceAi(phone.caps);
+    renderPhoneHint(phone.caps);
   } else if (message.type === "voice") {
     if (message.state === "listening") {
       // Dictation adds to what is already in the box instead of replacing it.
@@ -287,10 +217,6 @@ function onPhoneMessage(message) {
       // The assistant gesture means "I want to say something": listen right away.
       if (!phone.listening) phoneSend({ type: "listen" });
     }).catch(fail);
-  } else if (message.type === "route") {
-    const resolve = phone.routes.get(message.id);
-    phone.routes.delete(message.id);
-    if (resolve) resolve(message);
   } else if (message.type === "message_action") {
     // The app checked a reply's phone action: show its label with Do it / Cancel.
     phone.offers[message.id] = message.error ? { error: message.error }
@@ -305,10 +231,7 @@ function onPhoneMessage(message) {
         phone.offers[blockId] = { error: message.error };
         renderTranscript();
       } else settleMessageAction(blockId, offer.message, "done", offer.label);
-      return;
     }
-    addPhoneTurn({ role: "assistant", text: message.error || "Done." });
-    renderTranscript();
   }
 }
 

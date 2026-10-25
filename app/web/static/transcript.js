@@ -37,7 +37,7 @@ async function refreshTranscript() {
       api(`/chat-sessions/${state.chatId}/focus`),
     ]);
     // Draw only when something is different, so text you selected stays selected.
-    const signature = JSON.stringify([msgs, tasks, runs, focus, phone.turns[state.chatId] || [],
+    const signature = JSON.stringify([msgs, tasks, runs, focus,
       state.pending.filter((entry) => entry.chatId === state.chatId).map((entry) => entry.messageId)]);
     const changed = signature !== state.transcriptSignature;
     state.transcriptSignature = signature;
@@ -166,9 +166,7 @@ function renderTranscript() {
         + `<span class="grow">${esc(taskCardLabel(task))}</span><span>View ›</span></button>` : "");
     return `<div class="msg ${m.role}"><div class="who">${who}</div>`
       + `<div class="bubble">${esc(m.content)}${extras}</div></div>`;
-  }).map((html, index) => html + phoneTurnsAfter(state.messages[index].id)).join("")
-    // Phone turns from before the first saved message (or a chat not saved yet).
-    .replace(/^/, phoneTurnsAfter(null)) + pendingTurns() || `<div class="empty">No messages yet.</div>`;
+  }).join("") + pendingTurns() || `<div class="empty">No messages yet.</div>`;
   if (atBottom || state.pending.length) $("transcript").scrollTop = $("transcript").scrollHeight;
   window.avatarEvent?.("transcript", avatarTranscriptState());
 }
@@ -184,7 +182,7 @@ function avatarTranscriptState() {
 
 // Sends what the user said. Returns false when it could not be sent, so the caller can put
 // the text back in the box.
-async function send(text, { local = true, voice = false } = {}) {
+async function send(text, { voice = false } = {}) {
   state.busy = true; $("send").disabled = true;
   let entry = null;
   try {
@@ -193,17 +191,8 @@ async function send(text, { local = true, voice = false } = {}) {
     // messages and tapped suggestions, until you mute or switch conversations.
     if (voice) phone.voiceChat = state.chatId;
     const spoken = voice || Boolean(phone.bridge && state.chatId && phone.voiceChat === state.chatId);
-    if (local && phone.bridge && !awaitingChoice() && !attachments.length) {
-      // Simple things (the time, a timer) can be answered on the phone itself. Its model
-      // can't see the conversation, so once one is going ("yes please do" follows a
-      // question) the phone keeps only the actions you confirm; the rest goes to the server.
-      const route = await phoneRoute(text);
-      const ongoing = state.messages.some((m) => m.role !== "system");
-      if (route && route.route !== "cloud" && !(ongoing && route.route === "reply")) {
-        answerOnPhone(text, route, spoken);
-        return true;
-      }
-    }
+    // Every message goes to the server, which sees the whole conversation. The phone only
+    // listens, speaks and runs the actions (timers, alarms, events) a reply proposes.
     if (!state.chatId) {
       state.chatId = (await api("/chat-sessions", { method: "POST", body: "{}" })).id;
       goChat(state.chatId);

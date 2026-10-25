@@ -1,6 +1,6 @@
 """Talking to the assistant on the phone: once you speak in a conversation its replies are
-spoken, and a follow-up like "yes please do" goes to the server, which knows what it
-follows, not to the phone's own model, which doesn't."""
+spoken, and every message goes to the server, which sees the whole conversation. The
+phone never decides what a message means; it only listens, speaks and runs actions."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from tests.ui.helpers import eventually
 from tests.ui.test_chat_ui import new_chat
 from tests.ui.test_reply_blocks_ui import _chat_id
 
-# A phone whose on-device model answers everything as small talk, like the real one did
-# with "Yes please do"; anything about street food it leaves to the server.
+# A phone app that would still answer a "route" request itself, as small talk, the way its
+# on-device model answered "Yes please do". The page must never ask it.
 FAKE_PHONE = """
 window.sentToPhone = [];
 window.AndroidAssistant = {
@@ -21,14 +21,20 @@ window.AndroidAssistant = {
     const reply = (m) => setTimeout(() => this.onmessage({ data: JSON.stringify(m) }), 30);
     if (message.type === "hello") reply({ type: "capabilities", voice: true });
     if (message.type === "route") {
-      reply(/street food/i.test(message.text)
-        ? { type: "route", id: message.id, route: "cloud" }
-        : { type: "route", id: message.id, route: "reply", text: "Okay, I'm ready to assist." });
+      reply({ type: "route", id: message.id, route: "reply", text: "Okay, I'm ready to assist." });
     }
   },
   onmessage: null,
 };
 """
+
+
+def _asked_to_route(page: Page) -> bool:
+    return page.evaluate("() => window.sentToPhone.some((m) => m.type === 'route')")
+
+
+def _saved(live_app, chat_id: str, text: str) -> bool:
+    return any(m.content == text for m in live_app.state.task_service.list_chat_messages(chat_id))
 
 
 def _answer(live_app, text: str) -> None:
@@ -77,28 +83,25 @@ def test_a_spoken_conversation_stays_spoken_and_follow_ups_go_to_the_server(
 
     # "Yes please do" follows that question: the server gets it, not the phone's model.
     _type(page, "Yes please do")
-    eventually(
-        lambda: any(
-            m.content == "Yes please do"
-            for m in live_app.state.task_service.list_chat_messages(chat_id)
-        )
-    )
-    expect(page.locator("#transcript")).not_to_contain_text("ON THIS PHONE")
+    eventually(lambda: _saved(live_app, chat_id, "Yes please do"))
     _answer(live_app, "Here are the best places.")
     eventually(lambda: "Here are the best places." in _spoken(page), timeout=10)
+    assert not _asked_to_route(page)
 
 
-def test_a_typed_conversation_stays_quiet_and_a_fresh_one_still_answers_on_the_phone(
+def test_even_the_simplest_message_goes_to_the_server_and_typing_stays_quiet(
     page: Page, live_server: str, live_app
 ) -> None:
     page.add_init_script(FAKE_PHONE)
     new_chat(page, live_server)
+    chat_id = _chat_id(page)
 
-    # Nothing saved yet: the phone may answer on its own, instantly.
-    _type(page, "hello there")
-    expect(page.locator("#transcript")).to_contain_text("ON THIS PHONE")
-
-    _type(page, "find street food in Shanghai")
-    _answer(live_app, "Try Yunnan Road.")
-    expect(page.locator("#transcript")).to_contain_text("Try Yunnan Road.", timeout=10000)
+    # Small talk and a timer, the things the phone used to answer itself: the server gets
+    # both, and a timer comes back as a card the phone runs (see test_reply_blocks_ui).
+    for text in ("hello there", "set a timer for 2 minutes"):
+        _type(page, text)
+        eventually(lambda text=text: _saved(live_app, chat_id, text))
+        _answer(live_app, f"Reply to {text}.")
+        expect(page.locator("#transcript")).to_contain_text(f"Reply to {text}.", timeout=10000)
+    assert not _asked_to_route(page)
     assert _spoken(page) == []  # never spoken to, so nothing read out
