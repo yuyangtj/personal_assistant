@@ -5,7 +5,7 @@ import time
 import httpx
 from playwright.sync_api import Page, expect
 
-from tests.ui.helpers import eventually, notes
+from tests.ui.helpers import eventually, in_more, notes, pick_repository
 
 
 def new_chat(page: Page, live_server: str) -> None:
@@ -153,7 +153,7 @@ def test_the_stats_page_shows_the_work_done(page: Page, live_server: str) -> Non
     say(page, "hello there")  # queues a reply (no worker runs here)
     expect(page.locator("#transcript .taskcard")).to_be_visible()
 
-    page.click("#nav-stats")
+    in_more(page, "#nav-stats")
     row = page.locator("#stats-body tbody tr").first
     expect(row.locator("th")).to_have_text("chat reply")
     expect(row.locator("td").first).to_have_text("1")  # one task
@@ -179,12 +179,12 @@ def test_the_repository_picked_above_the_chat_is_sent_with_the_message(
     expect(page.locator("#transcript")).to_contain_text("What's this repo about")
 
     # The reply task is made by the console, once the server has routed the message.
-    page.select_option("#repository", "analytics-agent-playground")
+    pick_repository(page, "analytics-agent-playground")
     page.evaluate("id => createTask(id)", messages[0])
     eventually(lambda: len(sent) == 1)
     assert sent[0]["source_context"]["selected_repository_id"] == "analytics-agent-playground"
 
-    page.select_option("#repository", "")  # "Pick for me": nothing is sent
+    pick_repository(page, "")  # "Pick for me": nothing is sent
     page.evaluate("id => createTask(id)", messages[1])
     eventually(lambda: len(sent) == 2)
     assert "selected_repository_id" not in sent[1]["source_context"]

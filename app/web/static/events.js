@@ -98,7 +98,42 @@ $("new-chat").onclick = async () => {
   try { const c = await api("/chat-sessions", { method: "POST", body: "{}" }); goChat(c.id); }
   catch (e) { fail(e); }
 };
-$("reload-chats").onclick = loadChats;
+
+// The message box starts one line tall and grows with what's in it, up to about six lines,
+// also when dictation or a share fills it.
+const INPUT_MAX_PX = 160;
+function growInput() {
+  const box = $("input");
+  box.style.height = "auto";
+  box.style.height = `${Math.min(box.scrollHeight, INPUT_MAX_PX)}px`;
+  box.style.overflowY = box.scrollHeight > INPUT_MAX_PX ? "auto" : "hidden";
+}
+{
+  const box = $("input");
+  const native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+  Object.defineProperty(box, "value", {
+    get() { return native.get.call(this); },
+    set(value) { native.set.call(this, value); growInput(); },
+  });
+  box.addEventListener("input", growInput);
+}
+
+// More: Stats and the settings, in a small sheet above the tab bar (or beside the rail).
+function setMore(open) {
+  $("more-sheet").hidden = !open;
+  $("more-open").setAttribute("aria-expanded", String(open));
+}
+$("more-open").onclick = (e) => { e.stopPropagation(); setMore($("more-sheet").hidden); };
+$("nav-stats").addEventListener("click", () => setMore(false));
+$("passkeys-open").addEventListener("click", () => setMore(false));
+document.addEventListener("click", (e) => {
+  if (!$("more-sheet").hidden && !e.target.closest("#more-sheet, #more-open")) setMore(false);
+  // The conversation menu closes like a popover too.
+  for (const menu of document.querySelectorAll("details.chat-menu[open]")) {
+    if (!menu.contains(e.target)) menu.open = false;
+  }
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") setMore(false); });
 document.addEventListener("change", (e) => {
   const check = e.target.closest("[data-check]");
   if (!check || !state.itemId) return;
@@ -243,15 +278,7 @@ async function setAvatar(on, { remember = true } = {}) {
   window.avatar.mount(stage);
   window.avatarEvent("transcript", avatarTranscriptState());
   if (phone.listening) window.avatarEvent("listening", { on: true });
-  if (remember && !stage.offsetParent) showAvatarConversation();
 }
-// The face lives above a conversation. Switched on from somewhere else (the chat list on a
-// phone, Notes, Stats), it opens the last conversation, or the newest, so the tap shows it.
-async function showAvatarConversation() {
-  if (!state.chatId && !state.chats.length) await loadChats().catch(() => {});
-  const id = state.chatId || state.chats[0]?.id;
-  if (id) goChat(id);
-  else $("status").textContent = "The avatar shows in a conversation.";
-}
+// The switch is in a conversation's ⋯ menu, so the face appears right where it was turned on.
 $("avatar-toggle").onclick = () => setAvatar($("avatar-toggle").getAttribute("aria-pressed") !== "true");
 if (avatarWanted()) setAvatar(true, { remember: false });

@@ -92,11 +92,17 @@ function stopSpeaking() {
   showSpeaking(false);
 }
 
+const SPEAKER_ICON = (waves) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none"
+  stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+  aria-hidden="true"><path d="M4 10v4h3.5L12 18V6L7.5 10z"/>${waves}</svg>`;
+const SPEAKER_ON = SPEAKER_ICON('<path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>');
+const SPEAKER_OFF = SPEAKER_ICON('<path d="M16 9.5l5 5M21 9.5l-5 5"/>');
+
 function setMuted(muted) {
   phone.muted = muted;
   try { localStorage.setItem("assistantMuted", muted ? "1" : "0"); } catch (_) {}
   const button = $("mute-voice");
-  button.textContent = muted ? "🔇" : "🔊";
+  button.innerHTML = muted ? SPEAKER_OFF : SPEAKER_ON;
   button.setAttribute("aria-pressed", String(muted));
   button.setAttribute("aria-label", muted ? "Unmute spoken replies" : "Mute spoken replies");
   button.title = button.getAttribute("aria-label");
