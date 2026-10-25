@@ -100,3 +100,19 @@ def test_a_failing_cache_prune_never_fails_the_deploy(tmp_path: Path) -> None:
     env = _stub_tools(tmp_path, disk_percent=50, docker_fails=True)
 
     assert _bash("prune_build_cache", env=env).returncode == 0
+
+
+def test_deploys_keep_every_chat_provider_the_app_supports() -> None:
+    """A deploy once rewrote ASSISTANT_CONVERSATION_MODEL_PROVIDER=deepseek to minimax:
+    its scripts only knew kimi and minimax."""
+    import re
+    from pathlib import Path
+
+    from app.integrations.factory import CHAT_PROVIDERS
+
+    for script in ("scripts/redeploy-remote.sh", "scripts/host-deployer.sh"):
+        text = Path(script).read_text(encoding="utf-8")
+        for allowed in re.findall(r"^\s*(?:\"\"\|)?([a-z|]+)\) ;;$", text, re.MULTILINE):
+            assert set(allowed.split("|")) == set(CHAT_PROVIDERS), (script, allowed)
+    redeploy = Path("scripts/redeploy-remote.sh").read_text(encoding="utf-8")
+    assert '"${FALLBACK:-auto}"' in redeploy  # a chosen fallback is kept
