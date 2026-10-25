@@ -284,6 +284,8 @@ class TaskResponse(BaseModel):
     updated_at: datetime
     #: The latest thing a running agent reported doing, and its current plan.
     progress: str | None = None
+    #: The reply as far as it has been written, a sentence at a time (to speak it early).
+    draft: str | None = None
     plan: str | None = None
 
     @classmethod
@@ -292,6 +294,7 @@ class TaskResponse(BaseModel):
         if progress:
             response.progress = progress.get("progress")
             response.plan = progress.get("plan")
+            response.draft = progress.get("draft")
         return response
 
 

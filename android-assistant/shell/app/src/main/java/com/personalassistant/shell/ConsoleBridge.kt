@@ -54,6 +54,7 @@ class ConsoleBridge(
             "listen" -> startListening()
             "stop_listening" -> stopListening()
             "speak" -> incoming.text?.let { speech.speak(it) {} }
+            "speak_more" -> incoming.text?.let { speech.speak(it, queue = true) {} }
             "stop_speaking" -> speech.stop()
             "run_action" -> runAction(incoming.id)
             "offer_message_action" -> offerServerAction(incoming.id, incoming.text)

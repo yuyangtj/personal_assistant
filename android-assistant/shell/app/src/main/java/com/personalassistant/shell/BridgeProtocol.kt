@@ -34,6 +34,8 @@ object BridgeProtocol {
         .put("voice", voice)
         .apply { if (assistant != null) put("assistant", assistant) }
         .put("speak", true)
+        // The page may send a reply a sentence at a time ("speak_more" queues it).
+        .put("speakQueue", true)
         .toString()
 
     /** Text shared from another app, for the chat box. */
@@ -84,6 +86,7 @@ object BridgeProtocol {
         "listen",
         "stop_listening",
         "speak",
+        "speak_more",
         "stop_speaking",
         "run_action",
         "offer_message_action",

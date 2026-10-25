@@ -6,6 +6,7 @@ chat replies turn it off, since the reply has to come within a few seconds.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -15,9 +16,9 @@ from app.integrations.chat import (
     ChatCompletion,
     ChatMessage,
     ProviderError,
-    post_within,
     read_tool_calls,
     reasoning_extra,
+    request_completion,
     wire_messages,
 )
 
@@ -33,6 +34,8 @@ class DeepSeekChatClient:
     provider = "deepseek"
     #: Takes ``tools`` and returns the model's calls (OpenAI-style tool calling).
     supports_tools = True
+    #: Can hand over the reply's text as it is written (``on_text``).
+    streams = True
 
     def __init__(
         self,
@@ -62,6 +65,7 @@ class DeepSeekChatClient:
         *,
         max_tokens: int = 700,
         tools: list[dict[str, Any]] | None = None,
+        on_text: Callable[[str], None] | None = None,
     ) -> ChatCompletion:
         payload = {
             "model": self.model,
@@ -71,22 +75,18 @@ class DeepSeekChatClient:
         }
         if tools:
             payload["tools"] = tools
+        body = request_completion(
+            self._client,
+            payload,
+            deadline_seconds=self._deadline_seconds,
+            on_text=on_text,
+            error=DeepSeekError,
+            name="DeepSeek",
+        )
         try:
-            response = post_within(
-                self._client,
-                "/chat/completions",
-                json=payload,
-                deadline_seconds=self._deadline_seconds,
-            )
-        except httpx.HTTPError as error:
-            raise DeepSeekError(f"DeepSeek request failed: {type(error).__name__}") from error
-        if response.status_code != 200:
-            raise DeepSeekError(f"DeepSeek returned HTTP {response.status_code}")
-        try:
-            body = response.json()
             message = body["choices"][0]["message"]
             text = message.get("content") or ""
-        except (ValueError, KeyError, IndexError, TypeError) as error:
+        except (KeyError, IndexError, TypeError) as error:
             raise DeepSeekError("DeepSeek returned an unexpected response shape") from error
         usage = body.get("usage") or {}
         return ChatCompletion(

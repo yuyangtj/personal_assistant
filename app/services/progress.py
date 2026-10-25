@@ -50,7 +50,10 @@ class ProgressOperations(ServiceBase):
             )
             for event in events:
                 entry = progress.setdefault(event.task_id, {})
-                key = "plan" if event.payload.get("kind") == "plan" else "progress"
+                kind = event.payload.get("kind")
+                # The reply being written ("draft") is kept apart from the step shown on
+                # the reply's card ("Looking at Willys").
+                key = kind if kind in ("plan", "draft") else "progress"
                 entry.setdefault(key, str(event.payload.get("text", "")))
         return progress
 

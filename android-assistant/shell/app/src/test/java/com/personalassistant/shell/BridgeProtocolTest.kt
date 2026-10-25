@@ -30,6 +30,13 @@ class BridgeProtocolTest {
     }
 
     @Test
+    fun aReplyCanBeSpokenASentenceAtATime() {
+        assertEquals("speak_more", BridgeProtocol.parse("""{"type":"speak_more","text":"Then tea."}""")?.type)
+        val caps = JSONObject(BridgeProtocol.capabilities(voice = true))
+        assertEquals(true, caps.getBoolean("speakQueue"))
+    }
+
+    @Test
     fun capabilitiesNoLongerMentionAnOnDeviceModel() {
         val caps = JSONObject(BridgeProtocol.capabilities(voice = true, assistant = false))
 

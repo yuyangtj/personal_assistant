@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from app.integrations.chat import (
@@ -29,6 +29,7 @@ class FallbackChatClient:
         self.provider = _chain_label(self.clients, "provider")
         self.model = _chain_label(self.clients, "model")
         self.supports_tools = all(getattr(c, "supports_tools", False) for c in self.clients)
+        self.streams = any(getattr(c, "streams", False) for c in self.clients)
 
     def complete(
         self,
@@ -36,11 +37,13 @@ class FallbackChatClient:
         *,
         max_tokens: int = 700,
         tools: list[dict[str, Any]] | None = None,
+        on_text: Callable[[str], None] | None = None,
     ) -> ChatCompletion:
-        extra = {"tools": tools} if tools else {}
+        extra: dict[str, Any] = {"tools": tools} if tools else {}
         for client in self.clients:
+            streamed = {"on_text": on_text} if on_text and getattr(client, "streams", False) else {}
             try:
-                completion = client.complete(messages, max_tokens=max_tokens, **extra)
+                completion = client.complete(messages, max_tokens=max_tokens, **extra, **streamed)
                 if completion.text.strip() or completion.tool_calls:
                     return completion
             except ProviderError:
