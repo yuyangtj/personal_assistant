@@ -34,6 +34,7 @@ class ExecutionOperations(ServiceBase):
         lease_seconds: int,
         supports_coding: bool = True,
         coding_only: bool = False,
+        lane: str = "all",
     ) -> TaskModel | None:
         with self.database.session() as session, session.begin():
             # Such tasks were skipped on every poll and stayed queued forever.
@@ -62,6 +63,7 @@ class ExecutionOperations(ServiceBase):
                 lease_seconds=lease_seconds,
                 supports_coding=supports_coding,
                 coding_only=coding_only,
+                lane=lane,
             )
 
     def recover_expired_tasks(self) -> list[str]:
