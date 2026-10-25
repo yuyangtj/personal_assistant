@@ -7,19 +7,18 @@ offered to the console through a small bridge (`ConsoleBridge`):
 - **Voice in and out**: a microphone button in the composer (on-device speech recognition
   when available); spoken questions get spoken answers.
 - **Phone actions**: timers, alarms and calendar drafts, always confirmed on screen first.
-- **Answers that stay on the phone**: the time, the date, a timer, and, where Gemini Nano is
-  available through AICore, other small requests. Everything else goes to the server.
+- **No decisions on the phone**: every message goes to the server, whose chat agent sees
+  the whole conversation. The phone only listens, speaks and runs confirmed actions.
 - **Login**: the console's sign-in is asked once and kept encrypted with a key in the
   phone's keystore.
 - **Links**: push notifications and links into the console open in the app; other links
   open in the browser.
 
 The bridge is registered only for the console's own origin, and the page can never
-describe a phone action itself: the app proposes actions and the page can only confirm
-one by the id the app gave it. When a server reply proposes one (a calendar draft the
-phone didn't catch itself, say), the page names only the reply's card; the app reads the
-action from the server with the console login (`ServerActions`), checks it like its own,
-and shows its own label to confirm.
+describe a phone action itself. When a server reply proposes one (a timer, an alarm, a
+calendar draft), the page names only the reply's card; the app reads the action from the
+server with the console login (`ServerActions`), checks it, and shows its own label to
+confirm. The page then refers to it only by the id the app gave it.
 
 ## Build and run
 
