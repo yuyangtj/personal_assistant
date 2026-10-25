@@ -1,0 +1,7 @@
+id: overview
+name: Overview
+summary: "See everything going on across the user's chats: background work in progress or just finished, coding runs, what waits for review, routines, and what was said in another chat."
+example: "what's going on?"
+kind: quick
+band: free
+order: 5
