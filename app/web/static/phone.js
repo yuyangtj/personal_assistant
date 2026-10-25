@@ -5,7 +5,7 @@
 // replies, timers and alarms, and simple answers that stay on the phone. In a browser
 // none of this exists and the console works as before.
 const phone = { bridge: window.AndroidAssistant || null, caps: null, routes: new Map(), next: 0,
-                turns: {}, speakFor: null, listening: false, dictated: false, dictationBase: "", screen: null,
+                turns: {}, speakFor: null, voiceChat: null, listening: false, dictated: false, dictationBase: "", screen: null,
                 // Phone-action cards on replies, by block id: what the app said after
                 // checking the action itself ({ action, label } or { error }).
                 offers: {} };
@@ -102,7 +102,7 @@ function setMuted(muted) {
   button.setAttribute("aria-pressed", String(muted));
   button.setAttribute("aria-label", muted ? "Unmute spoken replies" : "Mute spoken replies");
   button.title = button.getAttribute("aria-label");
-  if (muted) stopSpeaking();
+  if (muted) { stopSpeaking(); phone.voiceChat = null; }
 }
 
 function phoneSend(message) { phone.bridge.postMessage(JSON.stringify(message)); }
