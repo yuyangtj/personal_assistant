@@ -76,14 +76,38 @@ function showSpeaking(on) {
   if (!on) { clearTimeout(speakingTimer); speakingTimer = null; window.avatarEvent?.("stop"); }
 }
 
-function phoneSpeak(text) {
+let speakingUntil = 0;
+function phoneSpeak(text, { queued = false } = {}) {
   if (phone.muted) return;
-  phoneSend({ type: "speak", text });
+  // Queued: said after what the phone is saying (a reply spoken a sentence at a time).
+  phoneSend({ type: queued ? "speak_more" : "speak", text });
   showSpeaking(true);
   clearTimeout(speakingTimer);
   const ms = Math.min(text.length, 2000) * SPEECH_MS_PER_CHARACTER;
+  speakingUntil = (queued ? Math.max(Date.now(), speakingUntil) : Date.now()) + ms;
   window.avatarEvent?.("speak", { text, ms });
-  speakingTimer = setTimeout(() => showSpeaking(false), ms + 1500);
+  speakingTimer = setTimeout(() => showSpeaking(false), speakingUntil - Date.now() + 1500);
+}
+
+// A reply spoken while it is written: each finished sentence of its draft goes to the phone
+// at once, queued; the final reply then adds only the sentences not said yet. Phones whose
+// app can't queue speech (no speakQueue) wait for the whole reply as before.
+const SENTENCE = /[^.!?…]+(?:[.!?…]+["”’)]*|$)/g;
+const sentences = (text) => (text.match(SENTENCE) || []).map((s) => s.trim()).filter(Boolean);
+phone.spokenSentences = 0;
+function speakSentencesFrom(text, { final = false } = {}) {
+  const all = sentences(text);
+  // A draft's last piece may still be growing; only a finished reply is said to the end.
+  const ready = final ? all : all.slice(0, Math.max(0, all.length - (/[.!?…]["”’)]*$/.test(text.trim()) ? 0 : 1)));
+  const fresh = ready.slice(phone.spokenSentences);
+  if (!fresh.length) return;
+  phoneSpeak(fresh.join(" "), { queued: phone.spokenSentences > 0 });
+  phone.spokenSentences = ready.length;
+}
+function speakDraftIfWaiting() {
+  if (!phone.speakFor || phone.muted || !(phone.caps && phone.caps.speakQueue)) return;
+  const task = state.tasks.find((t) => t.origin_message_id === phone.speakFor && t.draft);
+  if (task) speakSentencesFrom(task.draft);
 }
 
 function stopSpeaking() {
@@ -117,7 +141,9 @@ function speakReplyIfWaiting() {
   const reply = index >= 0 && state.messages.slice(index + 1).find((m) => m.role === "assistant");
   if (!reply) return;
   phone.speakFor = null;
-  phoneSpeak(reply.content);
+  if (phone.spokenSentences) speakSentencesFrom(reply.content, { final: true });
+  else phoneSpeak(reply.content);
+  phone.spokenSentences = 0;
 }
 
 const withDictation = (text) =>

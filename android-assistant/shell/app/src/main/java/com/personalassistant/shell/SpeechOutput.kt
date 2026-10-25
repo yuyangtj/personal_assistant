@@ -30,12 +30,14 @@ class SpeechOutput(context: Context) : TextToSpeech.OnInitListener {
     }
 
     /** Returns false when TTS is not ready; the written response remains available. */
-    fun speak(text: String, onDone: () -> Unit): Boolean {
+    /** Speak now, or ([queue]) after what is being said: a reply spoken a sentence at a time. */
+    fun speak(text: String, queue: Boolean = false, onDone: () -> Unit): Boolean {
         val spoken = SpeechText.speakable(text)
         if (!ready || spoken.isBlank()) return false
         val id = UUID.randomUUID().toString()
         callbacks[id] = onDone
-        val result = engine.speak(spoken.take(2_000), TextToSpeech.QUEUE_FLUSH, Bundle(), id)
+        val mode = if (queue) TextToSpeech.QUEUE_ADD else TextToSpeech.QUEUE_FLUSH
+        val result = engine.speak(spoken.take(2_000), mode, Bundle(), id)
         if (result == TextToSpeech.ERROR) {
             callbacks.remove(id)
             return false

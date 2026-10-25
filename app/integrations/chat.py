@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import json as _json
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -98,6 +99,114 @@ def post_within(
                 )
     # Already decoded, so no headers: they would make httpx decode the body again.
     return httpx.Response(response.status_code, content=bytes(body), request=response.request)
+
+
+def stream_within(
+    client: httpx.Client,
+    path: str,
+    *,
+    json: Any,
+    deadline_seconds: float,
+    on_text: Callable[[str], None],
+    **kwargs: Any,
+) -> tuple[int, dict[str, Any] | None]:
+    """POST with ``"stream": true`` and assemble the reply as the non-streaming body.
+
+    Each piece of the reply's text goes to ``on_text`` as it arrives, so it can be shown or
+    spoken early. Returns the status code and a body shaped like a normal chat completion
+    (``choices[0].message`` with content, tool calls and reasoning; ``usage``; ``model``),
+    or ``None`` for an error status. The whole exchange is capped at ``deadline_seconds``.
+    """
+    deadline = time.monotonic() + deadline_seconds
+    message: dict[str, Any] = {"role": "assistant", "content": ""}
+    calls: dict[int, dict[str, Any]] = {}
+    body: dict[str, Any] = {}
+    with client.stream("POST", path, json=json, **kwargs) as response:
+        if response.status_code != 200:
+            response.read()
+            return response.status_code, None
+        for line in response.iter_lines():
+            if time.monotonic() > deadline:
+                raise httpx.ReadTimeout(
+                    f"no complete response within {deadline_seconds:g} s", request=response.request
+                )
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if not data or data == "[DONE]":
+                continue
+            try:
+                chunk = _json.loads(data)
+            except ValueError:
+                continue
+            if chunk.get("model"):
+                body["model"] = chunk["model"]
+            if chunk.get("usage"):
+                body["usage"] = chunk["usage"]
+            for choice in chunk.get("choices") or []:
+                delta = choice.get("delta") or {}
+                text = delta.get("content")
+                if isinstance(text, str) and text:
+                    message["content"] += text
+                    on_text(text)
+                thought = delta.get("reasoning_content")
+                if isinstance(thought, str) and thought:
+                    message["reasoning_content"] = message.get("reasoning_content", "") + thought
+                for part in delta.get("tool_calls") or []:
+                    call = calls.setdefault(
+                        int(part.get("index", len(calls))),
+                        {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+                    )
+                    if part.get("id"):
+                        call["id"] = part["id"]
+                    function = part.get("function") or {}
+                    call["function"]["name"] += function.get("name") or ""
+                    call["function"]["arguments"] += function.get("arguments") or ""
+    if calls:
+        message["tool_calls"] = [calls[index] for index in sorted(calls)]
+    body["choices"] = [{"message": message}]
+    return 200, body
+
+
+def request_completion(
+    client: httpx.Client,
+    payload: dict[str, Any],
+    *,
+    deadline_seconds: float,
+    on_text: Callable[[str], None] | None,
+    error: type[ProviderError],
+    name: str,
+) -> dict[str, Any]:
+    """One chat-completion call, streamed when ``on_text`` wants the text as it comes.
+
+    Returns the response body (always the non-streaming shape); provider failures raise
+    ``error`` with a message that never carries the provider's own details.
+    """
+    try:
+        if on_text is not None:
+            status, body = stream_within(
+                client,
+                "/chat/completions",
+                json={**payload, "stream": True, "stream_options": {"include_usage": True}},
+                deadline_seconds=deadline_seconds,
+                on_text=on_text,
+            )
+        else:
+            response = post_within(
+                client, "/chat/completions", json=payload, deadline_seconds=deadline_seconds
+            )
+            status = response.status_code
+            body = None
+            if status == 200:
+                try:
+                    body = response.json()
+                except ValueError as bad:
+                    raise error(f"{name} returned an unexpected response shape") from bad
+    except httpx.HTTPError as failure:
+        raise error(f"{name} request failed: {type(failure).__name__}") from failure
+    if status != 200 or body is None:
+        raise error(f"{name} returned HTTP {status}")
+    return body
 
 
 #: Assistant-message fields that carry a model's reasoning, kept for the next request.

@@ -48,6 +48,7 @@ async function refreshTranscript() {
       renderFocusBar();
       state.messages = msgs.messages;
       state.workflowRuns = runs.runs.filter((run) => run.workflow_id === "coding-change");
+      speakDraftIfWaiting();
       speakReplyIfWaiting();
       const chat = state.chats.find((c) => c.id === state.chatId);
       $("chat-title").textContent = chat ? chat.title : "Conversation";
@@ -165,8 +166,13 @@ function renderTranscript() {
       + (task ? `<button class="taskcard" data-task="${task.id}" type="button" aria-label="View: ${esc(taskCardLabel(task))}">`
         + `<span class="dot ${active(task) ? "run" : task.status === "failed" ? "fail" : ""}"></span>`
         + `<span class="grow">${esc(taskCardLabel(task))}</span><span>View ›</span></button>` : "");
+    // The reply as far as it has been written, while it is still being written.
+    const draft = m.role === "user" && linked && active(linked) && linked.draft
+      ? `<div class="msg assistant draft"><div class="who">ASSISTANT</div><div class="bubble">`
+        + `${esc(linked.draft)} <span class="typing" role="status" aria-label="Still writing">`
+        + `<i></i><i></i><i></i></span></div></div>` : "";
     return `<div class="msg ${m.role}"><div class="who">${who}</div>`
-      + `<div class="bubble">${esc(m.content)}${extras}</div></div>`;
+      + `<div class="bubble">${esc(m.content)}${extras}</div></div>${draft}`;
   }).join("") + pendingTurns() || `<div class="empty">No messages yet.</div>`;
   if (atBottom || state.pending.length) $("transcript").scrollTop = $("transcript").scrollHeight;
   window.avatarEvent?.("transcript", avatarTranscriptState());
@@ -212,7 +218,7 @@ async function send(text, { voice = false } = {}) {
     entry.messageId = posted.message.id;
     if (attachments.length) setScreen(null);
     // A spoken question gets its answer spoken too, whenever it arrives.
-    if (spoken) phone.speakFor = posted.message.id;
+    if (spoken) { phone.speakFor = posted.message.id; phone.spokenSentences = 0; }
     // The server decides what the message needs; the repository picker is only an override.
     // When it already took care of it (an action, an offer with choices, or a choice
     // picked), its reply is in the transcript; otherwise the message gets a chat reply.

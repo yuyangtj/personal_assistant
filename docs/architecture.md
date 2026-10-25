@@ -64,6 +64,14 @@ flowchart LR
   `digests`): rewritten by a model call once the chats have been quiet for 10 minutes,
   built from chat messages only (never Notes or private memories), and given to every
   reply. It's shown read-only on the Memories page (`GET /digest`).
+- **Speaking from the first sentence.** DeepSeek and Kimi stream their reply
+  (`stream_within` in `app/integrations/chat.py`). `ReplyDraft` (`app/execution/draft.py`)
+  pulls the reply out of the streaming JSON and records each finished sentence as a `draft`
+  progress event (`TaskResponse.draft`).
+  - The page shows the draft as it's written.
+  - In a spoken conversation it sends each new sentence to the phone as `speak_more`
+    (queued); the final reply adds only the sentences not yet said.
+  - Phone apps without `speakQueue` wait for the whole reply as before.
 - **Coding runs** are started, inspected, steered and stopped through the agent's coding
   tools. No tool can merge or deploy; those stay behind the approval token in the console.
 - **The reply agent knows the repositories.** Every chat reply is told which repositories

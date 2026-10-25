@@ -16,6 +16,7 @@ from app.domain.work_items import render_work_item_context
 from app.execution.actions import alarm_matches_next_occurrence, validate_action
 from app.execution.attachments import attachments_prompt
 from app.execution.base import ConversationTurn, ExecutionResult
+from app.execution.draft import ReplyDraft
 from app.execution.fake import ExecutionCancelled
 from app.execution.routine_context import notable, routine_prompt
 from app.integrations.chat import ChatClient, ChatCompletion, ChatMessage, ToolCall
@@ -197,10 +198,15 @@ class ConversationExecutor:
         schemas = self.toolbox.schemas() if native and self.toolbox else None
         messages = self._messages(request, history, context or {}, native=native)
 
+        progress = (context or {}).get("progress")
+        streaming = callable(progress) and getattr(self.client, "streams", False)
+
         def complete() -> ChatCompletion:
-            if schemas:
-                return self.client.complete(messages, max_tokens=MAX_TOKENS, tools=schemas)
-            return self.client.complete(messages, max_tokens=MAX_TOKENS)
+            extra: dict[str, Any] = {"tools": schemas} if schemas else {}
+            if streaming:
+                # The reply a sentence at a time, so the phone can start speaking early.
+                extra["on_text"] = ReplyDraft(lambda text: progress(text, "draft")).feed
+            return self.client.complete(messages, max_tokens=MAX_TOKENS, **extra)
 
         completion = complete()
         tool_calls: list[dict[str, Any]] = []
