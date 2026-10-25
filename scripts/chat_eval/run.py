@@ -133,6 +133,46 @@ class Harness:
         job = DigestJob(self.app.state.database, DigestWriter(chat.client), clock=lambda: later)
         return job.run_due()
 
+    def finished_run(self, chat: str, seed: dict) -> None:
+        """A coding run started from this chat that finished with a draft PR and a summary."""
+        from app.coding.flow import start_coding_run
+
+        state = self.app.state
+        service = state.task_service
+        run = start_coding_run(
+            service,
+            state.workflow_service,
+            state.repository_registry,
+            repository_id=seed.get("repository", "personal-assistant"),
+            request=seed["goal"],
+            chat_session_id=chat,
+            origin_message_id=None,
+            approved_by="eval",
+        )
+        # Earlier scenarios may leave coding tasks queued (they never run here): claim past them.
+        for _ in range(50):
+            claimed = service.claim_next_task(
+                worker_id="eval-seed", lease_seconds=60, coding_only=True
+            )
+            if claimed is None or claimed.id == run.task_id:
+                break
+        execution = service.start_execution(
+            run.task_id,
+            capability_id="coding-pull-request",
+            executor_id="coding-pull-request",
+            execution_input={},
+        )
+        service.start_validation(
+            run.task_id, execution, output={"summary": seed["summary"], "tests": ["pytest"]}
+        )
+        number = seed.get("pr", 131)
+        service.request_approval(
+            run.task_id,
+            execution,
+            artifacts=[],
+            approval={"number": number, "url": f"https://github.com/acme/app/pull/{number}"},
+        )
+
     def messages(self, chat: str) -> list[dict]:
         return self.client.get(f"/chat-sessions/{chat}/messages").json()["messages"]
 
@@ -310,6 +350,8 @@ def run_scenarios(args: argparse.Namespace, scenarios: list[dict]) -> dict[str, 
                     print(f"- {scenario['name']}: skipped (no {', '.join(missing)} here)")
                     continue
                 chat = harness.client.post("/chat-sessions", json={}).json()["id"]
+                if seed := scenario.get("finished_run"):
+                    harness.finished_run(chat, seed)
                 for title in scenario.get("lists", []):
                     harness.client.post("/work-items", json={"title": title, "kind": "list"})
                 ok = True

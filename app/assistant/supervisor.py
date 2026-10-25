@@ -17,7 +17,7 @@ from app.assistant.overview import RunView, coding_runs, render_overview
 from app.coding.flow import revise_pull_request, start_coding_run
 from app.domain.enums import EventType, TaskStatus
 from app.persistence.database import Database
-from app.persistence.models import TaskEventModel
+from app.persistence.models import ExecutionModel, TaskEventModel
 from app.repositories import RepositoryRegistry
 from app.services import TaskService
 from app.workflows import WorkflowService
@@ -65,28 +65,57 @@ class SupervisorTools:
         if view is None:
             return {"error": f"No run matches {ref!r}; use a run id from ACTIVE WORK."}
         steps: list[str] = []
+        plan = view.plan
+        output: dict[str, Any] = {}
         if view.task_id:
             with self.database.session() as session:
+                progress = session.scalars(
+                    select(TaskEventModel)
+                    .where(TaskEventModel.task_id == view.task_id)
+                    .where(TaskEventModel.event_type == EventType.TASK_PROGRESS.value)
+                    .order_by(TaskEventModel.sequence.desc())
+                ).all()
                 steps = [
                     str(event.payload.get("text", ""))
-                    for event in session.scalars(
-                        select(TaskEventModel)
-                        .where(TaskEventModel.task_id == view.task_id)
-                        .where(TaskEventModel.event_type == EventType.TASK_PROGRESS.value)
-                        .order_by(TaskEventModel.sequence.desc())
-                        .limit(8)
-                    )
+                    for event in progress
                     if event.payload.get("kind") != "plan"
-                ][::-1]
-        return {
+                ][:8][::-1]
+                # The plan stays readable after the run, not only while it works.
+                plan = plan or next(
+                    (
+                        str(event.payload.get("text", ""))
+                        for event in progress
+                        if event.payload.get("kind") == "plan"
+                    ),
+                    None,
+                )
+                finished = session.scalars(
+                    select(ExecutionModel)
+                    .where(ExecutionModel.task_id == view.task_id)
+                    .where(ExecutionModel.output.is_not(None))
+                    .order_by(ExecutionModel.created_at.desc())
+                ).first()
+                output = (finished.output or {}) if finished else {}
+        detail: dict[str, Any] = {
             "run": view.ref,
             "repository": view.repository_id,
             "goal": view.goal,
             "state": view.state,
-            "plan": view.plan,
+            "plan": plan,
             "recent_steps": steps,
             "pull_request": view.pull_request_url,
         }
+        # What the agent reported when it finished: its findings, the same text as the
+        # pull request's description.
+        if output.get("summary"):
+            detail["summary"] = str(output["summary"])[:4000]
+        for key in ("tests", "notes"):
+            if output.get(key):
+                detail[key] = [str(item)[:300] for item in output[key][:20]]
+        review = output.get("review")
+        if isinstance(review, dict) and review.get("outcome"):
+            detail["review"] = str(review["outcome"])
+        return detail
 
     def start_coding(
         self,

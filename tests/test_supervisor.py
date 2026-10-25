@@ -398,3 +398,35 @@ def test_an_open_pr_is_left_waiting(client: TestClient) -> None:
 
     assert PullRequestReconciler(client.app.state.task_service, _FakeGitHub()).run_once() == 0
     assert client.get(f"/tasks/{run['task_id']}").json()["status"] == "waiting_for_approval"
+
+
+def test_a_finished_run_shows_what_its_agent_found(client: TestClient) -> None:
+    chat, _, run = _started_run(client)
+    service = client.app.state.task_service
+    execution = _execution(client, run["task_id"])
+    service.record_progress(run["task_id"], "▸ Trace the push path", "plan")
+    service.record_progress(run["task_id"], "Writing docs/push.md", "tool")
+    service.start_validation(
+        run["task_id"],
+        execution,
+        output={
+            "summary": "Pushes go through ntfy; the app itself never subscribes.",
+            "tests": ["uv run pytest"],
+            "notes": [],
+            "review": {"outcome": "approved", "problems": []},
+        },
+    )
+    service.request_approval(
+        run["task_id"],
+        execution,
+        artifacts=[],
+        approval={"number": 41, "url": "https://github.com/acme/widget/pull/41"},
+    )
+
+    detail = _tools(client).run_detail(run["id"][:8], chat)
+
+    assert detail["summary"] == "Pushes go through ntfy; the app itself never subscribes."
+    assert detail["tests"] == ["uv run pytest"] and "notes" not in detail
+    assert detail["review"] == "approved"
+    assert detail["plan"] == "▸ Trace the push path"
+    assert detail["recent_steps"] == ["Writing docs/push.md"]
