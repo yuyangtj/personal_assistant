@@ -128,7 +128,6 @@ class MainActivity : ComponentActivity() {
 
         bridge = ConsoleBridge(
             scope = lifecycleScope,
-            router = OnDeviceRouter(),
             speech = SpeechOutput(this),
             actions = PhoneActionRunner(this),
             voiceAvailable = { voice.isAvailable },
