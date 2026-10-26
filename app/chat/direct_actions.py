@@ -38,6 +38,7 @@ class DirectAction(BaseModel):
         "remember",
         "forget",
         "remind",
+        "alarm",
         "routine",
         "list_routines",
         "run_routine",
@@ -46,7 +47,7 @@ class DirectAction(BaseModel):
     ]
     #: Most actions are one short phrase; a note may be longer (see the validator).
     text: str = Field(min_length=1, max_length=NOTE_TEXT_LIMIT)
-    #: For remind/routine: local wall-clock time "YYYY-MM-DDTHH:MM" in the user's zone.
+    #: For remind/alarm/routine: local wall-clock time "YYYY-MM-DDTHH:MM" in the user's zone.
     at: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
     recurrence: Literal["none", "daily", "weekdays", "weekly", "monthly"] = "none"
     #: The work item's #tag for checklist actions; None means "the obvious one".
@@ -139,8 +140,11 @@ def _schedule(
             item = None
     routine = action.type == "routine"
     watch = routine and is_watch(action.text)
+    kind = {"routine": ScheduleKind.ROUTINE, "alarm": ScheduleKind.ALARM}.get(
+        action.type, ScheduleKind.REMINDER
+    )
     schedules.create(
-        kind=ScheduleKind.ROUTINE if routine else ScheduleKind.REMINDER,
+        kind=kind,
         message=action.text,
         run_at=local,
         recurrence=Recurrence(action.recurrence),
@@ -151,7 +155,11 @@ def _schedule(
     )
     when = local.strftime("%a %d %b %H:%M")
     repeat = "" if action.recurrence == "none" else f", repeating {action.recurrence}"
-    verb = "I'll remind you" if action.type == "remind" else "I'll do this"
+    verb = {"remind": "I'll remind you", "alarm": "Alarm set for"}.get(action.type, "I'll do this")
+    if action.type == "alarm":
+        return DirectActionResult(
+            True, f"{verb} {when}{repeat}: {action.text} (it rings on the phone)", None
+        )
     note = " (I'll only notify you when it's worth knowing)" if watch else ""
     return DirectActionResult(
         True, f"{verb} {when}{repeat}: {action.text}{note}", item.slug if item else None
@@ -245,7 +253,7 @@ def run_direct_action(
         if schedules is None:
             return DirectActionResult(False, "Routines aren't available here.")
         return _routines(action, chat_session_id=chat_session_id, schedules=schedules, tasks=tasks)
-    if action.type in ("remind", "routine"):
+    if action.type in ("remind", "alarm", "routine"):
         if schedules is None:
             return DirectActionResult(False, "Reminders aren't available here.")
         return _schedule(

@@ -28,6 +28,8 @@ class ConsoleBridge(
     private val openAssistantSettings: () -> Unit = {},
     /** Reads a reply's phone-action card from the console's server (see ServerActions). */
     private val fetchServerAction: suspend (path: String) -> JSONObject? = { null },
+    /** Fetches the server's reminders and alarms and sets them on the phone (AlarmSync). */
+    private val syncAlarms: () -> Unit = {},
 ) : WebViewCompat.WebMessageListener, VoiceInput.Listener {
     private var page: JavaScriptReplyProxy? = null
     /** Shared or screen context that arrived before the page said hello (cold start). */
@@ -63,6 +65,7 @@ class ConsoleBridge(
             "stop_speaking" -> speech.stop()
             "run_action" -> runAction(incoming.id)
             "offer_message_action" -> offerServerAction(incoming.id, incoming.text)
+            "sync_alarms" -> syncAlarms()
         }
     }
 

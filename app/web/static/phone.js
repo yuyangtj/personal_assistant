@@ -137,6 +137,17 @@ function setMuted(muted) {
 
 function phoneSend(message) { phone.bridge.postMessage(JSON.stringify(message)); }
 
+// The app rings reminders and alarms itself: after each new reply (one may have set one)
+// it fetches them from the server again. Only the app talks to the server for this.
+function syncPhoneAlarmsAfterReply() {
+  if (!phone.bridge || !phone.caps?.alarms) return;
+  const last = [...state.messages].reverse().find((m) => m.role === "assistant");
+  if (!last || last.id === phone.alarmsSyncedFor) return;
+  const first = phone.alarmsSyncedFor === undefined;  // the app syncs on opening anyway
+  phone.alarmsSyncedFor = last.id;
+  if (!first) phoneSend({ type: "sync_alarms" });
+}
+
 function speakReplyIfWaiting() {
   if (!phone.speakFor) return;
   const index = state.messages.findIndex((m) => m.id === phone.speakFor);

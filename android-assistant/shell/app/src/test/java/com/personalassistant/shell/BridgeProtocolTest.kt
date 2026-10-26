@@ -38,6 +38,12 @@ class BridgeProtocolTest {
     }
 
     @Test
+    fun thePageCanAskTheAppToSyncRemindersAndAlarms() {
+        assertEquals("sync_alarms", BridgeProtocol.parse("""{"type":"sync_alarms"}""")?.type)
+        assertEquals(true, JSONObject(BridgeProtocol.capabilities(voice = true)).getBoolean("alarms"))
+    }
+
+    @Test
     fun speechIsReportedAsItHappens() {
         val word = JSONObject(BridgeProtocol.speech("word", "Stockholm"))
         assertEquals("speech", word.getString("type"))

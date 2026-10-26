@@ -50,6 +50,7 @@ async function refreshTranscript() {
       state.workflowRuns = runs.runs.filter((run) => run.workflow_id === "coding-change");
       speakDraftIfWaiting();
       speakReplyIfWaiting();
+      syncPhoneAlarmsAfterReply();
       const chat = state.chats.find((c) => c.id === state.chatId);
       $("chat-title").textContent = chat ? chat.title : "Conversation";
       renderTranscript();

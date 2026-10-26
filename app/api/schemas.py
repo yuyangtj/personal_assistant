@@ -644,7 +644,7 @@ class TimelineResponse(BaseModel):
 
 
 class CreateScheduleRequest(BaseModel):
-    kind: Literal["reminder", "routine"] = "reminder"
+    kind: Literal["reminder", "routine", "alarm"] = "reminder"
     message: str = Field(min_length=1, max_length=500)
     run_at: datetime
     recurrence: Literal["none", "daily", "weekdays", "weekly", "monthly"] = "none"

@@ -71,6 +71,10 @@ class MainActivity : ComponentActivity() {
         else bridge.onError("Microphone permission is needed for voice requests.")
     }
 
+    private val notificationPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (granted) syncAlarms() }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -141,6 +145,7 @@ class MainActivity : ComponentActivity() {
                     ServerActions.fetch(origin, path, ServerActions.host(origin)?.let(credentials::load))
                 }
             },
+            syncAlarms = ::syncAlarms,
         )
         voice = VoiceInput(this, bridge)
         val origin = ConsoleUrls.origin(server)
@@ -245,6 +250,29 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         web.saveState(outState)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        syncAlarms()
+    }
+
+    /**
+     * Reminders and alarms from the server, set to ring on this phone. Android asks once
+     * whether the app may show notifications, which ringing needs; without them the server's
+     * push (ntfy) stays the way they arrive.
+     */
+    private fun syncAlarms() {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { AlarmSync.sync(applicationContext) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+                !preferences().getBoolean(KEY_ASKED_NOTIFICATIONS, false)
+            ) {
+                preferences().edit().putBoolean(KEY_ASKED_NOTIFICATIONS, true).apply()
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     override fun onPause() {
@@ -373,7 +401,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_SCREEN_APP = "screen_app"
         const val EXTRA_SCREEN_TEXT = "screen_text"
         private const val BRIDGE_NAME = "AndroidAssistant"
-        private const val KEY_SERVER = "server"
+        const val KEY_SERVER = "server"
+        private const val KEY_ASKED_NOTIFICATIONS = "asked_notifications"
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         private const val PADDING = 48
     }

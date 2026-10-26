@@ -38,6 +38,8 @@ object BridgeProtocol {
         .put("speakQueue", true)
         // Speech start, each spoken word and done arrive as "speech" messages (lip sync).
         .put("speechEvents", true)
+        // Reminders and alarms ring from the app; the page asks it to sync after a reply.
+        .put("alarms", true)
         .toString()
 
     /** Text shared from another app, for the chat box. */
@@ -99,5 +101,6 @@ object BridgeProtocol {
         "stop_speaking",
         "run_action",
         "offer_message_action",
+        "sync_alarms",
     )
 }

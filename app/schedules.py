@@ -1,6 +1,8 @@
-"""Reminders and routines: stored schedules the worker runs when they are due.
+"""Reminders, alarms and routines: stored schedules the worker runs when they are due.
 
-A reminder posts into its chat and pushes to the phone. A routine starts a run (a chat
+A reminder posts into its chat and rings on the phone; an alarm only rings. The Android
+app schedules both itself (see app/api/phone.py); a push through ntfy is sent only for the
+ones it hasn't picked up. A routine starts a run (a chat
 task linked to its work item) with the scheduled message as the request. Times are
 stored in UTC and recurrences are computed in the schedule's own timezone, so "every
 day at 9" stays at 9 across daylight-saving changes.
@@ -30,6 +32,8 @@ logger = logging.getLogger(__name__)
 class ScheduleKind(StrEnum):
     REMINDER = "reminder"
     ROUTINE = "routine"
+    #: Rings on the phone like a clock alarm (full screen, until dismissed).
+    ALARM = "alarm"
 
 
 class Recurrence(StrEnum):
@@ -167,7 +171,7 @@ class Scheduler:
         """Claim due schedules (advancing or closing them) in one short transaction, then
         fire each outside it, so a slow push or run never holds database locks."""
         now = self.clock()
-        claimed: list[ScheduleModel] = []
+        claimed: list[tuple[ScheduleModel, datetime]] = []
         with self.database.session() as session, session.begin():
             due = list(
                 session.scalars(
@@ -179,6 +183,7 @@ class Scheduler:
                 )
             )
             for schedule in due:
+                fired_at = _aware(schedule.next_run_at)
                 schedule.last_run_at = now
                 following = next_occurrence(
                     schedule.next_run_at, Recurrence(schedule.recurrence), schedule.timezone
@@ -192,22 +197,23 @@ class Scheduler:
                     schedule.active = False
                 else:
                     schedule.next_run_at = following
-                claimed.append(schedule)
-        for schedule in claimed:
+                claimed.append((schedule, fired_at))
+        for schedule, fired_at in claimed:
             try:
-                self._fire(schedule)
+                self._fire(schedule, fired_at)
             except Exception:
                 logger.exception("Schedule %s failed to fire", schedule.id)
         return len(claimed)
 
-    def _fire(self, schedule: ScheduleModel) -> None:
+    def _fire(self, schedule: ScheduleModel, fired_at: datetime | None = None) -> None:
         tag = ""
         if schedule.work_item_id:
             with self.database.session() as session:
                 tag = f" (#{get_work_item(session, schedule.work_item_id).slug})"
-        if schedule.kind == ScheduleKind.REMINDER.value:
-            text = f"Reminder{tag}: {schedule.message}"
-            if schedule.chat_session_id:
+        if schedule.kind in (ScheduleKind.REMINDER.value, ScheduleKind.ALARM.value):
+            alarm = schedule.kind == ScheduleKind.ALARM.value
+            text = f"{'Alarm' if alarm else 'Reminder'}{tag}: {schedule.message}"
+            if schedule.chat_session_id and not alarm:
                 with self.database.session() as session, session.begin():
                     ChatMessageRepository.append(
                         session,
@@ -215,9 +221,75 @@ class Scheduler:
                         role="assistant",
                         content=text,
                     )
-            sent = self.notifier.send("Reminder", text, priority=4)
+            on_phone = (
+                schedule.phone_until is not None
+                and fired_at is not None
+                and fired_at <= _aware(schedule.phone_until)
+            )
+            if on_phone:
+                return  # the app rings it itself
+            title = "Alarm" if alarm else "Reminder"
+            sent = self.notifier.send(title, text, priority=5 if alarm else 4)
             if not sent and not isinstance(self.notifier, NullNotifier):  # off is not a failure
                 logger.warning("Reminder push failed for schedule %s", schedule.id)
             return
         # The run itself pushes its result when it finishes (see the worker).
         self.start_run(schedule)
+
+
+#: How far ahead the phone schedules reminders and alarms, and how many it holds at most.
+PHONE_HORIZON = timedelta(days=14)
+PHONE_MAX_PER_SCHEDULE = 20
+PHONE_MAX = 64
+
+
+def phone_alarms(database: Database, *, now: datetime | None = None) -> list[dict]:
+    """Every time a reminder or alarm rings in the next two weeks, for the Android app."""
+    now = now or utc_now()
+    end = now + PHONE_HORIZON
+    with database.session() as session:
+        schedules = list(
+            session.scalars(
+                select(ScheduleModel)
+                .where(
+                    ScheduleModel.active.is_(True),
+                    ScheduleModel.kind.in_((ScheduleKind.REMINDER.value, ScheduleKind.ALARM.value)),
+                    ScheduleModel.next_run_at <= end,
+                )
+                .order_by(ScheduleModel.next_run_at)
+            )
+        )
+    rings: list[dict] = []
+    for schedule in schedules:
+        at: datetime | None = _aware(schedule.next_run_at)
+        count = 0
+        while at is not None and at <= end and count < PHONE_MAX_PER_SCHEDULE:
+            if at > now:
+                rings.append(
+                    {
+                        "id": f"{schedule.id}@{int(at.timestamp())}",
+                        "schedule_id": schedule.id,
+                        "at": int(at.timestamp() * 1000),
+                        "kind": schedule.kind,
+                        "text": schedule.message,
+                    }
+                )
+                count += 1
+            at = next_occurrence(at, Recurrence(schedule.recurrence), schedule.timezone)
+    rings.sort(key=lambda ring: ring["at"])
+    return rings[:PHONE_MAX]
+
+
+def mark_on_phone(database: Database, until: dict[str, int]) -> int:
+    """The app rings these schedules itself up to the given times (ms); no push for those."""
+    marked = 0
+    with database.session() as session, session.begin():
+        for schedule_id, at_ms in until.items():
+            schedule = session.get(ScheduleModel, schedule_id)
+            if schedule is None or schedule.kind == ScheduleKind.ROUTINE.value:
+                continue
+            at = datetime.fromtimestamp(at_ms / 1000, tz=UTC)
+            if schedule.phone_until is None or _aware(schedule.phone_until) < at:
+                schedule.phone_until = at
+                marked += 1
+    return marked
