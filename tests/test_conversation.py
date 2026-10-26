@@ -336,6 +336,19 @@ def test_executor_uses_phone_local_time_and_returns_action() -> None:
     assert result.output["action"] == {"type": "set_timer", "seconds": 600, "label": "Tea"}
 
 
+def test_a_utc_time_from_the_page_is_shown_as_the_users_own_clock() -> None:
+    # The console once sent new Date().toISOString(): 20:13 UTC is 21:13 in Stockholm, and
+    # showing 20:13 put "in 3 minutes" an hour in the past.
+    client = RecordingChatClient(['{"reply": "Sure.", "emotion": "Warm", "action": null}'])
+    ConversationExecutor(client).execute(
+        task_id="t1",
+        request="remind me in 3 minutes",
+        is_cancelled=lambda: False,
+        context={"local_time": "2026-10-26T20:13:00.000Z", "timezone": "Europe/Stockholm"},
+    )
+    assert "Monday 26 October 2026, 21:13 (Europe/Stockholm)" in client.calls[0][0].content
+
+
 def test_worker_publishes_validated_action_in_reply(service: TaskService) -> None:
     client = RecordingChatClient(
         [

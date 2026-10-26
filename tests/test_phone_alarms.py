@@ -111,3 +111,20 @@ def test_the_app_lists_and_confirms_through_the_api(client: TestClient) -> None:
     assert marked == {"marked": 1}
     # Unknown ids are ignored.
     assert client.post("/phone/alarms/ack", json={"until": {"nope": 1}}).json() == {"marked": 0}
+
+
+def test_postgres_allows_every_schedule_kind() -> None:
+    # Production is Postgres, with a check on schedules.kind that SQLite tests don't have:
+    # "alarm" was refused there until migration 030. The latest check must list them all.
+    import re
+    from pathlib import Path
+
+    checks = [
+        match
+        for path in sorted(Path("migrations").glob("*.sql"))
+        for match in re.findall(
+            r"ck_schedules_kind\s+CHECK\s*\(kind IN \(([^)]*)\)", path.read_text()
+        )
+    ]
+    allowed = set(re.findall(r"'(\w+)'", checks[-1]))
+    assert {kind.value for kind in ScheduleKind} <= allowed
