@@ -83,6 +83,15 @@
     {"say": "set a timer for 10 minutes for the pasta", "expect": {"action": "set_timer"}},
     {"say": "put lunch with Anna on Friday at 12 in my calendar", "expect": {"action": "create_event"}}
   ]},
+  {"name": "alarms-on-any-day", "about": "Alarms ring from the app at any date: the alarm tool, never a refusal because the Clock app only takes the next 8:00.", "turns": [
+    {"say": "set an alarm for Friday at 8", "expect": {"tool": "alarm"}}
+  ]},
+  {"name": "wake-up-alarm", "turns": [
+    {"say": "wake me up at 6:45 tomorrow", "expect": {"tool": "alarm"}}
+  ]},
+  {"name": "reminder-in-hours", "about": "A reminder at a later time is a reminder (it rings on the phone), not an alarm or a timer.", "turns": [
+    {"say": "remind me in 3 hours to call mom", "expect": {"tool": "remind"}}
+  ]},
   {"name": "shared-screen", "turns": [
     {"say": "what is this about, in one sentence?", "screen": "Moderna Museet — Utställning: Hilma af Klint, 12 oktober–2 mars. Öppettider tis–sön 10–18, fredag till 20. Entré 150 kr.", "expect": {"reply_any": ["moderna", "museum", "exhibition", "utställning"]}}
   ]},

@@ -391,6 +391,9 @@ class ScheduleModel(Base):
     quiet: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: The Android app rings this reminder or alarm itself, for every time up to here;
+    #: those get no ntfy push (it would be a second notification).
+    phone_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )

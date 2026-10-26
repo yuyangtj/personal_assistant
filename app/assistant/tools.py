@@ -34,6 +34,11 @@ def _text(arguments: dict[str, Any], key: str = "text") -> str:
     return value.strip()
 
 
+def _alarm_label(arguments: dict[str, Any]) -> str:
+    label = arguments.get("label") or arguments.get("text")
+    return label.strip() if isinstance(label, str) and label.strip() else "Alarm"
+
+
 def _short(text: str, size: int = 50) -> str:
     text = " ".join(text.split())
     return text if len(text) <= size else text[: size - 1] + "…"
@@ -198,9 +203,21 @@ def bookkeeping_tools(
                 "reminders",
                 '{"text": "<what to remind about>", "at": "YYYY-MM-DDTHH:MM (local time)", '
                 f'"recurrence": "<{RECURRENCES}>"}}',
-                "push a reminder to the user's phone at that time",
+                "a reminder at that time: it rings on the user's phone as a notification and "
+                "is posted in this chat",
                 lambda a, c: act({"type": "remind", "text": _text(a), **when(a)}, c),
                 lambda a: "Setting a reminder",
+            ),
+            AssistantTool(
+                "alarm",
+                "reminders",
+                '{"label": "<short label, or empty>", "at": "YYYY-MM-DDTHH:MM (local time)", '
+                f'"recurrence": "<{RECURRENCES}>"}}',
+                "an alarm that rings on the user's phone like a clock alarm (full screen, "
+                'until dismissed), on any date, once or repeating: for wake-ups and "set an '
+                'alarm"',
+                lambda a, c: act({"type": "alarm", "text": _alarm_label(a), **when(a)}, c),
+                lambda a: "Setting an alarm",
             ),
             AssistantTool(
                 "routine_create",

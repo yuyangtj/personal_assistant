@@ -1,6 +1,6 @@
 id: phone
 name: Phone actions
-summary: In the Android app, set timers and alarms and draft calendar events; the phone shows a card and acts only after the user taps Confirm.
+summary: In the Android app, set timers and draft calendar events; the phone shows a card and acts only after the user taps Confirm.
 example: "set a timer for 10 minutes"
 kind: quick
 band: ask

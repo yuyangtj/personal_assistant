@@ -1,6 +1,6 @@
 id: reminders
 name: Reminders
-summary: Remind the user at a time, once or repeating.
+summary: Remind the user at a time, or set an alarm, once or repeating; both ring on the phone.
 example: "remind me tomorrow at 9 to call mum"
 kind: quick
 band: free

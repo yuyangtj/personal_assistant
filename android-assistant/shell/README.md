@@ -6,7 +6,13 @@ offered to the console through a small bridge (`ConsoleBridge`):
 
 - **Voice in and out**: a microphone button in the composer (on-device speech recognition
   when available); spoken questions get spoken answers.
-- **Phone actions**: timers, alarms and calendar drafts, always confirmed on screen first.
+- **Phone actions**: timers and calendar drafts, always confirmed on screen first.
+- **Reminders and alarms ring from the app**: it fetches the coming two weeks from the
+  server (`GET /phone/alarms`, `AlarmSync`) when it opens, after each reply and after each
+  ring, and sets them with Android's exact alarms (`AlarmScheduler`), so they ring with the
+  app closed and again after a reboot. An alarm rings full screen with the alarm sound until
+  dismissed or snoozed; a reminder is a notification with sound. The app tells the server
+  which ones it has (`POST /phone/alarms/ack`), and the server sends no ntfy push for those.
 - **No decisions on the phone**: every message goes to the server, whose chat agent sees
   the whole conversation. The phone only listens, speaks and runs confirmed actions.
 - **Login**: the console's sign-in is asked once and kept encrypted with a key in the
@@ -15,7 +21,7 @@ offered to the console through a small bridge (`ConsoleBridge`):
   open in the browser.
 
 The bridge is registered only for the console's own origin, and the page can never
-describe a phone action itself. When a server reply proposes one (a timer, an alarm, a
+describe a phone action itself. When a server reply proposes one (a timer or a
 calendar draft), the page names only the reply's card; the app reads the action from the
 server with the console login (`ServerActions`), checks it, and shows its own label to
 confirm. The page then refers to it only by the id the app gave it.

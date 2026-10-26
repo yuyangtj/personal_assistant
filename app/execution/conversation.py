@@ -103,17 +103,11 @@ a confirmation card and only acts after the user taps Confirm, so never say it i
 Put the action in this reply (don't ask first whether to: the card is the question) and
 say what it will set up. Supported actions:
 - {"type": "set_timer", "seconds": <1-86400>, "label": "<short label or empty>"}
-- {"type": "set_alarm", "hour": <0-23>, "minute": <0-59>, "label": "<short label>",
-  "days": [<repeat days, 1=Sunday ... 7=Saturday>], "date": "YYYY-MM-DD or null"}
-  For a one-time alarm, leave "days" empty and always include its local calendar date. The
-  phone Clock can only set the next occurrence of a time, so propose it only when that date is
-  the next occurrence after the local time below. Otherwise explain that limitation and propose
-  no action. For repeating requests, fill "days" and set "date" to null.
-- {"type": "create_event", "title": "<title>", "start": "YYYY-MM-DDTHH:MM",
+{alarms}- {"type": "create_event", "title": "<title>", "start": "YYYY-MM-DDTHH:MM",
   "end": "YYYY-MM-DDTHH:MM or null", "location": "<optional>"}
   Times are in the user's local time; resolve words like "tomorrow" from the local date below.
-If a needed detail is missing (a timer's length, an alarm's or event's start), ask a short
-question and propose no action. An event's end and location are optional: never ask for them.
+{alarm_note}If a needed detail is missing (a timer's length, an alarm's or event's start), ask a
+short question and propose no action. An event's end and location are optional: never ask for them.
 You cannot read calendars, email, messages, files, or accounts, and you cannot browse the web.
 {coding}Answer questions about the work from the work item summaries you are given.
 When it helps the user pick or open something, you may add up to four short "choices" (the
@@ -124,6 +118,20 @@ When you are done, respond with only a JSON object: {"reply": "<spoken reply>",
 "emotion": "<one of Warm, Curious, Excited, Concerned, Neutral>",
 "action": <one action object or null>, "choices": [<short labels>] or omitted,
 "links": [{"label": "...", "href": "https://..."}] or omitted}."""
+
+#: Alarms ring from the Android app itself, at any date: the alarm tool, not a card.
+ALARM_TOOL = """Alarms ("wake me up at 7", "an alarm on Friday at 8") are not a card: set them
+with the alarm tool, which rings on the phone at any date, once or repeating. A reminder at a
+time ("remind me in 2 hours to ...") is the remind tool; it rings on the phone too.
+"""
+#: Without it, the phone's Clock app, which only takes the next occurrence of a time.
+CLOCK_ALARM = """- {"type": "set_alarm", "hour": <0-23>, "minute": <0-59>, "label": "<short label>",
+  "days": [<repeat days, 1=Sunday ... 7=Saturday>], "date": "YYYY-MM-DD or null"}
+  For a one-time alarm, leave "days" empty and always include its local calendar date. The
+  phone Clock can only set the next occurrence of a time, so propose it only when that date is
+  the next occurrence after the local time below. Otherwise explain that limitation and propose
+  no action. For repeating requests, fill "days" and set "date" to null.
+"""
 
 #: Without coding tools, code changes go through the coding workflow offer.
 CODING_HANDOFF = """Code changes in the user's registered projects are made by the assistant's
@@ -341,8 +349,11 @@ class ConversationExecutor:
         )
         research_tool = bool(self.toolbox) and "research" in self.toolbox.names
         can_follow_up = bool(self.toolbox) and "routine_create" in self.toolbox.names
+        alarm_tool = bool(self.toolbox) and "alarm" in self.toolbox.names
         prompt = (
             SYSTEM_PROMPT.replace("{coding}", coding)
+            .replace("{alarms}", "" if alarm_tool else CLOCK_ALARM)
+            .replace("{alarm_note}", ALARM_TOOL if alarm_tool else "")
             + (f"\n{self.abilities_text}" if self.abilities_text else "")
             + (RESEARCH_HANDOFF if self.research_available and not research_tool else "")
             + (FOLLOW_UPS if can_follow_up else "")
