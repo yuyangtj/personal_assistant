@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -443,6 +444,10 @@ class ConversationExecutor:
             try:
                 parsed = datetime.fromisoformat(local)
                 label = f" ({zone})" if isinstance(zone, str) and zone else ""
+                if parsed.tzinfo is not None and label:
+                    # A UTC time ("…Z") is shown as the user's own wall clock, not as is.
+                    with contextlib.suppress(ZoneInfoNotFoundError, ValueError):
+                        parsed = parsed.astimezone(ZoneInfo(zone))
                 return (
                     f"User's local date and time: {parsed.strftime('%A %d %B %Y, %H:%M')}{label}."
                 )
