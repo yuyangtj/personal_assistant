@@ -88,6 +88,14 @@ def _chat_title(request: str) -> str:
     return normalized if len(normalized) <= 80 else normalized[:77].rstrip() + "…"
 
 
+#: A first message longer than this makes a poor title; a model writes a short one.
+SHORT_TITLE_CHARACTERS = 32
+
+
+def _needs_short_title(title: str) -> bool:
+    return len(title) > SHORT_TITLE_CHARACTERS
+
+
 class ExecutionNotFoundError(LookupError):
     pass
 

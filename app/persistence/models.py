@@ -50,6 +50,8 @@ class ChatSessionModel(Base):
     pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     #: The one "Assistant" conversation the app opens in; it can't be archived or deleted.
     home: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: The title is a long first message cut short; a model gives it a short one soon.
+    title_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
