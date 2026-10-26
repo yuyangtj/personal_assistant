@@ -43,7 +43,14 @@ s = s.replace("export const ResourcesPath = '../../Resources/';", "export const 
 s = s.replace("export const ShaderPath = '../../Framework/Shaders/WebGL/';", "export const ShaderPath = '/ui/avatar-assets/Framework/Shaders/WebGL/';")
 open(f"{src}/lappdefine.ts", "w").write(s)
 edit("lappview.ts", [("    let imageName = '';", "    let imageName = '';\n    if (imageName === '') return; // no background or buttons in the avatar")])
-edit("lappsubdelegate.ts", [("gl.clearColor(0.0, 0.0, 0.0, 1.0);", "gl.clearColor(0.0, 0.0, 0.0, 0.0);")])
+edit("lappsubdelegate.ts", [
+    ("gl.clearColor(0.0, 0.0, 0.0, 1.0);", "gl.clearColor(0.0, 0.0, 0.0, 0.0);"),
+    # Drawing at 0x0 (the stage hidden behind another view) throws and ends the loop for
+    # good; wait for a size instead, the resize stays pending until then.
+    ("    if (this._glManager.getGl().isContextLost()) {\n      return;\n    }",
+     "    if (this._glManager.getGl().isContextLost()) {\n      return;\n    }\n"
+     "    if (!this._canvas.clientWidth || !this._canvas.clientHeight) {\n      return;\n    }"),
+])
 edit("lappdelegate.ts", [
     ("      canvas.style.width = `${width}vw`;\n      canvas.style.height = `${height}vh`;",
      "      canvas.style.width = '100%';\n      canvas.style.height = '100%';"),

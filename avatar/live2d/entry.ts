@@ -53,6 +53,19 @@ function reload(): void {
   else bundle();
 }
 
+let waiting: ResizeObserver | null = null;
+
+function start(host: HTMLElement): boolean {
+  w.__live2dPaused = false;
+  if (!LAppDelegate.getInstance().initialize()) return false;
+  canvas = host.querySelector('canvas');
+  canvas?.addEventListener('webglcontextlost', (event) => event.preventDefault());
+  canvas?.addEventListener('webglcontextrestored', reload);
+  LAppDelegate.getInstance().run();
+  started = true;
+  return true;
+}
+
 w.live2dAvatar = {
   /** Draw the model into `host` (a sized element), framed head and shoulders. */
   mount(host: HTMLElement, frame?: Frame): boolean {
@@ -73,17 +86,25 @@ w.live2dAvatar = {
       }
       return true;
     }
-    w.__live2dPaused = false;
-    if (!LAppDelegate.getInstance().initialize()) return false;
-    canvas = host.querySelector('canvas');
-    canvas?.addEventListener('webglcontextlost', (event) => event.preventDefault());
-    canvas?.addEventListener('webglcontextrestored', reload);
-    LAppDelegate.getInstance().run();
-    started = true;
     mounted = true;
-    return true;
+    // Live2D can't start at 0x0 (the page not laid out yet, or the stage behind another
+    // view): it throws and never draws. Start once the stage has a size.
+    if (!host.clientWidth || !host.clientHeight) {
+      waiting?.disconnect();
+      waiting = new ResizeObserver(() => {
+        if (!host.clientWidth || !host.clientHeight) return;
+        waiting?.disconnect();
+        waiting = null;
+        if (mounted && w.__live2dHost === host && !started) start(host);
+      });
+      waiting.observe(host);
+      return true;
+    }
+    return start(host);
   },
   unmount(): void {
+    waiting?.disconnect();
+    waiting = null;
     if (!mounted) return;
     mounted = false;
     if (reloading) return;
