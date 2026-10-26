@@ -36,6 +36,7 @@ from app.services.common import (
     PostedMessage,
     _chat_title,
     _focus_mentions,
+    _needs_short_title,
 )
 
 #: How much of a chat each reply sees: the last messages, each cut to this length.
@@ -242,6 +243,7 @@ class ChatOperations(ServiceBase):
             )
             if role == "user" and chat_session.title == DEFAULT_CHAT_TITLE:
                 chat_session.title = _chat_title(normalized_content)
+                chat_session.title_pending = _needs_short_title(chat_session.title)
             chat_session.updated_at = datetime.now(UTC)
             session.flush()
             focused = (
@@ -424,9 +426,11 @@ class ChatOperations(ServiceBase):
                     self._reference_task(session, existing, task)
                     return existing
 
+            title = _chat_title(task.original_request)
             chat_session = ChatSessionModel(
                 id=str(uuid4()),
-                title=_chat_title(task.original_request),
+                title=title,
+                title_pending=_needs_short_title(title),
                 archived=False,
             )
             session.add(chat_session)

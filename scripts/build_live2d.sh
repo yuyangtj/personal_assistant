@@ -48,6 +48,12 @@ edit("lappdelegate.ts", [
     ("      canvas.style.width = `${width}vw`;\n      canvas.style.height = `${height}vh`;",
      "      canvas.style.width = '100%';\n      canvas.style.height = '100%';"),
     ("      document.body.appendChild(canvas);", "      ((window as any).__live2dHost || document.body).appendChild(canvas);"),
+    # The sample can't be shut down and started again, so the avatar pauses instead.
+    ("      if (s_instance == null) {\n        return;\n      }",
+     "      if (s_instance == null) {\n        return;\n      }\n"
+     "      if ((window as any).__live2dPaused) {\n"
+     "        (window as any).__live2dResume = () => requestAnimationFrame(loop);\n"
+     "        return;\n      }"),
 ])
 edit("lappmodel.ts", [("""    this._updateScheduler.onLateUpdate(this._model, deltaTimeSeconds);
 

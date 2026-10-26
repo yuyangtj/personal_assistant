@@ -20,6 +20,7 @@ from app.services.common import (
     TaskNotFoundError,
     _chat_title,
     _focus_mentions,
+    _needs_short_title,
 )
 from app.work.items import get_work_item, item_title, link_task, resolve_for_run, work_item_context
 
@@ -134,6 +135,7 @@ class TaskOperations(ServiceBase):
             if chat_session is not None:
                 if chat_session.title == DEFAULT_CHAT_TITLE:
                     chat_session.title = _chat_title(normalized_request)
+                    chat_session.title_pending = _needs_short_title(chat_session.title)
                 chat_session.updated_at = datetime.now(UTC)
             session.add(task)
             session.flush()

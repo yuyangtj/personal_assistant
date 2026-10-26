@@ -28,6 +28,7 @@ from app.assistant.tools import (
 )
 from app.capabilities import CapabilityRegistry
 from app.chat.routines import start_routine as run_routine
+from app.chat.titles import TitleJob, TitleWriter
 from app.coding.base import CodeAgentRunner
 from app.coding.decision import CodingDecisionEngine, CodingRunnerRegistry
 from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
@@ -455,6 +456,7 @@ class TaskWorker:
         brief_writeback: BriefWritebackJob | None = None,
         brief_writeback_interval_seconds: float = 30.0,
         digest: DigestJob | None = None,
+        titles: TitleJob | None = None,
         scheduler: Scheduler | None = None,
         reporter: Reporter | None = None,
         scheduler_interval_seconds: float = 20.0,
@@ -480,6 +482,8 @@ class TaskWorker:
         self._brief_writeback_thread: threading.Thread | None = None
         self.digest = digest
         self._digest_thread: threading.Thread | None = None
+        self.titles = titles
+        self._titles_thread: threading.Thread | None = None
         self.scheduler = scheduler
         self.reporter = reporter
         self.scheduler_interval_seconds = scheduler_interval_seconds
@@ -807,6 +811,27 @@ class TaskWorker:
             except Exception:
                 logger.exception("Could not update the summary of recent days")
 
+    def start_titles(self) -> threading.Thread | None:
+        """Give chats named after a long first message a short title (general worker only)."""
+        if self.titles is None or self.coding_only:
+            return None
+        if self._titles_thread is None or not self._titles_thread.is_alive():
+            self._titles_thread = threading.Thread(
+                target=self._titles_loop, name="chat-titles", daemon=True
+            )
+            self._titles_thread.start()
+        return self._titles_thread
+
+    def _titles_loop(self) -> None:
+        job = self.titles
+        if job is None:
+            return
+        while not self._stop_event.wait(10):
+            try:
+                job.run_due()
+            except Exception:
+                logger.exception("Could not write short chat titles")
+
     def _brief_writeback_loop(self) -> None:
         job = self.brief_writeback
         if job is None:
@@ -824,6 +849,7 @@ class TaskWorker:
         logger.info("Worker %s started", self.worker_id)
         self.start_brief_writeback()
         self.start_digest()
+        self.start_titles()
         self.start_scheduler()
         self.start_pull_request_sync()
         while not self._stop_event.is_set():
@@ -1011,6 +1037,11 @@ def main() -> None:
         ),
         digest=(
             DigestJob(database, DigestWriter(conversation_executor.client))
+            if conversation_executor is not None
+            else None
+        ),
+        titles=(
+            TitleJob(database, TitleWriter(conversation_executor.client))
             if conversation_executor is not None
             else None
         ),
