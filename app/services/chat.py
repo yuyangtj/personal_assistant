@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -51,6 +55,12 @@ UNTRUSTED_CONTEXT_EXCLUDED = {
     "repository_analysis",
     "shell_execution",
 }
+
+
+@dataclass(frozen=True)
+class ChatMessagePage:
+    messages: list[ChatMessageModel]
+    next_before: str | None
 
 
 class ChatOperations(ServiceBase):
@@ -204,10 +214,64 @@ class ChatOperations(ServiceBase):
         *,
         limit: int = 500,
     ) -> list[ChatMessageModel]:
+        return self.list_chat_message_page(chat_session_id, limit=limit).messages
+
+    def list_chat_message_page(
+        self,
+        chat_session_id: str,
+        *,
+        limit: int = 500,
+        before: str | None = None,
+    ) -> ChatMessagePage:
         with self.database.session() as session:
             if ChatSessionRepository.get(session, chat_session_id) is None:
                 raise ChatSessionNotFoundError(chat_session_id)
-            return ChatMessageRepository.list(session, chat_session_id, limit=limit)
+            anchor = (
+                self._chat_message_cursor(session, chat_session_id, before)
+                if before is not None
+                else None
+            )
+            messages, has_older = ChatMessageRepository.list_page(
+                session,
+                chat_session_id,
+                limit=limit,
+                before=(anchor.created_at, anchor.id) if anchor is not None else None,
+            )
+            next_before = (
+                self._encode_chat_message_cursor(messages[0]) if has_older and messages else None
+            )
+            return ChatMessagePage(messages=messages, next_before=next_before)
+
+    @staticmethod
+    def _chat_message_cursor(session, chat_session_id: str, cursor: str) -> ChatMessageModel:
+        try:
+            padding = "=" * (-len(cursor) % 4)
+            encoded = base64.b64decode(cursor + padding, altchars=b"-_", validate=True)
+            payload = json.loads(encoded)
+            if not isinstance(payload, dict) or set(payload) != {"created_at", "id"}:
+                raise ValueError("Invalid chat message cursor")
+            if not isinstance(payload["created_at"], str) or not isinstance(payload["id"], str):
+                raise ValueError("Invalid chat message cursor")
+            created_at = datetime.fromisoformat(payload["created_at"])
+            message_id = payload["id"]
+        except (binascii.Error, UnicodeDecodeError, ValueError) as error:
+            raise ChatMessageNotFoundError(cursor) from error
+        message = session.get(ChatMessageModel, message_id)
+        try:
+            matches = message is not None and message.created_at == created_at
+        except TypeError:
+            matches = False
+        if not matches or message.chat_session_id != chat_session_id:
+            raise ChatMessageNotFoundError(cursor)
+        return message
+
+    @staticmethod
+    def _encode_chat_message_cursor(message: ChatMessageModel) -> str:
+        payload = json.dumps(
+            {"created_at": message.created_at.isoformat(), "id": message.id},
+            separators=(",", ":"),
+        ).encode()
+        return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
     def append_chat_message(
         self,

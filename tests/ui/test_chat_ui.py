@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from playwright.sync_api import Page, expect
 
+from app.chat.blocks import model_blocks
+from app.persistence.models import ChatMessageModel
 from tests.ui.helpers import eventually, in_more, notes, pick_repository
 
 
@@ -210,3 +213,51 @@ def test_the_stats_page_lists_what_the_assistant_can_do(page: Page, live_server:
     expect(body.locator("li", has_text="Looking at repositories")).to_contain_text(
         "not set up on this server"
     )
+
+
+def test_loading_earlier_preserves_scroll_and_polling_keeps_the_whole_transcript(
+    page: Page, live_server: str, live_app, api: httpx.Client
+) -> None:
+    chat_id = api.post("/chat-sessions", json={}).json()["id"]
+    started = datetime(2026, 1, 1, tzinfo=UTC)
+    with live_app.state.database.session() as session, session.begin():
+        session.add_all(
+            ChatMessageModel(
+                id=f"message-{number:04d}",
+                chat_session_id=chat_id,
+                role="user",
+                content=f"message-{number}",
+                created_at=started + timedelta(microseconds=number),
+            )
+            for number in range(1, 501)
+        )
+    live_app.state.task_service.append_chat_message(
+        chat_id,
+        content="By week or by merchant?",
+        role="assistant",
+        blocks=model_blocks({"choices": ["By week"]}),
+    )
+    page.goto(f"{live_server}/ui#/chats/{chat_id}")
+    expect(page.locator("#transcript .msg")).to_have_count(500)
+    expect(page.locator("#transcript .msg .bubble").first).to_have_text("message-2")
+    expect(page.locator("[data-choice='By week']")).to_be_visible()
+
+    page.evaluate("() => document.querySelector('#transcript').scrollTop = 0")
+    first_loaded = page.locator("#transcript .msg").filter(has_text=re.compile(r"^YOUmessage-2$"))
+    expect(first_loaded).to_have_count(1)
+    before_y = first_loaded.bounding_box()["y"]
+    page.click("[data-load-earlier]")
+
+    expect(page.locator("#transcript .msg")).to_have_count(501)
+    expect(page.locator("#transcript .msg .bubble").first).to_have_text("message-1")
+    after_y = first_loaded.bounding_box()["y"]
+    assert abs(after_y - before_y) <= 1
+
+    page.click("[data-choice='By week']")
+    expect(page.locator("#transcript .msg")).to_have_count(502)
+    expect(page.locator("#transcript .msg.user", has_text="By week")).to_be_visible()
+    page.wait_for_timeout(1_500)  # a latest-page poll while the reply is queued
+    expect(page.locator("#transcript .msg")).to_have_count(502)
+    expect(page.locator("#transcript")).to_contain_text("message-1")
+    message_ids = page.evaluate("() => state.messages.map(message => message.id)")
+    assert len(message_ids) == len(set(message_ids))

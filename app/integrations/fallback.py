@@ -38,10 +38,16 @@ class FallbackChatClient:
         max_tokens: int = 700,
         tools: list[dict[str, Any]] | None = None,
         on_text: Callable[[str], None] | None = None,
+        on_text_factory: Callable[[], Callable[[str], None]] | None = None,
     ) -> ChatCompletion:
         extra: dict[str, Any] = {"tools": tools} if tools else {}
         for client in self.clients:
-            streamed = {"on_text": on_text} if on_text and getattr(client, "streams", False) else {}
+            attempt_on_text = on_text_factory() if on_text_factory else on_text
+            streamed = (
+                {"on_text": attempt_on_text}
+                if attempt_on_text and getattr(client, "streams", False)
+                else {}
+            )
             try:
                 completion = client.complete(messages, max_tokens=max_tokens, **extra, **streamed)
                 if completion.text.strip() or completion.tool_calls:

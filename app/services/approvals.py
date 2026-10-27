@@ -17,7 +17,7 @@ from app.persistence.models import (
     WorkflowRunModel,
     utc_now,
 )
-from app.persistence.repository import ChatMessageRepository, TaskRepository
+from app.persistence.repository import TaskRepository
 from app.services.base import ServiceBase
 from app.services.common import (
     ApprovalConflictError,
@@ -38,13 +38,18 @@ class ApprovalOperations(ServiceBase):
         *,
         artifacts: list[dict[str, Any]],
         approval: dict[str, Any],
-    ) -> TaskModel:
+        claim_id: str | None = None,
+    ) -> TaskModel | None:
         """Persists review artifacts and pauses the task before a destructive action."""
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
             execution = self._require_execution(session, execution_id)
             if execution.task_id != task.id:
                 raise ExecutionNotFoundError(execution_id)
+            if (
+                claim_id is not None and not self._has_active_claim(task, claim_id)
+            ) or execution.status != ExecutionStatus.RUNNING.value:
+                return None
             ensure_transition(task.status, TaskStatus.WAITING_FOR_APPROVAL)
             for artifact in artifacts:
                 TaskRepository.append_event(session, task, EventType.ARTIFACT_CREATED, artifact)
@@ -57,6 +62,7 @@ class ApprovalOperations(ServiceBase):
             self._report_pull_request_ready(session, task, approval)
             task.status = TaskStatus.WAITING_FOR_APPROVAL.value
             task.claimed_by = None
+            task.claim_id = None
             task.lease_expires_at = None
             return task
 
@@ -160,6 +166,7 @@ class ApprovalOperations(ServiceBase):
             ensure_transition(task.status, TaskStatus.WAITING_FOR_APPROVAL)
             task.status = TaskStatus.WAITING_FOR_APPROVAL.value
             task.claimed_by = None
+            task.claim_id = None
             task.lease_expires_at = None
             TaskRepository.append_event(
                 session,
@@ -358,6 +365,7 @@ class ApprovalOperations(ServiceBase):
             )
             task.status = TaskStatus.COMPLETED.value
             task.claimed_by = None
+            task.claim_id = None
             task.lease_expires_at = None
             execution.status = ExecutionStatus.SUCCEEDED.value
             execution.completed_at = datetime.now(UTC)
@@ -409,6 +417,7 @@ class ApprovalOperations(ServiceBase):
             task.cancel_requested = True
             task.status = TaskStatus.CANCELLED.value
             task.claimed_by = None
+            task.claim_id = None
             task.lease_expires_at = None
             self._mark_execution_cancelled(execution)
             TaskRepository.append_event(
@@ -444,6 +453,7 @@ class ApprovalOperations(ServiceBase):
             task.status = TaskStatus.SUPERSEDED.value
             task.superseded_by_task_id = revision.id
             task.claimed_by = None
+            task.claim_id = None
             task.lease_expires_at = None
             self._mark_execution_cancelled(execution)
             TaskRepository.append_event(
@@ -563,22 +573,25 @@ class ApprovalOperations(ServiceBase):
                 )
             number = approval.payload.get("number")
             if task.chat_session_id and number:
-                ChatMessageRepository.append(
+                self._record_assistant_reply(
                     session,
-                    chat_session_id=task.chat_session_id,
-                    role="assistant",
-                    content=(
-                        f"The revision didn't change PR #{number}, so it is back waiting for "
-                        "your review."
-                    ),
-                    linked_task_id=task.id,
-                    blocks=[
-                        {
-                            "type": "link",
-                            "label": "Review and merge",
-                            "href": f"#/chats/{task.chat_session_id}?task={task.id}",
-                        }
-                    ],
+                    task,
+                    {
+                        **_reply_payload(
+                            f"The revision didn't change PR #{number}, so it is back waiting for "
+                            "your review.",
+                            emotion="Neutral",
+                            intensity=0.5,
+                            outcome="waiting_for_approval",
+                        ),
+                        "blocks": [
+                            {
+                                "type": "link",
+                                "label": "Review and merge",
+                                "href": f"#/chats/{task.chat_session_id}?task={task.id}",
+                            }
+                        ],
+                    },
                 )
             return task
 

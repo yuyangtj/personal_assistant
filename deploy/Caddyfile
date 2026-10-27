@@ -1,10 +1,10 @@
 {$ASSISTANT_DOMAIN} {
 	encode zstd gzip
 
-	# The app manifest, icons, service worker and Android app-links file are public:
-	# phones fetch them before signing in, and Android verifies them from its own side.
+	# Health, the app manifest, icons, service worker and Android app-links file are public:
+	# phones fetch assets before signing in, and deployment checks the public health path.
 	# They hold nothing private; everything else needs the console login.
-	@private not path /manifest.webmanifest /sw.js /icons/* /.well-known/assetlinks.json
+	@private not path /health /manifest.webmanifest /sw.js /icons/* /.well-known/assetlinks.json
 	basic_auth @private {
 		{$ASSISTANT_WEB_USER} {$ASSISTANT_WEB_PASSWORD_HASH}
 	}

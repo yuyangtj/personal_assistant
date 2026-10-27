@@ -47,7 +47,11 @@ flowchart LR
 - **Workers report to Assistant** (`app/assistant/reporter.py`, run on the scheduler loop).
   - Finished background work (research, routine runs, coding runs: completed, failed or with
     a PR to review) is gathered once nothing new has finished for 30 s, or after 2 minutes at
-    most. `tasks.reported_at` marks what was told.
+    most. `tasks.reported_at` marks what was queued for reporting.
+  - Reports, retries, reminders and routine starts have durable rows in `outbox_deliveries`.
+    The scheduler advances a schedule and enqueues its occurrence in one transaction;
+    `app/delivery.py` retries failed delivery with externally keyed tasks and deterministic
+    reminder-message IDs preventing duplicates after a crash.
   - It becomes one report in Assistant, written by the chat agent in a few lines, with links
     to each result.
   - It pushes to the phone only for the must-knows (a PR to review, a failure, a watch that
@@ -134,6 +138,23 @@ Gemini is used only for text-to-speech, and only the API process receives
 
 The coding workflow is a registered agent capability, while merging is deliberately
 outside routing.
+- **Reliable task ownership:** every claim has a unique token. Planning, execution,
+  progress, validation, approval and completion writes from a worker are accepted only
+  while that claim and its lease remain current, so a stale worker cannot overwrite a
+  replacement. Queue scans use keyset batches rather than stopping at the first 100 rows.
+- **Independent streaming attempts:** each conversation provider gets a fresh `ReplyDraft`;
+  a failed provider's partial text or emitted sentences never leak into the fallback reply.
+- **Bounded chat reads:** the API returns the newest 500 messages by default. Stable
+  `(created_at, id)` cursors load earlier pages without duplicating messages when new ones
+  arrive, and the console offers "Load earlier" for that history.
+- **Coding-worker isolation:** a coding-only worker neither starts general assistant jobs
+  nor reads transcripts, memories, notes or work-item context. Its dedicated PostgreSQL
+  role sees only coding tasks and their execution records; a controlled function is its
+  only route to post an assistant reply in the originating chat. Container networking and
+  filesystem permissions apply the same boundary.
+- **Worker liveness:** every worker lane writes a heartbeat tied to its container instance.
+  Compose health checks reject stale, stopped or previous-instance heartbeats; deployment
+  promotion requires the API, public HTTPS and all enabled workers to be healthy.
 - **How coding starts:** coding tasks are created only by a coding run, which you start
   in chat or the supervisor starts, or by a PR revision. The public task routes refuse
   coding capabilities.

@@ -16,7 +16,7 @@ services:
     volumes:
       - assistant-postgres:/var/lib/postgresql/data
     networks:
-      - private
+      - database
 
   migrate:
     image: postgres:17-alpine
@@ -26,14 +26,14 @@ services:
     restart: "no"
     environment:
       PGPASSWORD: ${ASSISTANT_POSTGRES_PASSWORD:?set ASSISTANT_POSTGRES_PASSWORD}
+      ASSISTANT_CODING_POSTGRES_PASSWORD: ${ASSISTANT_CODING_POSTGRES_PASSWORD:?set ASSISTANT_CODING_POSTGRES_PASSWORD}
     volumes:
       - ./migrations:/migrations:ro
-    command:
-      - sh
-      - -c
-      - for migration in /migrations/*.sql; do psql -h postgres -U assistant -d assistant -v ON_ERROR_STOP=1 -f "$${migration}"; done
+      - ./scripts/migrate.sh:/scripts/migrate.sh:ro
+      - ./deploy/postgres/coding-worker-password.sql:/database/coding-worker-password.sql:ro
+    command: ["sh", "/scripts/migrate.sh"]
     networks:
-      - private
+      - database
 
   api:
     build: .
@@ -86,6 +86,12 @@ services:
       ASSISTANT_GEMINI_REASONING_EFFORT: ${ASSISTANT_GEMINI_REASONING_EFFORT:-low}
       ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER: ${ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER:-auto}
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     expose:
       - "8000"
     volumes:
@@ -105,6 +111,8 @@ services:
         read_only: true
     networks:
       - private
+      - database
+      - egress
 
   worker:
     build: .
@@ -157,6 +165,12 @@ services:
       ASSISTANT_BRIEF_WRITEBACK_IDLE_SECONDS: ${ASSISTANT_BRIEF_WRITEBACK_IDLE_SECONDS:-600}
       ASSISTANT_DEPLOY_SPOOL_DIRECTORY: /deploy
     command: ["python", "-m", "app.worker"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker_liveness"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
     volumes:
       # The worker only reads deploy results, to finish runs while the API restarts.
       - type: bind
@@ -165,6 +179,8 @@ services:
         read_only: true
     networks:
       - private
+      - database
+      - egress
 
   coding-worker:
     profiles: ["coding"]
@@ -187,7 +203,7 @@ services:
       HOME: /tmp/assistant-home
       GIT_ASKPASS: /usr/local/bin/assistant-git-askpass
       GIT_TERMINAL_PROMPT: "0"
-      ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:${ASSISTANT_POSTGRES_PASSWORD}@postgres:5432/assistant
+      ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant_coding:${ASSISTANT_CODING_POSTGRES_PASSWORD:?set ASSISTANT_CODING_POSTGRES_PASSWORD}@postgres:5432/assistant
       ASSISTANT_CAPABILITIES_DIRECTORY: /service/capabilities
       ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
       ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
@@ -235,6 +251,12 @@ services:
       ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL: ${ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
       ASSISTANT_GITHUB_TOKEN: ${ASSISTANT_GITHUB_TOKEN:?set ASSISTANT_GITHUB_TOKEN}
       ASSISTANT_GITHUB_API_BASE_URL: ${ASSISTANT_GITHUB_API_BASE_URL:-https://api.github.com}
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker_liveness"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 120s
     volumes:
       - type: bind
         source: ${ASSISTANT_HOST_REPOSITORY_PERSONAL_ASSISTANT_PATH:-./.coding-repositories/personal-assistant}
@@ -249,7 +271,8 @@ services:
         source: ${ASSISTANT_HOST_CODEX_HOME:-./.codex-home}
         target: /service-state/codex
     networks:
-      - private
+      - database
+      - coding-egress
 
   # The MCP servers (Willys, Lidl) and their gateway, built from the private mcp-servers
   # repository next to this one. Opt-in through the "mcp" profile.
@@ -272,12 +295,20 @@ services:
     security_opt: ["no-new-privileges:true"]
     networks:
       - private
+      - egress
 
   caddy:
     image: caddy:2.10-alpine
     restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     environment:
       ASSISTANT_DOMAIN: ${ASSISTANT_DOMAIN:?set ASSISTANT_DOMAIN}
       ASSISTANT_WEB_USER: ${ASSISTANT_WEB_USER:?set ASSISTANT_WEB_USER}
@@ -292,9 +323,15 @@ services:
       - caddy-config:/config
     networks:
       - private
+      - egress
 
 networks:
   private:
+    internal: true
+  database:
+    internal: true
+  egress:
+  coding-egress:
 
 volumes:
   assistant-postgres:

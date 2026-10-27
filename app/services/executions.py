@@ -70,19 +70,28 @@ class ExecutionOperations(ServiceBase):
         with self.database.session() as session, session.begin():
             return TaskRepository.recover_expired(session, now=datetime.now(UTC))
 
-    def renew_lease(self, task_id: str, *, worker_id: str, lease_seconds: int) -> bool:
+    def renew_lease(
+        self,
+        task_id: str,
+        *,
+        worker_id: str,
+        claim_id: str,
+        lease_seconds: int,
+    ) -> bool:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
-            if task.claimed_by != worker_id or TaskStatus(task.status) in TERMINAL_STATUSES:
+            if not self._has_active_claim(task, claim_id, worker_id=worker_id):
                 return False
             task.lease_expires_at = datetime.now(UTC) + timedelta(seconds=lease_seconds)
             task.updated_at = datetime.now(UTC)
             return True
 
-    def record_plan(self, task_id: str, plan: list[str]) -> None:
+    def record_plan(self, task_id: str, plan: list[str], *, claim_id: str | None = None) -> None:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
-            if TaskStatus(task.status) != TaskStatus.PLANNING:
+            if TaskStatus(task.status) != TaskStatus.PLANNING or (
+                claim_id is not None and not self._has_active_claim(task, claim_id)
+            ):
                 return
             TaskRepository.append_event(
                 session,
@@ -91,10 +100,14 @@ class ExecutionOperations(ServiceBase):
                 {"steps": plan},
             )
 
-    def record_manager_decision(self, task_id: str, decision: dict[str, Any]) -> None:
+    def record_manager_decision(
+        self, task_id: str, decision: dict[str, Any], *, claim_id: str | None = None
+    ) -> None:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
-            if TaskStatus(task.status) != TaskStatus.PLANNING:
+            if TaskStatus(task.status) != TaskStatus.PLANNING or (
+                claim_id is not None and not self._has_active_claim(task, claim_id)
+            ):
                 return
             TaskRepository.append_event(
                 session,
@@ -110,10 +123,13 @@ class ExecutionOperations(ServiceBase):
         capability_id: str,
         executor_id: str,
         execution_input: dict[str, Any],
+        claim_id: str | None = None,
     ) -> str | None:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
-            if TaskStatus(task.status) == TaskStatus.CANCELLED:
+            if TaskStatus(task.status) == TaskStatus.CANCELLED or (
+                claim_id is not None and not self._has_active_claim(task, claim_id)
+            ):
                 return None
             ensure_transition(task.status, TaskStatus.EXECUTING)
             task.status = TaskStatus.EXECUTING.value
@@ -146,12 +162,20 @@ class ExecutionOperations(ServiceBase):
         execution_id: str,
         *,
         output: dict[str, Any],
+        claim_id: str | None = None,
     ) -> bool:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
             execution = self._require_execution(session, execution_id)
+            if execution.task_id != task.id:
+                return False
             if TaskStatus(task.status) == TaskStatus.CANCELLED:
-                self._mark_execution_cancelled(execution)
+                if execution.status == ExecutionStatus.RUNNING.value:
+                    self._mark_execution_cancelled(execution)
+                return False
+            if (
+                claim_id is not None and not self._has_active_claim(task, claim_id)
+            ) or execution.status != ExecutionStatus.RUNNING.value:
                 return False
 
             ensure_transition(task.status, TaskStatus.VALIDATING)
@@ -181,13 +205,21 @@ class ExecutionOperations(ServiceBase):
         action: dict[str, Any] | None = None,
         blocks: list[dict[str, Any]] | None = None,
         notable: bool = False,
-    ) -> TaskModel:
+        claim_id: str | None = None,
+    ) -> TaskModel | None:
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
             execution = self._require_execution(session, execution_id)
+            if execution.task_id != task.id:
+                return None
             if TaskStatus(task.status) == TaskStatus.CANCELLED:
-                self._mark_execution_cancelled(execution)
+                if execution.status == ExecutionStatus.RUNNING.value:
+                    self._mark_execution_cancelled(execution)
                 return task
+            if (
+                claim_id is not None and not self._has_active_claim(task, claim_id)
+            ) or execution.status != ExecutionStatus.RUNNING.value:
+                return None
 
             TaskRepository.append_event(
                 session,
@@ -216,6 +248,7 @@ class ExecutionOperations(ServiceBase):
                 )
             task.status = TaskStatus.COMPLETED.value
             task.claimed_by = None
+            task.claim_id = None
             task.lease_expires_at = None
             execution.status = ExecutionStatus.SUCCEEDED.value
             execution.completed_at = datetime.now(UTC)
@@ -234,18 +267,25 @@ class ExecutionOperations(ServiceBase):
         error: str,
         execution_id: str | None = None,
         reply: str = DEFAULT_FAILURE_REPLY,
-    ) -> None:
+        claim_id: str | None = None,
+    ) -> bool:
         """Fail a task. ``error`` is internal; ``reply`` is the user-facing sentence."""
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
-            if execution_id:
-                execution = self._require_execution(session, execution_id)
+            if TaskStatus(task.status) in TERMINAL_STATUSES or (
+                claim_id is not None and not self._has_active_claim(task, claim_id)
+            ):
+                return False
+            execution = self._require_execution(session, execution_id) if execution_id else None
+            if execution is not None and (
+                execution.task_id != task.id or execution.status != ExecutionStatus.RUNNING.value
+            ):
+                return False
+            ensure_transition(task.status, TaskStatus.FAILED)
+            if execution is not None:
                 execution.status = ExecutionStatus.FAILED.value
                 execution.error = error
                 execution.completed_at = datetime.now(UTC)
-            if TaskStatus(task.status) in TERMINAL_STATUSES:
-                return
-            ensure_transition(task.status, TaskStatus.FAILED)
             self._record_assistant_reply(
                 session,
                 task,
@@ -253,6 +293,7 @@ class ExecutionOperations(ServiceBase):
             )
             task.status = TaskStatus.FAILED.value
             task.claimed_by = None
+            task.claim_id = None
             task.lease_expires_at = None
             TaskRepository.append_event(
                 session,
@@ -261,6 +302,7 @@ class ExecutionOperations(ServiceBase):
                 {"execution_id": execution_id, "error": error},
             )
         self._restore_after_revision(task_id)
+        return True
 
     def cancel_task(self, task_id: str) -> TaskModel:
         with self.database.session() as session, session.begin():
@@ -279,6 +321,7 @@ class ExecutionOperations(ServiceBase):
             task.cancel_requested = True
             task.status = TaskStatus.CANCELLED.value
             task.claimed_by = None
+            task.claim_id = None
             task.lease_expires_at = None
             TaskRepository.append_event(
                 session,
@@ -299,11 +342,19 @@ class ExecutionOperations(ServiceBase):
     def finish_cancelled_execution(self, execution_id: str) -> None:
         with self.database.session() as session, session.begin():
             execution = self._require_execution(session, execution_id)
-            self._mark_execution_cancelled(execution)
+            task = self._require_task(session, execution.task_id, for_update=True)
+            if (
+                TaskStatus(task.status) == TaskStatus.CANCELLED
+                and execution.status == ExecutionStatus.RUNNING.value
+            ):
+                self._mark_execution_cancelled(execution)
 
-    def is_cancelled(self, task_id: str) -> bool:
+    def is_cancelled(self, task_id: str, *, claim_id: str | None = None) -> bool:
         with self.database.session() as session:
             task = TaskRepository.get(session, task_id)
-            return (
-                task is None or task.cancel_requested or task.status == TaskStatus.CANCELLED.value
+            return bool(
+                task is None
+                or task.cancel_requested
+                or task.status == TaskStatus.CANCELLED.value
+                or (claim_id is not None and not self._has_active_claim(task, claim_id))
             )

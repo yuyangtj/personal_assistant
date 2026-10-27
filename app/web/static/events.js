@@ -20,6 +20,7 @@ document.addEventListener("change", async (e) => {
 });
 
 document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-load-earlier]")) return loadEarlierMessages();
   const menu = e.target.closest("[data-chat-menu]");
   if (menu) {
     const id = menu.dataset.chatMenu;

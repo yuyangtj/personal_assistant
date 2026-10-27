@@ -148,13 +148,19 @@ def list_chat_session_messages(
     chat_session_id: str,
     request: Request,
     limit: Annotated[int, Query(ge=1, le=500)] = 500,
+    before: str | None = None,
 ) -> ChatMessageListResponse:
     try:
-        messages = task_service(request).list_chat_messages(chat_session_id, limit=limit)
+        page = task_service(request).list_chat_message_page(
+            chat_session_id, limit=limit, before=before
+        )
     except ChatSessionNotFoundError as error:
         raise HTTPException(status_code=404, detail="Chat session not found") from error
+    except ChatMessageNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Chat message cursor not found") from error
     return ChatMessageListResponse(
-        messages=[ChatMessageResponse.from_model(message) for message in messages]
+        messages=[ChatMessageResponse.from_model(message) for message in page.messages],
+        next_before=page.next_before,
     )
 
 

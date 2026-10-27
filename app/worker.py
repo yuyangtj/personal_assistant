@@ -45,6 +45,7 @@ from app.coding.runners import (
 from app.coding.runs import CodingRunStore
 from app.coding.spec import SpecWriter
 from app.config import Settings
+from app.delivery import DeliveryService
 from app.deployments import DeploymentRegistry, HostDeployerSpool
 from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.fake import ExecutionCancelled
@@ -74,6 +75,7 @@ from app.work.memory import MemoryService
 from app.work.notes import NoteService
 from app.work.purchases import PurchaseService
 from app.work.spaces import SpaceRegistry
+from app.worker_liveness import WorkerHeartbeat, container_instance_id
 from app.workflows import WorkflowRegistry, WorkflowService
 
 logger = logging.getLogger(__name__)
@@ -95,11 +97,13 @@ class ProgressReporter:
         service: TaskService,
         task_id: str,
         *,
+        claim_id: str | None = None,
         interval: float = 10.0,
         clock: Callable[[], float] = time.monotonic,
     ):
         self.service = service
         self.task_id = task_id
+        self.claim_id = claim_id
         self.interval = interval
         self.clock = clock
         self._last_step_at: float | None = None
@@ -114,7 +118,7 @@ class ProgressReporter:
                 return
             self._last_step_at = now
         self._last[kind] = text
-        self.service.record_progress(self.task_id, text, kind)
+        self.service.record_progress(self.task_id, text, kind, claim_id=self.claim_id)
 
 
 class GuidanceInbox:
@@ -142,13 +146,16 @@ class _LeaseHeartbeat:
         *,
         task_id: str,
         worker_id: str,
+        claim_id: str,
         lease_seconds: int,
     ):
         self.service = service
         self.task_id = task_id
         self.worker_id = worker_id
+        self.claim_id = claim_id
         self.lease_seconds = lease_seconds
         self.stop_event = threading.Event()
+        self.lost = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self) -> None:
@@ -165,8 +172,10 @@ class _LeaseHeartbeat:
                 if not self.service.renew_lease(
                     self.task_id,
                     worker_id=self.worker_id,
+                    claim_id=self.claim_id,
                     lease_seconds=self.lease_seconds,
                 ):
+                    self.lost.set()
                     return
             except Exception:
                 logger.exception("Could not renew lease for task %s", self.task_id)
@@ -459,6 +468,7 @@ class TaskWorker:
         titles: TitleJob | None = None,
         scheduler: Scheduler | None = None,
         reporter: Reporter | None = None,
+        delivery: DeliveryService | None = None,
         scheduler_interval_seconds: float = 20.0,
         pull_requests: PullRequestReconciler | None = None,
         pull_request_interval_seconds: float = 300.0,
@@ -486,6 +496,7 @@ class TaskWorker:
         self._titles_thread: threading.Thread | None = None
         self.scheduler = scheduler
         self.reporter = reporter
+        self.delivery = delivery
         self.scheduler_interval_seconds = scheduler_interval_seconds
         self._scheduler_thread: threading.Thread | None = None
         self.pull_requests = pull_requests
@@ -509,10 +520,14 @@ class TaskWorker:
             self._sync_deployments()
             return False
 
+        if task.claim_id is None:
+            raise RuntimeError(f"Claimed task {task.id} has no claim ID")
+        claim_id = task.claim_id
         heartbeat = _LeaseHeartbeat(
             self.service,
             task_id=task.id,
             worker_id=self.worker_id,
+            claim_id=claim_id,
             lease_seconds=self.lease_seconds,
         )
         heartbeat.start()
@@ -528,16 +543,19 @@ class TaskWorker:
                     "Execute through its configured adapter",
                     "Validate that a structured result was produced",
                 ],
+                claim_id=claim_id,
             )
             self.service.record_manager_decision(
                 task.id,
                 decision.model_dump(mode="json"),
+                claim_id=claim_id,
             )
             if isinstance(decision, FailDecision):
                 self.service.fail_task(
                     task.id,
                     error=decision.reason,
                     reply="Sorry, I can't do that yet. I don't have a tool for it.",
+                    claim_id=claim_id,
                 )
                 return True
             if not isinstance(decision, DelegateDecision):
@@ -552,12 +570,13 @@ class TaskWorker:
                 capability_id=decision.capability_id,
                 executor_id=executor.id,
                 execution_input={"request": task.original_request},
+                claim_id=claim_id,
             )
             if execution_id is None:
                 return True
 
             execution_context = dict(task.source_context or {})
-            routine = self._routine(task)
+            routine = None if self.coding_only else self._routine(task)
             if routine is not None:
                 # A routine compares with what its earlier runs found; a watch says whether
                 # this result is worth a push.
@@ -566,21 +585,20 @@ class TaskWorker:
                     "previous_runs": self.service.routine_results(task),
                 }
             if executor.id == "coding-pull-request":
-                execution_context["progress"] = ProgressReporter(self.service, task.id)
+                execution_context["progress"] = ProgressReporter(
+                    self.service, task.id, claim_id=claim_id
+                )
                 execution_context["guidance"] = GuidanceInbox(self.service, task.id)
             if executor.id == "model-conversation":
                 # Its tool calls show on the reply's card ("Reading app/main.py").
-                execution_context["progress"] = ProgressReporter(self.service, task.id)
+                execution_context["progress"] = ProgressReporter(
+                    self.service, task.id, claim_id=claim_id
+                )
             if executor.id in {"supervisor", "model-conversation"}:
                 # Their tools act in this chat: a reminder, a list entry, a coding run.
                 execution_context["chat_session_id"] = task.chat_session_id
                 execution_context["origin_message_id"] = task.origin_message_id
-            if executor.id in {
-                "model-conversation",
-                "coding-pull-request",
-                "tool-agent",
-                "supervisor",
-            }:
+            if executor.id in {"model-conversation", "tool-agent", "supervisor"}:
                 work_items = self.service.work_item_context(task)
                 if work_items:
                     execution_context["work_items"] = work_items
@@ -592,19 +610,26 @@ class TaskWorker:
                 if recent is not None and recent.content:
                     execution_context["recent"] = recent.content
             # The one "Assistant" conversation: the reply is told it speaks for everything.
-            if task.chat_session_id and self.service.is_home_chat(task.chat_session_id):
+            if (
+                not self.coding_only
+                and task.chat_session_id
+                and self.service.is_home_chat(task.chat_session_id)
+            ):
                 execution_context["home"] = True
             result = executor.execute(
                 task_id=task.id,
                 request=task.original_request,
-                is_cancelled=lambda: self.service.is_cancelled(task.id),
-                history=self.service.conversation_history(task),
+                is_cancelled=lambda: (
+                    heartbeat.lost.is_set() or self.service.is_cancelled(task.id, claim_id=claim_id)
+                ),
+                history=() if self.coding_only else self.service.conversation_history(task),
                 context=execution_context,
             )
             if not self.service.start_validation(
                 task.id,
                 execution_id,
                 output=result.output,
+                claim_id=claim_id,
             ):
                 return True
             self._sync_workflow(task.id)
@@ -622,6 +647,7 @@ class TaskWorker:
                         else []
                     ),
                     approval=approval,
+                    claim_id=claim_id,
                 )
                 return True  # the Assistant's report tells the user, with a push
             reply = result.output.get("reply") or result.output["summary"]
@@ -629,7 +655,7 @@ class TaskWorker:
             blocks = result.output.get("blocks")
             if report:
                 blocks = [*(blocks or []), *report_links(report)]
-            self.service.complete_task(
+            completed = self.service.complete_task(
                 task.id,
                 execution_id,
                 reply=str(reply),
@@ -638,8 +664,9 @@ class TaskWorker:
                 blocks=blocks,
                 # A watch that triggered: its report always pushes.
                 notable=bool(routine is not None and result.output.get("notable")),
+                claim_id=claim_id,
             )
-            if report:
+            if report and completed is not None:
                 self._push_report(task, report, str(reply), bool(result.output.get("notable")))
         except ExecutionCancelled:
             if execution_id is not None:
@@ -647,14 +674,15 @@ class TaskWorker:
         except Exception as error:
             logger.exception("Task %s failed", task.id)
             user_message = getattr(error, "user_message", None)
-            self.service.fail_task(
+            failed = self.service.fail_task(
                 task.id,
                 error=str(error),
                 execution_id=execution_id,
+                claim_id=claim_id,
                 **({"reply": user_message} if user_message else {}),
             )
             report = (task.source_context or {}).get("report")
-            if report:
+            if report and failed:
                 # No model could write the report: say it plainly, and still push what must.
                 text = report_fallback(report)
                 self.service.append_chat_message(
@@ -778,16 +806,24 @@ class TaskWorker:
                 logger.exception("Could not run due schedules")
                 fired = 0
             if fired:
-                logger.info("Ran %d due schedules", fired)
+                logger.info("Queued %d due schedules", fired)
             if self.reporter is not None:
                 # Finished background work, told in the Assistant conversation.
                 try:
                     report = self.reporter.run_due()
                 except Exception:
-                    logger.exception("Could not report finished work")
-                    continue
-                if report:
-                    logger.info("Started report %s", report)
+                    logger.exception("Could not queue finished-work report")
+                else:
+                    if report:
+                        logger.info("Queued report delivery %s", report)
+            if self.delivery is not None:
+                try:
+                    delivered = self.delivery.run_due()
+                except Exception:
+                    logger.exception("Could not drain delivery outbox")
+                else:
+                    if delivered:
+                        logger.info("Delivered %d outbox records", delivered)
 
     def start_digest(self) -> threading.Thread | None:
         """Keep the summary of recent days current, on its own thread (general worker only)."""
@@ -846,17 +882,27 @@ class TaskWorker:
                 logger.info("Updated %d work item briefs", written)
 
     def run_forever(self) -> None:
-        logger.info("Worker %s started", self.worker_id)
-        self.start_brief_writeback()
-        self.start_digest()
-        self.start_titles()
-        self.start_scheduler()
-        self.start_pull_request_sync()
-        while not self._stop_event.is_set():
-            processed = self.run_once()
-            if not processed:
-                self._stop_event.wait(self.poll_interval_seconds)
-        logger.info("Worker %s stopped", self.worker_id)
+        heartbeat = WorkerHeartbeat(
+            self.service.database,
+            worker_id=self.worker_id,
+            instance_id=container_instance_id(),
+            lane=self.lane,
+        )
+        heartbeat.start()
+        try:
+            logger.info("Worker %s started", self.worker_id)
+            self.start_brief_writeback()
+            self.start_digest()
+            self.start_titles()
+            self.start_scheduler()
+            self.start_pull_request_sync()
+            while not self._stop_event.is_set():
+                processed = self.run_once()
+                if not processed:
+                    self._stop_event.wait(self.poll_interval_seconds)
+        finally:
+            heartbeat.stop()
+            logger.info("Worker %s stopped", self.worker_id)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -978,13 +1024,17 @@ def main() -> None:
             else None
         ),
     )
-    task_service = TaskService(database)
-    executors: dict[str, Executor] = {
-        "fake": FakeExecutor(delay_seconds=settings.fake_executor_delay_seconds),
-    }
-    conversation_executor = add_chat_executors(
-        executors, settings, database, task_service, workflow_service, repositories
+    task_service = TaskService(database, coding_restricted=settings.worker_coding_only)
+    executors: dict[str, Executor] = (
+        {}
+        if settings.worker_coding_only
+        else {"fake": FakeExecutor(delay_seconds=settings.fake_executor_delay_seconds)}
     )
+    conversation_executor = None
+    if not settings.worker_coding_only:
+        conversation_executor = add_chat_executors(
+            executors, settings, database, task_service, workflow_service, repositories
+        )
     provider_state_store = DatabaseProviderStateStore(database)
     coding_executor = build_coding_executor(
         settings,
@@ -1007,8 +1057,22 @@ def main() -> None:
         settings.ntfy_topic_url, token=settings.ntfy_token, public_url=settings.public_url
     )
 
-    def start_routine(schedule) -> str | None:
-        return run_routine(task_service, schedule)
+    def start_routine(schedule, external_key: str) -> str | None:
+        return run_routine(
+            task_service,
+            schedule,
+            external_source="schedule",
+            external_key=external_key,
+        )
+
+    delivery = None
+    if not settings.worker_coding_only:
+        delivery = DeliveryService(
+            database,
+            task_service,
+            start_run=start_routine,
+            notifier=notifier,
+        )
 
     if not settings.worker_coding_only:
         logger.info(
@@ -1023,7 +1087,7 @@ def main() -> None:
         lease_seconds=settings.worker_lease_seconds,
         poll_interval_seconds=settings.worker_poll_interval_seconds,
         workflow_service=workflow_service,
-        memory_service=MemoryService(database),
+        memory_service=None if settings.worker_coding_only else MemoryService(database),
         supports_coding=coding_executor is not None,
         coding_only=settings.worker_coding_only,
         brief_writeback=(
@@ -1045,8 +1109,9 @@ def main() -> None:
             if conversation_executor is not None
             else None
         ),
-        scheduler=Scheduler(database, start_run=start_routine, notifier=notifier),
-        reporter=Reporter(task_service, database),
+        scheduler=None if settings.worker_coding_only else Scheduler(database),
+        reporter=None if settings.worker_coding_only else Reporter(task_service, database),
+        delivery=delivery,
         scheduler_interval_seconds=settings.scheduler_interval_seconds,
         pull_requests=(
             PullRequestReconciler(

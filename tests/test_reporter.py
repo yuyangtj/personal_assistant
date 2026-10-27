@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.assistant.reporter import Reporter
 from app.capabilities import CapabilityRegistry
+from app.delivery import DeliveryService
 from app.execution.conversation import REPORT, ConversationExecutor
 from app.manager import DeterministicManager
 from app.services import TaskService
@@ -34,6 +35,19 @@ def _worker(service: TaskService, client, notifier) -> TaskWorker:
         poll_interval_seconds=0.01,
         notifier=notifier,
     )
+
+
+def _drain(service: TaskService, delivery_id: str | None = None) -> str | None:
+    delivery = DeliveryService(service.database, service, start_run=lambda _schedule, _key: None)
+    assert delivery.run_due() == 1
+    if delivery_id is None:
+        return None
+    (task,) = [
+        task
+        for task in service.list_tasks(limit=100)
+        if (task.external_source, task.external_key) == ("reporter", delivery_id)
+    ]
+    return task.id
 
 
 def _finish(service: TaskService, task_id: str, reply: str, *, fail: bool = False) -> None:
@@ -93,7 +107,7 @@ def test_finished_work_is_gathered_into_one_report_once(service: TaskService) ->
     report = reporter.run_due(now=LATER)
     assert reporter.run_due(now=LATER + timedelta(minutes=5)) is None  # never twice
 
-    task = service.get_task(report)
+    task = service.get_task(_drain(service, report))
     assert task.chat_session_id == service.home_chat().id
     items = task.source_context["report"]
     assert [(i["goal"], i["chat_title"], i["must_push"]) for i in items] == [
@@ -126,14 +140,15 @@ def test_the_must_knows_are_a_pr_and_a_failure(service: TaskService) -> None:
 
     report = Reporter(service, service.database).run_due(now=LATER)
 
-    items = service.get_task(report).source_context["report"]
+    task = service.get_task(_drain(service, report))
+    items = task.source_context["report"]
     assert [
         (i["kind"], i["status"], i["pull_request"], i["must_push"], i["tried_twice"]) for i in items
     ] == [
         ("coding run", "waiting_for_approval", 41, True, False),
         ("research", "failed", None, True, True),
     ]
-    assert "FAILED, after being tried twice" in service.get_task(report).original_request
+    assert "FAILED, after being tried twice" in task.original_request
 
 
 def test_the_report_lands_in_assistant_with_links_and_pushes_only_when_it_should(
@@ -146,6 +161,7 @@ def test_the_report_lands_in_assistant_with_links_and_pushes_only_when_it_should
     worker = _worker(service, model, notifier)
 
     Reporter(service, service.database).run_due(now=LATER)
+    _drain(service)
     worker.run_once()
 
     assert any(m.content == REPORT for m in model.calls[0])
@@ -163,6 +179,7 @@ def test_the_report_lands_in_assistant_with_links_and_pushes_only_when_it_should
     _ready_pr(service, museum)
     model.replies.append('{"reply": "PR 41 is ready for you.", "notable": false}')
     Reporter(service, service.database).run_due(now=LATER + timedelta(minutes=10))
+    _drain(service)
     worker.run_once()
     assert notifier.sent == [("Assistant", "PR 41 is ready for you.", 4)]  # one push, no more
 
@@ -174,6 +191,7 @@ def test_without_a_model_the_report_is_still_told_plainly(service: TaskService) 
     worker = _worker(service, FailingChat([]), notifier)
 
     Reporter(service, service.database).run_due(now=LATER)
+    _drain(service)
     worker.run_once()
 
     message = [
@@ -192,16 +210,18 @@ def test_a_failed_research_run_is_tried_once_more_on_its_own(service: TaskServic
 
     assert reporter.run_due() is None  # a moment's pause first
     assert reporter.run_due(now=LATER) is None  # retried, so nothing to tell yet
+    _drain(service)
     (retry,) = [t for t in service.list_tasks(limit=50) if (t.source_context or {}).get("retry_of")]
     assert (retry.original_request, retry.chat_session_id) == ("cheapest train to Copenhagen", chat)
     assert retry.source_context["retry_of"] == first
 
     _finish(service, retry.id, "SJ at 06:12, 395 kr.")
     report = reporter.run_due(now=LATER + timedelta(minutes=10))
-    (item,) = service.get_task(report).source_context["report"]
+    task = service.get_task(_drain(service, report))
+    (item,) = task.source_context["report"]
     assert (item["status"], item["tried_twice"], item["must_push"]) == ("completed", True, False)
     # The first failure is never told: only the retry's result is.
-    assert "FAILED" not in service.get_task(report).original_request
+    assert "FAILED" not in task.original_request
     assert reporter.run_due(now=LATER + timedelta(hours=1)) is None
 
 
@@ -218,7 +238,7 @@ def test_coding_failures_are_not_retried_but_reported(service: TaskService) -> N
 
     report = Reporter(service, service.database).run_due(now=LATER)
 
-    (item,) = service.get_task(report).source_context["report"]
+    (item,) = service.get_task(_drain(service, report)).source_context["report"]
     assert (item["kind"], item["status"], item["must_push"]) == ("coding run", "failed", True)
     assert not [t for t in service.list_tasks(limit=50) if (t.source_context or {}).get("retry_of")]
 
@@ -237,7 +257,8 @@ def test_work_that_never_starts_or_stops_moving_is_raised_once(service: TaskServ
     assert reporter.run_due(now=soon) is None  # neither has waited long enough
     report = reporter.run_due(now=datetime.now(UTC) + timedelta(minutes=30))
 
-    items = {i["goal"]: i for i in service.get_task(report).source_context["report"]}
+    report_task = service.get_task(_drain(service, report))
+    items = {i["goal"]: i for i in report_task.source_context["report"]}
     assert (items["ticket prices"]["status"], items["ticket prices"]["must_push"]) == (
         "not_started",
         True,
@@ -255,12 +276,12 @@ def test_a_waiting_pr_gets_one_quiet_reminder_a_day(service: TaskService) -> Non
     _ready_pr(service, chat)
     reporter = Reporter(service, service.database)
     first = reporter.run_due(now=LATER)  # "ready for review": a must-know
-    assert service.get_task(first).source_context["report"][0]["must_push"] is True
+    assert service.get_task(_drain(service, first)).source_context["report"][0]["must_push"] is True
 
     assert reporter.run_due(now=LATER + timedelta(hours=5)) is None
     day = datetime.now(UTC) + timedelta(hours=25)
     reminder = reporter.run_due(now=day)
-    (item,) = service.get_task(reminder).source_context["report"]
+    (item,) = service.get_task(_drain(service, reminder)).source_context["report"]
     assert (item["status"], item["must_push"]) == ("review_waiting", False)
     assert reporter.run_due(now=day + timedelta(hours=3)) is None  # not again the same day
     assert reporter.run_due(now=day + timedelta(hours=25)) is not None  # but the next day

@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from app.domain.enums import EventType, TaskStatus
 from app.persistence.database import Database
 from app.persistence.models import ChatSessionModel, TaskEventModel, TaskModel, utc_now
+from app.persistence.outbox import enqueue
 from app.persistence.repository import TaskRepository
 
 #: A batch waits until nothing new has finished for this long...
@@ -124,13 +125,10 @@ class Reporter:
         self.database = database
 
     def run_due(self, *, now: datetime | None = None) -> str | None:
-        """Report finished or stuck work once its batch has settled; the report task's id.
-
-        A failed research or routine run is first tried once more on its own.
-        """
+        """Queue finished or stuck work for reporting once its batch has settled."""
         now = now or utc_now()
         home = self.tasks.home_chat()
-        retries: list[dict[str, Any]] = []
+        report_delivery: str | None = None
         with self.database.session() as session, session.begin():
             pending = list(
                 session.scalars(
@@ -148,7 +146,7 @@ class Reporter:
                 elif _retryable(task):
                     if now - _aware(task.updated_at) < RETRY_AFTER:
                         continue  # a moment's pause before trying again
-                    retries.append(_retry_spec(task))
+                    enqueue(session, kind="task", payload=_retry_spec(task))
                     task.reported_at = now  # its retry reports, whichever way it goes
                 else:
                     batch.append(task)
@@ -178,17 +176,17 @@ class Reporter:
                     task.reported_at = now
                 for task, _, _ in stuck:
                     task.followed_up_at = now
-        for spec in retries:
-            self.tasks.create_task(**spec)
-        if not items:
-            return None  # nothing yet, or more may finish in a moment: tell them together
-        report = self.tasks.create_task(
-            request=report_request(items),
-            chat_session_id=home.id,
-            post_request=False,
-            source_context={"report": [item.as_dict() for item in items]},
-        )
-        return report.id
+                report_delivery = enqueue(
+                    session,
+                    kind="task",
+                    payload={
+                        "request": report_request(items),
+                        "chat_session_id": home.id,
+                        "post_request": False,
+                        "source_context": {"report": [item.as_dict() for item in items]},
+                    },
+                )
+        return report_delivery
 
 
 def _ours(task: TaskModel, home_id: str) -> bool:

@@ -5,7 +5,8 @@ an archive. It is the **Notes** tab of the console, so the Android app has it to
 
 Notes are not memories. Memories are few and chosen, and they are given to the chat
 model with your messages. Notes are a large, messy pile, and **no note is ever sent to a
-model or any other service**; they are only shown in the console.
+model or any other service**; they are only shown in the console. The isolated coding
+worker also has no database privileges on the notes table.
 
 ## Using it
 

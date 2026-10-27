@@ -40,13 +40,14 @@ def test_the_coding_worker_starts_without_the_shopping_files(
     monkeypatch.setenv("ASSISTANT_WORKER_CODING_ONLY", "true")
     monkeypatch.setenv("ASSISTANT_TOOLSETS_DIRECTORY", str(tmp_path / "missing"))
     monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
-    started: list[set[str]] = []
-    monkeypatch.setattr(
-        worker.TaskWorker,
-        "run_forever",
-        lambda self: started.append(set(self.executors)),
-    )
+    started: list[worker.TaskWorker] = []
+    monkeypatch.setattr(worker.TaskWorker, "run_forever", lambda self: started.append(self))
 
     worker.main()
 
     assert started
+    assert set(started[0].executors) == set()
+    assert started[0].memory_service is None
+    assert started[0].scheduler is None
+    assert started[0].reporter is None
+    assert started[0].delivery is None

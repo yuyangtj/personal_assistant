@@ -20,10 +20,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 
-from app.notify import Notifier, NullNotifier
 from app.persistence.database import Database
 from app.persistence.models import ScheduleModel, utc_now
-from app.persistence.repository import ChatMessageRepository
+from app.persistence.outbox import enqueue, schedule_payload
 from app.work.items import get_work_item
 
 logger = logging.getLogger(__name__)
@@ -152,26 +151,19 @@ class ScheduleService:
 
 
 class Scheduler:
-    """Runs due schedules; called from the worker's background thread."""
+    """Atomically advances due schedules and enqueues their delivery."""
 
     def __init__(
         self,
         database: Database,
         *,
-        start_run: Callable[[ScheduleModel], str | None],
-        notifier: Notifier | None = None,
         clock: Callable[[], datetime] = utc_now,
     ):
         self.database = database
-        self.start_run = start_run
-        self.notifier = notifier or NullNotifier()
         self.clock = clock
 
     def run_due(self, *, limit: int = 20) -> int:
-        """Claim due schedules (advancing or closing them) in one short transaction, then
-        fire each outside it, so a slow push or run never holds database locks."""
         now = self.clock()
-        claimed: list[tuple[ScheduleModel, datetime]] = []
         with self.database.session() as session, session.begin():
             due = list(
                 session.scalars(
@@ -197,44 +189,12 @@ class Scheduler:
                     schedule.active = False
                 else:
                     schedule.next_run_at = following
-                claimed.append((schedule, fired_at))
-        for schedule, fired_at in claimed:
-            try:
-                self._fire(schedule, fired_at)
-            except Exception:
-                logger.exception("Schedule %s failed to fire", schedule.id)
-        return len(claimed)
-
-    def _fire(self, schedule: ScheduleModel, fired_at: datetime | None = None) -> None:
-        tag = ""
-        if schedule.work_item_id:
-            with self.database.session() as session:
-                tag = f" (#{get_work_item(session, schedule.work_item_id).slug})"
-        if schedule.kind in (ScheduleKind.REMINDER.value, ScheduleKind.ALARM.value):
-            alarm = schedule.kind == ScheduleKind.ALARM.value
-            text = f"{'Alarm' if alarm else 'Reminder'}{tag}: {schedule.message}"
-            if schedule.chat_session_id and not alarm:
-                with self.database.session() as session, session.begin():
-                    ChatMessageRepository.append(
-                        session,
-                        chat_session_id=schedule.chat_session_id,
-                        role="assistant",
-                        content=text,
-                    )
-            on_phone = (
-                schedule.phone_until is not None
-                and fired_at is not None
-                and fired_at <= _aware(schedule.phone_until)
-            )
-            if on_phone:
-                return  # the app rings it itself
-            title = "Alarm" if alarm else "Reminder"
-            sent = self.notifier.send(title, text, priority=5 if alarm else 4)
-            if not sent and not isinstance(self.notifier, NullNotifier):  # off is not a failure
-                logger.warning("Reminder push failed for schedule %s", schedule.id)
-            return
-        # The run itself pushes its result when it finishes (see the worker).
-        self.start_run(schedule)
+                enqueue(
+                    session,
+                    kind="schedule",
+                    payload=schedule_payload(schedule, fired_at),
+                )
+        return len(due)
 
 
 #: How far ahead the phone schedules reminders and alarms, and how many it holds at most.

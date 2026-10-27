@@ -152,9 +152,11 @@ cp .env.remote.example .env.remote
 chmod 600 .env.remote
 ```
 
-Generate two different URL-safe secrets for PostgreSQL and merge approval:
+Generate three different URL-safe secrets for the owner PostgreSQL role, the coding
+PostgreSQL role, and merge approval:
 
 ```bash
+openssl rand -hex 32
 openssl rand -hex 32
 openssl rand -hex 32
 ```
@@ -166,9 +168,11 @@ stored in shell history):
 docker run --rm -it caddy:2.10-alpine caddy hash-password
 ```
 
-Edit `.env.remote`. Set the real domain, login name, single-quoted Caddy hash, the two
+Edit `.env.remote`. Set the real domain, login name, single-quoted Caddy hash, all three
 random secrets, and at least one routine model key (`KIMI_API_KEY` or
-`MINIMAX_API_KEY`). `.env.remote` is ignored by Git through the existing `.env` pattern.
+`MINIMAX_API_KEY`). `ASSISTANT_CODING_POSTGRES_PASSWORD` is required even when the coding
+profile is off because migrations provision its role; use a value different from both other
+secrets. `.env.remote` is ignored by Git through the existing `.env` pattern.
 
 ## Coding worker (optional)
 
@@ -176,7 +180,12 @@ The normal `worker` handles chat and non-coding tasks. The separate `coding-work
 contains Git, uv, Claude Code, Codex and Kimi Code and has no public port or Docker socket. It
 runs with all Linux capabilities dropped, as the unprivileged `assistant-coder` host
 account, and only receives the explicitly registered repository mounts plus its worktree
-directory.
+directory. It connects as `assistant_coding`, not the database owner, and reaches only
+PostgreSQL and outbound services. It cannot reach the API, Caddy or MCP containers.
+Row-level security limits it to coding tasks and related runs; it has no direct privileges
+on chat messages, notes, memories, schedules, work items, digests, purchases or passkeys.
+The only chat write is the `post_coding_assistant_reply` function, which derives the chat
+from a verified coding task rather than accepting a chat identifier from the worker.
 
 Create the account, its directories, and its clones as `root`:
 
@@ -339,7 +348,8 @@ stack safely:
    keeping the newest 20 dumps and the last dump of each of the last 30 days.
 6. Builds and starts the release with images tagged by commit
    (`personal-assistant:<sha>`); migrations run first.
-7. Waits up to 60 seconds for `/health`.
+7. Recreates Caddy when its configuration changed, then waits up to 120 seconds for the
+   API `/health`, public HTTPS `/health`, and fresh heartbeats from every enabled worker.
 8. If healthy, records the release as current, prunes images beyond the current and the
    previous release, and removes Docker build cache unused for 3 days (6 hours when the
    disk is over 85% full; `prune_build_cache` in `scripts/housekeeping.sh`). If not,
@@ -449,8 +459,11 @@ the PostgreSQL container.
 
 - Caddy is the only public container and terminates HTTPS.
 - Basic authentication protects the UI and every API path at the proxy.
-- PostgreSQL and the worker are reachable only on the private Compose network.
-- The merge-approval token is separate from the browser password.
+- PostgreSQL is reachable only on the internal database Compose network. The coding worker
+  has a separate database credential, row-level access to coding work only, and no route to
+  the API, Caddy or MCP services; the older API and general worker keep owner access.
+- The PostgreSQL owner, coding database and merge-approval secrets are all different, and
+  the merge-approval token is separate from the browser password.
 - Provider and GitHub keys stay in the server-only `.env.remote` file.
 - SSH accepts keys only, and only for the deploy user once `root` login is disabled.
 - The general worker keeps code execution disabled. Coding runs only in the explicit

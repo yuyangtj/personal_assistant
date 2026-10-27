@@ -63,6 +63,8 @@ def start_routine(
     schedule: ScheduleModel,
     *,
     chat_session_id: str | None = None,
+    external_source: str | None = None,
+    external_key: str | None = None,
 ) -> str:
     """Start one run of a routine: the chat agent, or research when it was saved with it.
 
@@ -74,6 +76,8 @@ def start_routine(
         chat_session_id=chat_session_id or schedule.chat_session_id,
         work_item_id=schedule.work_item_id,
         source_context={"schedule_id": schedule.id, "timezone": schedule.timezone},
+        external_source=external_source,
+        external_key=external_key,
     )
     return task.id
 
