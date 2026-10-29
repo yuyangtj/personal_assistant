@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.domain.enums import ExecutionStatus, TaskStatus
 from app.persistence.database import Database
-from app.persistence.models import TaskModel
+from app.persistence.models import ExecutionModel, TaskModel
 from app.services import TaskService
 
 
@@ -170,3 +170,26 @@ def test_user_cancellation_marks_only_the_running_execution_cancelled(
         from app.persistence.models import ExecutionModel
 
         assert session.get(ExecutionModel, execution).status == ExecutionStatus.CANCELLED.value
+
+
+def test_a_run_that_fails_after_its_task_was_cancelled_is_closed(
+    service: TaskService, database: Database
+) -> None:
+    task = service.create_task(request="Do work the user then cancels")
+    claimed = service.claim_next_task(worker_id="worker-a", lease_seconds=30)
+    assert claimed is not None and claimed.claim_id is not None
+    execution_id = _start(service, task.id, claimed.claim_id)
+    service.cancel_task(task.id)
+
+    assert not service.fail_task(
+        task.id,
+        error="the executor raised after the cancel",
+        execution_id=execution_id,
+        claim_id=claimed.claim_id,
+    )
+
+    with database.session() as session:
+        execution = session.get(ExecutionModel, execution_id)
+        assert execution.status == ExecutionStatus.CANCELLED.value
+        assert execution.completed_at is not None
+    assert service.get_task(task.id).status == TaskStatus.CANCELLED.value

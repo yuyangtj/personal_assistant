@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from app.chat.routines import start_routine
-from app.delivery import DeliveryService
+from app.delivery import CLAIM_LEASE, MAX_ATTEMPTS, PUSH_STALE_AFTER, DeliveryService
 from app.persistence.database import Database
 from app.persistence.models import OutboxDeliveryModel, utc_now
 from app.persistence.outbox import enqueue
@@ -38,6 +38,10 @@ def _pending(database: Database) -> list[OutboxDeliveryModel]:
         return list(session.scalars(select(OutboxDeliveryModel)))
 
 
+def _after_the_lease() -> datetime:
+    return utc_now() + CLAIM_LEASE + timedelta(seconds=1)
+
+
 def _crash_before_completion(delivery: DeliveryService, monkeypatch: pytest.MonkeyPatch) -> None:
     def crash(_delivery_id: str) -> None:
         raise RuntimeError("process stopped after the delivery committed")
@@ -67,7 +71,9 @@ def test_task_delivery_dedupes_a_crash_after_task_commit(
 
     (created,) = service.list_tasks()
     assert len(service.list_chat_messages(chat.id)) == 1
-    restarted = _delivery(service)
+    # Still claimed by the crashed worker: no one else delivers it until the lease ends.
+    assert _delivery(service).run_due() == 0
+    restarted = _delivery(service, clock=_after_the_lease)
     assert restarted.run_due() == 1
     assert [task.id for task in service.list_tasks()] == [created.id]
     assert (created.external_source, created.external_key) == ("reporter", delivery_id)
@@ -100,7 +106,7 @@ def test_routine_delivery_dedupes_a_crash_after_task_commit(
     with pytest.raises(RuntimeError, match="process stopped"):
         first.run_due()
 
-    restarted = _delivery(service, start_run=run)
+    restarted = _delivery(service, start_run=run, clock=_after_the_lease)
     assert restarted.run_due() == 1
     (task,) = service.list_tasks()
     assert task.original_request == routine.message
@@ -163,4 +169,58 @@ def test_null_notifier_completes_delivery(service: TaskService) -> None:
     Scheduler(service.database, clock=lambda: NOW).run_due()
 
     assert _delivery(service).run_due() == 1
+    assert _pending(service.database) == []
+
+
+class DownNotifier:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def send(self, _title: str, message: str, *, priority: int = 3, path: str = "") -> bool:
+        self.messages.append(message)
+        return False
+
+
+def _fired_reminder(service: TaskService) -> str:
+    reminder = ScheduleService(service.database).create(
+        kind=ScheduleKind.REMINDER,
+        message="Call mum",
+        run_at=utc_now() - timedelta(minutes=1),
+    )
+    Scheduler(service.database).run_due()
+    return reminder.id
+
+
+def test_a_failing_delivery_is_given_up_after_its_attempts(service: TaskService) -> None:
+    with service.database.session() as session, session.begin():
+        enqueue(session, kind="task", payload={"request": "x", "chat_session_id": "gone"})
+    now = utc_now()
+    for _ in range(MAX_ATTEMPTS):
+        assert _delivery(service, clock=lambda at=now: at).run_due() == 0
+        now += timedelta(seconds=301)
+
+    assert _pending(service.database) == []
+    assert service.list_tasks() == []
+
+
+def test_a_push_still_failing_long_after_it_fired_is_skipped(service: TaskService) -> None:
+    _fired_reminder(service)
+    notifier = DownNotifier()
+    assert _delivery(service, notifier=notifier).run_due() == 0
+    assert len(notifier.messages) == 1
+
+    late = utc_now() + PUSH_STALE_AFTER + timedelta(minutes=1)
+    assert _delivery(service, notifier=notifier, clock=lambda: late).run_due() == 1
+    assert len(notifier.messages) == 1  # not sent again, half an hour late
+    assert _pending(service.database) == []
+
+
+def test_cancelling_a_schedule_drops_its_undelivered_push(service: TaskService) -> None:
+    reminder_id = _fired_reminder(service)
+    notifier = DownNotifier()
+    assert _delivery(service, notifier=notifier).run_due() == 0
+    assert len(_pending(service.database)) == 1
+
+    ScheduleService(service.database).cancel(reminder_id)
+
     assert _pending(service.database) == []

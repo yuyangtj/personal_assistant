@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 
@@ -10,10 +12,29 @@ from app.notify import Notifier, NullNotifier
 from app.persistence.database import Database
 from app.persistence.models import ChatMessageModel, OutboxDeliveryModel, ScheduleModel, utc_now
 from app.persistence.repository import ChatMessageRepository
+from app.schedules import aware
 from app.services import TaskService
 from app.work.items import get_work_item
 
 logger = logging.getLogger(__name__)
+
+#: A claimed delivery is hidden from other workers this long; if its worker dies
+#: mid-delivery, another one picks it up afterwards.
+CLAIM_LEASE = timedelta(minutes=5)
+#: Failed deliveries are retried with backoff (2 s doubling to 5 min) this many times,
+#: about an hour in all, then dropped with an error in the log.
+MAX_ATTEMPTS = 16
+#: A reminder or alarm push still failing this long after it fired is no longer useful:
+#: it is skipped, not sent hours late.
+PUSH_STALE_AFTER = timedelta(minutes=30)
+
+
+@dataclass(frozen=True)
+class _Claimed:
+    id: str
+    kind: str
+    payload: dict[str, Any]
+    queued_at: datetime
 
 
 class DeliveryService:
@@ -33,9 +54,10 @@ class DeliveryService:
         self.clock = clock
 
     def run_due(self, *, limit: int = 20) -> int:
+        """Claim due deliveries (so no other worker sends them too), then deliver each."""
         now = self.clock()
-        with self.database.session() as session:
-            deliveries = list(
+        with self.database.session() as session, session.begin():
+            rows = list(
                 session.scalars(
                     select(OutboxDeliveryModel)
                     .where(OutboxDeliveryModel.available_at <= now)
@@ -45,15 +67,16 @@ class DeliveryService:
                         OutboxDeliveryModel.id,
                     )
                     .limit(limit)
+                    .with_for_update(skip_locked=True)
                 )
             )
-        delivered = 0
-        for delivery in deliveries:
-            if self._deliver(delivery):
-                delivered += 1
-        return delivered
+            claimed = []
+            for row in rows:
+                row.available_at = now + CLAIM_LEASE
+                claimed.append(_Claimed(row.id, row.kind, dict(row.payload), aware(row.created_at)))
+        return sum(1 for delivery in claimed if self._deliver(delivery))
 
-    def _deliver(self, delivery: OutboxDeliveryModel) -> bool:
+    def _deliver(self, delivery: _Claimed) -> bool:
         try:
             if delivery.kind == "task":
                 self.tasks.create_task(
@@ -77,28 +100,19 @@ class DeliveryService:
             if delivery is not None:
                 session.delete(delivery)
 
-    def _deliver_schedule(self, delivery: OutboxDeliveryModel) -> None:
-        payload = delivery.payload
-        schedule = ScheduleModel(
-            id=payload["schedule_id"],
-            kind=payload["kind"],
-            message=payload["message"],
-            work_item_id=payload.get("work_item_id"),
-            chat_session_id=payload.get("chat_session_id"),
-            capabilities=payload.get("capabilities"),
-            quiet=payload.get("quiet", False),
-            timezone=payload["timezone"],
-            next_run_at=datetime.fromisoformat(payload["fired_at"]),
-        )
+    def _deliver_schedule(self, delivery: _Claimed) -> None:
+        with self.database.session() as session:
+            schedule = session.get(ScheduleModel, delivery.payload["schedule_id"])
+            if schedule is None:
+                return  # deleted since it fired: nothing to deliver
+            tag = ""
+            if schedule.work_item_id:
+                tag = f" (#{get_work_item(session, schedule.work_item_id).slug})"
         if schedule.kind == "routine":
             self.start_run(schedule, delivery.id)
             return
 
         alarm = schedule.kind == "alarm"
-        tag = ""
-        if schedule.work_item_id:
-            with self.database.session() as session:
-                tag = f" (#{get_work_item(session, schedule.work_item_id).slug})"
         text = f"{'Alarm' if alarm else 'Reminder'}{tag}: {schedule.message}"
         if schedule.chat_session_id and not alarm:
             with self.database.session() as session, session.begin():
@@ -110,11 +124,13 @@ class DeliveryService:
                         role="assistant",
                         content=text,
                     )
-        fired_at = datetime.fromisoformat(payload["fired_at"])
-        phone_until = payload.get("phone_until")
-        if phone_until and fired_at <= datetime.fromisoformat(phone_until):
-            return
+        fired_at = aware(datetime.fromisoformat(delivery.payload["fired_at"]))
+        if schedule.phone_until is not None and fired_at <= aware(schedule.phone_until):
+            return  # the phone app rings it itself
         if isinstance(self.notifier, NullNotifier):
+            return
+        if self.clock() - delivery.queued_at > PUSH_STALE_AFTER:
+            logger.warning("Skipped the late push for schedule %s", schedule.id)
             return
         sent = self.notifier.send(
             "Alarm" if alarm else "Reminder", text, priority=5 if alarm else 4
@@ -123,12 +139,22 @@ class DeliveryService:
             raise RuntimeError(f"Push failed for schedule {schedule.id}")
 
     def _defer(self, delivery_id: str, error: Exception) -> None:
-        logger.warning("Delivery %s failed: %s", delivery_id, error)
         with self.database.session() as session, session.begin():
             delivery = session.get(OutboxDeliveryModel, delivery_id)
             if delivery is None:
                 return
             delivery.attempts += 1
+            if delivery.attempts >= MAX_ATTEMPTS:
+                logger.error(
+                    "Gave up on delivery %s (%s) after %d attempts: %s",
+                    delivery_id,
+                    delivery.kind,
+                    delivery.attempts,
+                    error,
+                )
+                session.delete(delivery)
+                return
+            logger.warning("Delivery %s failed: %s", delivery_id, error)
             delivery.last_error = str(error)[:2000]
             delay = min(300, 2 ** min(delivery.attempts, 8))
             delivery.available_at = self.clock() + timedelta(seconds=delay)

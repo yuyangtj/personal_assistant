@@ -24,7 +24,7 @@ def test_expected_workers_cover_reply_and_coding_lanes() -> None:
     assert expected_worker_ids(Settings(worker_id="general")) == ["general", "general-replies"]
     assert expected_worker_ids(
         Settings(worker_id="coding", worker_coding_only=True, coding_concurrency=3)
-    ) == ["coding", "coding-2", "coding-3"]
+    ) == ["coding"]
 
 
 def test_heartbeat_requires_fresh_current_instance_and_running_worker(
@@ -63,3 +63,21 @@ def test_stopped_worker_is_not_healthy(database: Database) -> None:
     heartbeat.stop()
 
     assert unhealthy_workers(database, settings, instance_id="instance-a") == ["worker"]
+
+
+def test_extra_coding_loops_count_only_once_they_started(database: Database) -> None:
+    now = datetime.now(UTC)
+    settings = Settings(worker_id="coding", worker_coding_only=True, coding_concurrency=3)
+
+    def beat(worker_id: str, at: datetime) -> None:
+        WorkerHeartbeat(
+            database, worker_id=worker_id, instance_id="instance-a", lane="coding", clock=lambda: at
+        ).beat()
+
+    # No coding agent could be built: only the main loop runs, and that is healthy.
+    beat("coding", now)
+    assert unhealthy_workers(database, settings, instance_id="instance-a", now=now) == []
+
+    # An extra loop that started and then went quiet is not.
+    beat("coding-2", now - timedelta(minutes=5))
+    assert unhealthy_workers(database, settings, instance_id="instance-a", now=now) == ["coding-2"]

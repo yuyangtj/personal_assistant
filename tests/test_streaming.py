@@ -181,3 +181,42 @@ def test_the_task_api_carries_the_draft_apart_from_the_step(client) -> None:
 
     assert shown["progress"] == "Looking at Willys"
     assert shown["draft"] == "Willys has coffee on offer."
+
+
+class PassThrough:
+    """A wrapper around a chat client (retry, logging): it hands on_text through as is."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def complete(self, messages, **kwargs):
+        return self.inner.complete(messages, **kwargs)
+
+
+def test_a_wrapped_fallback_chain_still_starts_each_attempt_afresh() -> None:
+    reported: list[tuple[str, str]] = []
+    executor = ConversationExecutor(
+        PassThrough(
+            FallbackChatClient(
+                [
+                    FailingStreamingChat('{"reply": "Primary partial. More'),
+                    StreamingChat('{"reply": "Fallback answer."}'),
+                ]
+            )
+        )
+    )
+
+    executor.execute(
+        task_id="t",
+        request="hello",
+        is_cancelled=lambda: False,
+        context={"progress": lambda text, kind: reported.append((kind, text))},
+    )
+
+    assert [text for kind, text in reported if kind == "draft"] == [
+        "Primary partial.",
+        "Fallback answer.",
+    ]

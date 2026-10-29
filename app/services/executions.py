@@ -272,14 +272,25 @@ class ExecutionOperations(ServiceBase):
         """Fail a task. ``error`` is internal; ``reply`` is the user-facing sentence."""
         with self.database.session() as session, session.begin():
             task = self._require_task(session, task_id, for_update=True)
+            execution = self._require_execution(session, execution_id) if execution_id else None
+            running = (
+                execution is not None
+                and execution.task_id == task.id
+                and execution.status == ExecutionStatus.RUNNING.value
+            )
             if TaskStatus(task.status) in TERMINAL_STATUSES or (
                 claim_id is not None and not self._has_active_claim(task, claim_id)
             ):
+                # The task moved on without this run (cancelled, or claimed again), but the
+                # run itself has ended: close it so it doesn't stay "running" forever.
+                if running and TaskStatus(task.status) == TaskStatus.CANCELLED:
+                    self._mark_execution_cancelled(execution)
+                elif running:
+                    execution.status = ExecutionStatus.FAILED.value
+                    execution.error = error
+                    execution.completed_at = datetime.now(UTC)
                 return False
-            execution = self._require_execution(session, execution_id) if execution_id else None
-            if execution is not None and (
-                execution.task_id != task.id or execution.status != ExecutionStatus.RUNNING.value
-            ):
+            if execution is not None and not running:
                 return False
             ensure_transition(task.status, TaskStatus.FAILED)
             if execution is not None:

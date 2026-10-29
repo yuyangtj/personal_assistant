@@ -116,6 +116,10 @@ class ChatMessageRepository:
         return message
 
 
+#: How many batches of 100 queued tasks one claim or sweep looks through at most.
+SCAN_BATCHES = 10
+
+
 class TaskRepository:
     @staticmethod
     def get(session: Session, task_id: str, *, for_update: bool = False) -> TaskModel | None:
@@ -192,9 +196,14 @@ class TaskRepository:
         coding_only: bool = False,
         lane: str = "all",
     ) -> TaskModel | None:
-        """``lane``: "replies" takes only chat replies, "background" everything else."""
+        """``lane``: "replies" takes only chat replies, "background" everything else.
+
+        Eligibility is checked in Python (it reads JSON columns), so a poll looks at most
+        ``SCAN_BATCHES`` batches of the queue: a large backlog of other lanes' work can't
+        make every idle poll scan all of it.
+        """
         after: tuple[datetime, str] | None = None
-        while True:
+        for _ in range(SCAN_BATCHES):
             candidates = TaskRepository._created_batch(session, after=after)
             if not candidates:
                 return None
@@ -235,6 +244,7 @@ class TaskRepository:
                 )
                 return task
             after = (candidates[-1].created_at, candidates[-1].id)
+        return None
 
     @staticmethod
     def _created_batch(
@@ -313,7 +323,9 @@ class TaskRepository:
         """Queued tasks naming a repository without a coding capability; no worker runs them."""
         malformed: list[TaskModel] = []
         after: tuple[datetime, str] | None = None
-        while len(malformed) < limit:
+        for _ in range(SCAN_BATCHES):
+            if len(malformed) >= limit:
+                break
             candidates = TaskRepository._created_batch(session, after=after)
             if not candidates:
                 break

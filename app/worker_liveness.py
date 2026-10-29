@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.config import Settings
 from app.persistence.database import Database
@@ -40,12 +40,10 @@ def container_instance_id(path: Path = INSTANCE_FILE) -> str:
 
 
 def expected_worker_ids(settings: Settings) -> list[str]:
+    """The loops this container always starts. Extra coding loops start only when a coding
+    agent could be built, so they are checked by their own heartbeats (see below)."""
     workers = [settings.worker_id]
-    if settings.worker_coding_only:
-        workers.extend(
-            f"{settings.worker_id}-{index}" for index in range(2, settings.coding_concurrency + 1)
-        )
-    elif settings.worker_reply_lane:
+    if not settings.worker_coding_only and settings.worker_reply_lane:
         workers.append(f"{settings.worker_id}-replies")
     return workers
 
@@ -119,17 +117,22 @@ def unhealthy_workers(
     now: datetime | None = None,
 ) -> list[str]:
     now = now or datetime.now(UTC)
+    required = expected_worker_ids(settings)
     with database.session() as session:
         heartbeats = {
             row.worker_id: row
             for row in session.scalars(
                 select(WorkerHeartbeatModel).where(
-                    WorkerHeartbeatModel.worker_id.in_(expected_worker_ids(settings))
+                    or_(
+                        WorkerHeartbeatModel.worker_id.in_(required),
+                        # Every loop this container did start must keep beating too.
+                        WorkerHeartbeatModel.instance_id == instance_id,
+                    )
                 )
             )
         }
     unhealthy = []
-    for worker_id in expected_worker_ids(settings):
+    for worker_id in [*required, *sorted(set(heartbeats) - set(required))]:
         heartbeat = heartbeats.get(worker_id)
         heartbeat_at = heartbeat.heartbeat_at if heartbeat is not None else None
         if heartbeat_at is not None and heartbeat_at.tzinfo is None:

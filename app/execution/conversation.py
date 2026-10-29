@@ -21,7 +21,6 @@ from app.execution.draft import ReplyDraft
 from app.execution.fake import ExecutionCancelled
 from app.execution.routine_context import notable, routine_prompt
 from app.integrations.chat import ChatClient, ChatCompletion, ChatMessage, ToolCall
-from app.integrations.fallback import FallbackChatClient
 from app.integrations.model_json import (
     extract_arrow_tool_call,
     extract_dsml_tool_calls,
@@ -215,13 +214,8 @@ class ConversationExecutor:
             extra: dict[str, Any] = {"tools": schemas} if schemas else {}
             if streaming:
                 # The reply a sentence at a time, so the phone can start speaking early.
-                def draft() -> Callable[[str], None]:
-                    return ReplyDraft(lambda text: progress(text, "draft")).feed
-
-                if isinstance(self.client, FallbackChatClient):
-                    extra["on_text_factory"] = draft
-                else:
-                    extra["on_text"] = draft()
+                # The draft itself (not .feed): a fallback chain restarts it per attempt.
+                extra["on_text"] = ReplyDraft(lambda text: progress(text, "draft"))
             return self.client.complete(messages, max_tokens=MAX_TOKENS, **extra)
 
         completion = complete()

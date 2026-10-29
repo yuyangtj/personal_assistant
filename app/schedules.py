@@ -18,10 +18,10 @@ from enum import StrEnum
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.persistence.database import Database
-from app.persistence.models import ScheduleModel, utc_now
+from app.persistence.models import OutboxDeliveryModel, ScheduleModel, utc_now
 from app.persistence.outbox import enqueue, schedule_payload
 from app.work.items import get_work_item
 
@@ -54,7 +54,7 @@ def zone(name: str) -> ZoneInfo:
         raise ValueError(f"Unknown timezone: {name}") from error
 
 
-def _aware(value: datetime) -> datetime:
+def aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
@@ -62,7 +62,7 @@ def next_occurrence(previous: datetime, recurrence: Recurrence, timezone: str) -
     """The next run after ``previous`` (UTC), keeping the same local wall-clock time."""
     if recurrence == Recurrence.NONE:
         return None
-    local = _aware(previous).astimezone(zone(timezone))
+    local = aware(previous).astimezone(zone(timezone))
     if recurrence == Recurrence.DAILY:
         local = local + timedelta(days=1)
     elif recurrence == Recurrence.WEEKLY:
@@ -147,6 +147,14 @@ class ScheduleService:
             if schedule is None:
                 raise ScheduleNotFoundError(schedule_id)
             schedule.active = False
+            # A time that already fired but isn't delivered yet (a push being retried) is
+            # dropped too: the user cancelled it.
+            session.execute(
+                delete(OutboxDeliveryModel).where(
+                    OutboxDeliveryModel.kind == "schedule",
+                    OutboxDeliveryModel.payload["schedule_id"].as_string() == schedule_id,
+                )
+            )
             return schedule
 
 
@@ -175,7 +183,7 @@ class Scheduler:
                 )
             )
             for schedule in due:
-                fired_at = _aware(schedule.next_run_at)
+                fired_at = aware(schedule.next_run_at)
                 schedule.last_run_at = now
                 following = next_occurrence(
                     schedule.next_run_at, Recurrence(schedule.recurrence), schedule.timezone
@@ -221,7 +229,7 @@ def phone_alarms(database: Database, *, now: datetime | None = None) -> list[dic
         )
     rings: list[dict] = []
     for schedule in schedules:
-        at: datetime | None = _aware(schedule.next_run_at)
+        at: datetime | None = aware(schedule.next_run_at)
         count = 0
         while at is not None and at <= end and count < PHONE_MAX_PER_SCHEDULE:
             if at > now:
@@ -249,7 +257,7 @@ def mark_on_phone(database: Database, until: dict[str, int]) -> int:
             if schedule is None or schedule.kind == ScheduleKind.ROUTINE.value:
                 continue
             at = datetime.fromtimestamp(at_ms / 1000, tz=UTC)
-            if schedule.phone_until is None or _aware(schedule.phone_until) < at:
+            if schedule.phone_until is None or aware(schedule.phone_until) < at:
                 schedule.phone_until = at
                 marked += 1
     return marked

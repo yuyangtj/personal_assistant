@@ -158,3 +158,98 @@ def test_restricted_task_service_completes_a_coding_task_and_posts_its_reply(pos
     assert message.role == "assistant"
     assert message.content == "Implemented in PostgreSQL"
     assert message.linked_task_id == created.id
+
+
+def test_a_failed_revision_on_the_coding_role_gives_the_pr_its_review_back(postgres) -> None:
+    owner, coding, run_id = postgres
+    owner_service = TaskService(owner)
+    chat = owner_service.create_chat_session(title=f"PostgreSQL test {run_id} revision")
+    parent = _task(owner_service, run_id, coding=True, chat_id=chat.id)
+    claimed = owner_service.claim_next_task(
+        worker_id="postgres-pr-parent", lease_seconds=60, coding_only=True
+    )
+    assert claimed is not None and claimed.id == parent.id
+    execution = owner_service.start_execution(
+        parent.id,
+        capability_id="coding-pull-request",
+        executor_id="coding-pull-request",
+        execution_input={"postgres_test": run_id},
+        claim_id=claimed.claim_id,
+    )
+    assert owner_service.start_validation(
+        parent.id, execution, output={"summary": "Opened a PR"}, claim_id=claimed.claim_id
+    )
+    assert owner_service.request_approval(
+        parent.id,
+        execution,
+        artifacts=[],
+        approval={"number": 41, "expected_head_sha": "a" * 40},
+        claim_id=claimed.claim_id,
+    )
+    revision = owner_service.create_task(
+        request="Use a different icon",
+        required_capabilities=["coding", "pull_request_creation"],
+        source_context={
+            "postgres_test": run_id,
+            "repository_id": "personal-assistant",
+            "revision_pull_request": 41,
+        },
+        parent_task_id=parent.id,
+        chat_session_id=chat.id,
+        post_request=False,
+    )
+    owner_service.supersede_pull_request_approval(parent.id, revision_task_id=revision.id)
+    coding_service = TaskService(coding, coding_restricted=True)
+
+    assert coding_service.fail_task(revision.id, error="the coding agent failed")
+
+    restored = owner_service.get_task(parent.id)
+    assert restored.status == "waiting_for_approval"
+    assert restored.superseded_by_task_id is None
+
+
+def test_two_workers_deliver_each_reminder_once(postgres) -> None:
+    import threading
+    import time
+
+    from app.delivery import DeliveryService
+    from app.persistence.models import OutboxDeliveryModel, utc_now
+    from app.persistence.outbox import enqueue
+
+    owner, _, run_id = postgres
+    service = TaskService(owner)
+    with owner.session() as session, session.begin():
+        ids = [
+            enqueue(
+                session,
+                kind="task",
+                payload={
+                    "request": f"Report {index}",
+                    "source_context": {"postgres_test": run_id},
+                    "post_request": False,
+                },
+            )
+            for index in range(10)
+        ]
+    created: list[str] = []
+    lock = threading.Lock()
+    real_create = service.create_task
+
+    def slow_create(**kwargs):
+        time.sleep(0.05)  # both workers are mid-delivery at the same time
+        with lock:
+            created.append(kwargs["external_key"])
+        return real_create(**kwargs)
+
+    service.create_task = slow_create  # type: ignore[method-assign]
+    workers = [
+        DeliveryService(owner, service, start_run=lambda _s, _k: None, clock=utc_now)
+        for _ in range(2)
+    ]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda worker: worker.run_due(limit=10), workers))
+
+    assert sorted(created) == sorted(ids)
+    with owner.session() as session:
+        left = session.query(OutboxDeliveryModel).filter(OutboxDeliveryModel.id.in_(ids))
+        assert left.count() == 0

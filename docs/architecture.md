@@ -52,6 +52,11 @@ flowchart LR
     The scheduler advances a schedule and enqueues its occurrence in one transaction;
     `app/delivery.py` retries failed delivery with externally keyed tasks and deterministic
     reminder-message IDs preventing duplicates after a crash.
+  - A worker claims due rows (`FOR UPDATE SKIP LOCKED`, then hides them for a 5-minute
+    lease), so two workers never deliver the same row. A failing row is retried with
+    backoff and dropped after 16 attempts; a reminder or alarm push still failing 30
+    minutes after it fired is skipped, and cancelling a schedule drops its undelivered
+    rows. Schedule details are read from the schedule at delivery time.
   - It becomes one report in Assistant, written by the chat agent in a few lines, with links
     to each result.
   - It pushes to the phone only for the must-knows (a PR to review, a failure, a watch that
@@ -153,7 +158,8 @@ outside routing.
   only route to post an assistant reply in the originating chat. Container networking and
   filesystem permissions apply the same boundary.
 - **Worker liveness:** every worker lane writes a heartbeat tied to its container instance.
-  Compose health checks reject stale, stopped or previous-instance heartbeats; deployment
+  Compose health checks reject stale, stopped or previous-instance heartbeats (the main and
+  reply loops always; extra coding loops once they have started); deployment
   promotion requires the API, public HTTPS and all enabled workers to be healthy.
 - **How coding starts:** coding tasks are created only by a coding run, which you start
   in chat or the supervisor starts, or by a PR revision. The public task routes refuse

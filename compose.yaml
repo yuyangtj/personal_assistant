@@ -16,6 +16,9 @@ services:
       - assistant-postgres:/var/lib/postgresql/data
     networks:
       - database
+      # Docker publishes no ports for a container only on internal networks; this one
+      # exists so the 127.0.0.1 port above works for local tests and psql.
+      - postgres-host
 
   migrate:
     image: postgres:17-alpine
@@ -237,6 +240,7 @@ networks:
     internal: true
   egress:
   coding-egress:
+  postgres-host:
 
 volumes:
   assistant-postgres:

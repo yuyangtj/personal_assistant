@@ -19,7 +19,15 @@ def test_coding_worker_is_on_only_database_and_dedicated_egress_networks() -> No
         assert networks["database"]["internal"] is True
         assert not (networks["egress"] or {}).get("internal", False)
         assert not (networks["coding-egress"] or {}).get("internal", False)
-        assert services["postgres"]["networks"] == ["database"]
+        # Locally postgres is also on a host-only network so its 127.0.0.1 port works;
+        # nothing else joins that network.
+        expected = ["database", "postgres-host"] if filename == "compose.yaml" else ["database"]
+        assert services["postgres"]["networks"] == expected
+        assert [
+            name
+            for name, service in services.items()
+            if "postgres-host" in (service.get("networks") or [])
+        ] in ([], ["postgres"])
         assert services["migrate"]["networks"] == ["database"]
         assert services["coding-worker"]["networks"] == ["database", "coding-egress"]
         for name in ("api", "worker"):
@@ -75,8 +83,10 @@ def test_coding_role_grants_and_security_definer_boundary() -> None:
     migration = (ROOT / "migrations/035_coding_worker_role.sql").read_text()
 
     assert "CREATE ROLE assistant_coding NOLOGIN" in migration
-    assert "ALTER ROLE assistant_coding NOLOGIN" in migration
-    assert "GRANT UPDATE (status, claimed_by, claim_id, lease_expires_at" in migration
+    # Replayed on every deploy: it must never turn the running coding worker's login off.
+    assert "ALTER ROLE assistant_coding NOLOGIN" not in migration
+    assert "status, claimed_by, claim_id, lease_expires_at" in migration
+    assert "superseded_by_task_id\n) ON tasks TO assistant_coding" in migration
     for capability in ("coding", "pull_request_creation", "coding-pull-request"):
         assert f"'{capability}'" in migration
     assert "source_context ? 'repository_id'" in migration

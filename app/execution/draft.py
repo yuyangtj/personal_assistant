@@ -70,3 +70,10 @@ class ReplyDraft:
         if end > self.sent and reply[:end].strip():
             self.sent = end
             self.emit(reply[:end].strip())
+
+    __call__ = feed
+
+    def restart(self) -> None:
+        """A new attempt (the next provider after one failed): forget the old text."""
+        self.raw = ""
+        self.sent = 0
