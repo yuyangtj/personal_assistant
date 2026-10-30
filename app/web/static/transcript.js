@@ -259,23 +259,21 @@ async function send(text, { voice = false } = {}) {
     const posted = await api(`/chat-sessions/${state.chatId}/messages`, {
       method: "POST", body: JSON.stringify({ content: text, repository_id: state.repositoryId,
         local_time: localIsoTime(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        attachments }),
+        attachments, reply: true }),
     });
     entry.messageId = posted.message.id;
     if (attachments.length) setScreen(null);
     // A spoken question gets its answer spoken too, whenever it arrives.
     if (spoken) { phone.speakFor = posted.message.id; phone.spokenSentences = 0; }
-    // The server decides what the message needs; the repository picker is only an override.
-    // When it already took care of it (an action, an offer with choices, or a choice
-    // picked), its reply is in the transcript; otherwise the message gets a chat reply.
+    // The server decides what the message needs, and queues the chat reply in the same
+    // request; the repository picker is only a hint. When it took care of the message at
+    // once (a note, a choice picked), its reply is already in the transcript.
     const decision = posted.decision || { intent: "answer" };
+    await refreshTranscript();
     if (decision.handled || decision.intent === "direct_action") {
-      await refreshTranscript();
       if (state.itemId) await renderWorkItem(state.itemId);
       await loadItems();
-      return true;
     }
-    await createTask(posted.message.id);
     return true;
   } catch (e) { fail(e, { sticky: true }); return false; }
   finally {
@@ -289,20 +287,6 @@ function localIsoTime() {
   // The user's wall-clock time, so "tomorrow at 9" resolves in their timezone.
   const now = new Date();
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-}
-
-async function createTask(messageId) {
-  try {
-    const body = {
-      source_context: { client: "web-console",
-        local_time: localIsoTime(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        // The repository picked above the chat: the reply is told about it.
-        ...(state.repositoryId ? { selected_repository_id: state.repositoryId } : {}) },
-    };
-    await api(`/chat-sessions/${state.chatId}/messages/${messageId}/task`,
-      { method: "POST", body: JSON.stringify(body) });
-    await refreshTranscript();
-  } catch (e) { fail(e); }
 }
 
 async function startCodingWorkflow(runId) {

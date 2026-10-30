@@ -45,7 +45,7 @@ What is built and what is next:
 | `app/work` | Work items, briefs, spaces, memory, notes, stats |
 | `app/execution` | Chat model and research agent executors |
 | `app/web` | The console (`index.html`, `static/`) and its PWA files |
-| `app/worker.py`, `app/main.py` | Worker and API entry points |
+| `app/worker/` (`loop`, `jobs`, `build`), `app/main.py` | Worker and API entry points |
 | `abilities/`, `workflows/`, `repositories/`, `spaces/` | YAML configuration |
 | `migrations/` | Ordered SQL migrations (re-run on every deploy, so idempotent) |
 | `scripts/`, `deploy/` | Server deployment: host deployer, redeploy with rollback, Caddy |

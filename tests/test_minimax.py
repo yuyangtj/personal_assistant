@@ -6,8 +6,8 @@ import time
 import httpx
 import pytest
 
-from app.integrations.chat import ChatCompletion, ChatMessage
-from app.integrations.minimax import MiniMaxChatClient, MiniMaxError
+from app.integrations.chat import ChatCompletion, ChatMessage, ProviderError
+from app.integrations.openai_compat import MINIMAX, OpenAICompatibleChatClient
 from app.persistence.models import TaskModel
 
 
@@ -58,7 +58,8 @@ def test_minimax_chat_client_normalizes_thinking_and_reads_usage() -> None:
             },
         )
 
-    client = MiniMaxChatClient(
+    client = OpenAICompatibleChatClient(
+        MINIMAX,
         api_key="sk-test",
         model="MiniMax-M3",
         transport=httpx.MockTransport(handler),
@@ -95,12 +96,13 @@ def test_minimax_chat_error_is_sanitized() -> None:
             },
         )
 
-    client = MiniMaxChatClient(
+    client = OpenAICompatibleChatClient(
+        MINIMAX,
         api_key="sk-minimax-secret",
         transport=httpx.MockTransport(handler),
     )
 
-    with pytest.raises(MiniMaxError) as captured:
+    with pytest.raises(ProviderError) as captured:
         client.complete([ChatMessage("user", "Hi")])
 
     assert str(captured.value) == "MiniMax returned a provider error"
@@ -118,14 +120,15 @@ class _Trickle(httpx.SyncByteStream):
 
 
 def test_a_reply_that_never_finishes_fails_at_the_total_deadline() -> None:
-    client = MiniMaxChatClient(
+    client = OpenAICompatibleChatClient(
+        MINIMAX,
         api_key="k",
         timeout_seconds=0.2,
         transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=_Trickle())),
     )
 
     started = time.monotonic()
-    with pytest.raises(MiniMaxError, match="ReadTimeout"):
+    with pytest.raises(ProviderError, match="ReadTimeout"):
         client.complete([ChatMessage("user", "hi")])
 
     assert time.monotonic() - started < 2
@@ -133,7 +136,8 @@ def test_a_reply_that_never_finishes_fails_at_the_total_deadline() -> None:
 
 def test_a_complete_reply_is_read_as_before() -> None:
     body = {"choices": [{"message": {"content": "Hello"}}], "usage": {"prompt_tokens": 3}}
-    client = MiniMaxChatClient(
+    client = OpenAICompatibleChatClient(
+        MINIMAX,
         api_key="k",
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=body)),
     )
