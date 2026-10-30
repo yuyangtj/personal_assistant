@@ -128,6 +128,7 @@ flowchart LR
 | `app/services` | `TaskService`: chat, tasks, executions, approvals and progress over one database |
 | `app/work` | Work items, briefs, spaces, memory |
 | `app/execution` | The chat model and research agent executors |
+| `app/worker` | `loop`: claim a task, pick its executor, run it; `jobs`: the general worker's background jobs (schedules, reports, deliveries, deployments, PR sync, model jobs), each a `PeriodicJob` on its own thread; `build`: wiring from settings |
 | `app/workflows`, `app/deployments` | Controlled workflows and deployment targets |
 | `app/web` | The console: `index.html` plus `static/` CSS and scripts, PWA files |
 | `android-assistant/shell` | The Android app: the console in a native shell |
