@@ -45,7 +45,6 @@ services:
       ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:assistant@postgres:5432/assistant
       ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
       ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
-      ASSISTANT_CODING_RUNNERS_DIRECTORY: /service/coding-runners
       ASSISTANT_VALIDATION_PROFILES_DIRECTORY: /service/validation-profiles
       ASSISTANT_DEPLOYMENT_TARGETS_DIRECTORY: /service/deployment-targets
       ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH: ${ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH:-}
@@ -85,7 +84,6 @@ services:
       ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:assistant@postgres:5432/assistant
       ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
       ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
-      ASSISTANT_CODING_RUNNERS_DIRECTORY: /service/coding-runners
       ASSISTANT_VALIDATION_PROFILES_DIRECTORY: /service/validation-profiles
       ASSISTANT_DEPLOYMENT_TARGETS_DIRECTORY: /service/deployment-targets
       ASSISTANT_DEFAULT_REPOSITORY_ID: ${ASSISTANT_DEFAULT_REPOSITORY_ID:-personal-assistant}
@@ -176,7 +174,6 @@ services:
       ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant_coding:${ASSISTANT_CODING_POSTGRES_PASSWORD:-assistant-coding}@postgres:5432/assistant
       ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
       ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
-      ASSISTANT_CODING_RUNNERS_DIRECTORY: /service/coding-runners
       ASSISTANT_VALIDATION_PROFILES_DIRECTORY: /service/validation-profiles
       ASSISTANT_DEPLOYMENT_TARGETS_DIRECTORY: /service/deployment-targets
       ASSISTANT_REPOSITORY_PERSONAL_ASSISTANT_PATH: /workspace/repos/personal-assistant

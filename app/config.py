@@ -40,7 +40,6 @@ class Settings:
     abilities_directory: Path = Path("abilities")
     repositories_directory: Path = Path("repositories")
     workflows_directory: Path = Path("workflows")
-    coding_runners_directory: Path = Path("coding-runners")
     validation_profiles_directory: Path = Path("validation-profiles")
     deployment_targets_directory: Path = Path("deployment-targets")
     spaces_directory: Path = Path("spaces")

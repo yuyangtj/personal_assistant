@@ -25,7 +25,6 @@ from app.assistant.tools import (
 from app.chat.routines import start_routine as run_routine
 from app.chat.titles import TitleJob, TitleWriter
 from app.coding.base import CodeAgentRunner
-from app.coding.decision import CodingDecisionEngine, CodingRunnerRegistry
 from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
 from app.coding.reconcile import PullRequestReconciler
 from app.coding.review import DiffReviewer
@@ -101,14 +100,6 @@ def build_coding_executor(
         rate_limit_cooldown_seconds=settings.code_agent_rate_limit_cooldown_seconds,
         quota_cooldown_seconds=settings.code_agent_quota_cooldown_seconds,
         state_store=provider_state_store,
-        decision_engine=(
-            CodingDecisionEngine(
-                CodingRunnerRegistry.from_directory(settings.coding_runners_directory),
-                provider_state_store,
-            )
-            if provider_state_store is not None
-            else None
-        ),
     )
     registry = RepositoryRegistry.from_directory(settings.repositories_directory)
     checkpoint_store = (

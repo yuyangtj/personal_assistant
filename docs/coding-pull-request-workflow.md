@@ -33,10 +33,9 @@ flowchart LR
   forbids publishing or merging; the trusted host owns the intended commit, push, PR, and
   merge path. Run third-party CLIs under an OS/container sandbox in production because
   their own autonomous shell permissions are broader than Codex's workspace sandbox.
-- Runner selection is deterministic and explainable: the decision engine profiles the
-  request, scores the configured runner manifests, and filters persistent cooldowns. A
-  missing executable, provider failure, rate limit, or exhausted quota advances to the
-  next ranked runner. Rate-limit and quota cooldowns are persisted in PostgreSQL, so
+- Runners are tried in the configured order (`ASSISTANT_CODE_AGENT_PROVIDERS`), skipping
+  one that is cooling down. A missing executable, provider failure, rate limit, or
+  exhausted quota advances to the next runner. Rate-limit and quota cooldowns are persisted in PostgreSQL, so
   replacement workers do not immediately retry a provider whose limit was already observed.
 - Every fallback attempt starts from the original clean worktree. Partial changes from a
   failed runner are discarded before the next runner starts.
@@ -154,8 +153,7 @@ The coding runner settings are:
 | `ASSISTANT_CODE_AGENT_QUOTA_COOLDOWN_SECONDS` | `3600` |
 | `ASSISTANT_CODE_AGENT_PREFLIGHT_ENABLED` | `true` in the remote coding worker |
 
-The setting can narrow the allowed runner set, for example `minimax-claude,codex`.
-Ranking within that set comes from `coding-runners/*.yaml`, task fit, and runtime state.
+The setting lists the runners in the order they are tried, for example `minimax-claude,codex`.
 A provider is only a coding runner here; the chat model is configured separately.
 
 For a personal installation, use a fine-grained token scoped to the configured repository.

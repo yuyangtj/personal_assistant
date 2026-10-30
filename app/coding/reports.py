@@ -7,7 +7,6 @@ import re
 from typing import Any
 
 from app.coding.base import CodeAgentReport
-from app.coding.decision import CodingDecision
 from app.domain.work_items import render_work_item_context
 from app.integrations.github import GitHubPullRequest
 
@@ -204,7 +203,6 @@ def coding_output(
     pull_request: GitHubPullRequest,
     commit_sha: str,
     agent_provider: str,
-    decision: CodingDecision | None = None,
     validation: list[dict[str, Any]] | None = None,
     review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -241,8 +239,6 @@ def coding_output(
             "draft": pull_request.draft,
         },
     }
-    if decision is not None:
-        output["agent_decision"] = decision.model_dump(mode="json")
     if review is not None:
         output["review"] = review
         if review.get("outcome") == "unresolved":

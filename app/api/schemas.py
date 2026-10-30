@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.coding.decision import CodingRunnerManifest
 from app.deployments import DeploymentTarget
 from app.domain.enums import EventType, TaskStatus
 from app.domain.work_items import Brief, WorkItemKind, WorkItemLink, WorkItemStatus
@@ -466,10 +465,6 @@ class ProviderRuntimeStateResponse(BaseModel):
 
 class ProviderRuntimeStateListResponse(BaseModel):
     providers: list[ProviderRuntimeStateResponse]
-
-
-class CodingRunnerListResponse(BaseModel):
-    runners: list[CodingRunnerManifest]
 
 
 class WorkflowListResponse(BaseModel):

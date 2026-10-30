@@ -60,6 +60,5 @@ chat is handled before the message is stored or any model sees it: the memory is
 private and the transcript only keeps a placeholder, so later turns can't pass it on.
 "Forget …" only matches shared memories, since its reply repeats what was forgotten.
 
-Provider runtime state now retains lifetime success and failure counts. After three observations,
-the coding decision engine applies a bounded score adjustment of at most ten points. Capability,
-cost, current cooldown, and task complexity therefore remain stronger controls than history.
+Provider runtime state keeps each coding runner's cooldown and its lifetime success and failure
+counts. Runners are tried in the configured order; a runner cooling down is skipped.

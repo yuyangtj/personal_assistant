@@ -476,7 +476,6 @@ class CodingPullRequestExecutor:
                     pull_request,
                     commit_sha,
                     self.agent.provider,
-                    decision=getattr(self.agent, "last_decision", None),
                     validation=validation,
                     review=review,
                 )

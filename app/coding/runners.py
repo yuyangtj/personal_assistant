@@ -30,7 +30,6 @@ from app.coding.base import (
     safe_agent_environment,
 )
 from app.coding.claude_stream import ClaudeStreamProgress, final_result
-from app.coding.decision import CodingDecision, CodingDecisionEngine
 from app.coding.git import restore_clean_worktree
 from app.coding.process import (
     WorktreeWatcher,
@@ -410,7 +409,8 @@ class ClaudeCodeRunner:
 
 
 class FallbackCodeAgentRunner:
-    """Tries coding runners in order, cooling down limited providers between tasks."""
+    """Tries coding runners in the configured order (``ASSISTANT_CODE_AGENT_PROVIDERS``),
+    skipping one that is cooling down after a rate limit or exhausted quota."""
 
     def __init__(
         self,
@@ -419,7 +419,6 @@ class FallbackCodeAgentRunner:
         rate_limit_cooldown_seconds: int = 300,
         quota_cooldown_seconds: int = 3600,
         state_store: ProviderStateStore | None = None,
-        decision_engine: CodingDecisionEngine | None = None,
     ):
         if not runners:
             raise ValueError("At least one coding runner is required")
@@ -427,8 +426,6 @@ class FallbackCodeAgentRunner:
         self.rate_limit_cooldown_seconds = rate_limit_cooldown_seconds
         self.quota_cooldown_seconds = quota_cooldown_seconds
         self.state_store = state_store or InMemoryProviderStateStore()
-        self.decision_engine = decision_engine
-        self.last_decision: CodingDecision | None = None
         self.attempts: tuple[RunnerAttempt, ...] = ()
         self.provider = "->".join(runner.provider for runner in runners)
 
@@ -445,14 +442,7 @@ class FallbackCodeAgentRunner:
         deadline = time.monotonic() + timeout_seconds
         attempts: list[RunnerAttempt] = []
         failures: list[str] = []
-        ordered_runners = self.runners
-        if self.decision_engine is not None:
-            self.last_decision = self.decision_engine.decide(self.runners, request)
-            by_provider = {runner.provider: runner for runner in self.runners}
-            ordered_runners = tuple(
-                by_provider[provider] for provider in self.last_decision.ordered_providers
-            )
-        for runner in ordered_runners:
+        for runner in self.runners:
             provider_key = f"coding:{runner.provider}"
             if not self.state_store.is_available(provider_key):
                 attempts.append(RunnerAttempt(runner.provider, "skipped", "cooldown"))
@@ -502,12 +492,6 @@ class FallbackCodeAgentRunner:
                     for attempt in attempts
                 )
             )
-            if self.last_decision is not None:
-                report.notes.append(
-                    "Decision engine: "
-                    f"complexity={self.last_decision.profile.complexity.value}; "
-                    "order=" + " -> ".join(self.last_decision.ordered_providers)
-                )
             return report
         self.attempts = tuple(attempts)
         detail = ", ".join(failures) or "all providers are cooling down"

@@ -8,7 +8,6 @@ from fastapi import APIRouter, Request
 from sqlalchemy import text
 
 from app.api.schemas import (
-    CodingRunnerListResponse,
     DeploymentTargetListResponse,
     HealthResponse,
     ProviderRuntimeStateListResponse,
@@ -84,11 +83,6 @@ def list_provider_states(request: Request) -> ProviderRuntimeStateListResponse:
         for state in store.list()
     ]
     return ProviderRuntimeStateListResponse(providers=providers)
-
-
-@router.get("/coding-runners", response_model=CodingRunnerListResponse)
-def list_coding_runners(request: Request) -> CodingRunnerListResponse:
-    return CodingRunnerListResponse(runners=request.app.state.coding_runner_registry.list())
 
 
 @router.get("/workflows", response_model=WorkflowListResponse)
