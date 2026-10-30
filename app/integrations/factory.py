@@ -4,14 +4,11 @@ from __future__ import annotations
 
 from app.config import Settings
 from app.integrations.chat import ChatClient
-from app.integrations.deepseek import DeepSeekChatClient
 from app.integrations.fallback import FallbackChatClient
-from app.integrations.gemini import GeminiChatClient
-from app.integrations.kimi import KimiChatClient
-from app.integrations.minimax import MiniMaxChatClient
+from app.integrations.openai_compat import PRESETS, OpenAICompatibleChatClient
 
 #: Chat providers. "auto" falls back from Kimi to MiniMax, and from the others to Kimi.
-CHAT_PROVIDERS = frozenset({"kimi", "minimax", "deepseek", "gemini"})
+CHAT_PROVIDERS = frozenset(PRESETS)
 
 
 def provider_order(
@@ -37,58 +34,47 @@ def build_chat_client(
     primary: bool,
     timeout_seconds: float | None = None,
 ) -> ChatClient | None:
-    base_url_override = settings.conversation_model_base_url if primary else None
-    model_override = settings.conversation_model_name if primary else None
-    if provider == "kimi":
-        if not settings.kimi_api_key:
-            return None
-        return KimiChatClient(
-            api_key=settings.kimi_api_key,
-            base_url=base_url_override or settings.kimi_base_url,
-            model=model_override or settings.kimi_model,
-            timeout_seconds=(
-                timeout_seconds
-                or settings.conversation_model_timeout_seconds
-                or settings.kimi_timeout_seconds
-            ),
-        )
+    """One provider's client, or None without its API key."""
+    keys = {
+        "kimi": settings.kimi_api_key,
+        "deepseek": settings.deepseek_api_key,
+        "gemini": settings.gemini_api_key,
+        "minimax": settings.minimax_api_key,
+    }
+    base_urls = {
+        "kimi": settings.kimi_base_url,
+        "deepseek": settings.deepseek_base_url,
+        "gemini": settings.gemini_base_url,
+        "minimax": settings.minimax_base_url,
+    }
+    models = {
+        "kimi": settings.kimi_model,
+        "deepseek": settings.deepseek_model,
+        "gemini": settings.gemini_model,
+        "minimax": settings.minimax_model,
+    }
+    timeouts = {
+        "kimi": settings.kimi_timeout_seconds,
+        "deepseek": settings.deepseek_timeout_seconds,
+        "gemini": 30.0,
+        "minimax": settings.minimax_timeout_seconds,
+    }
+    extra: dict[str, object] = {}
     if provider == "deepseek":
-        if not settings.deepseek_api_key:
-            return None
-        return DeepSeekChatClient(
-            api_key=settings.deepseek_api_key,
-            base_url=base_url_override or settings.deepseek_base_url,
-            model=model_override or settings.deepseek_model,
-            thinking=settings.deepseek_thinking,
-            timeout_seconds=(
-                timeout_seconds
-                or settings.conversation_model_timeout_seconds
-                or settings.deepseek_timeout_seconds
-            ),
-        )
+        extra["thinking"] = {"type": "enabled" if settings.deepseek_thinking else "disabled"}
     if provider == "gemini":
-        if not settings.gemini_api_key:
-            return None
-        return GeminiChatClient(
-            api_key=settings.gemini_api_key,
-            base_url=base_url_override or settings.gemini_base_url,
-            model=model_override or settings.gemini_model,
-            reasoning_effort=settings.gemini_reasoning_effort or None,
-            timeout_seconds=(
-                timeout_seconds or settings.conversation_model_timeout_seconds or 30.0
-            ),
-        )
-    if not settings.minimax_api_key:
+        extra["reasoning_effort"] = settings.gemini_reasoning_effort or None
+    if not keys[provider]:
         return None
-    return MiniMaxChatClient(
-        api_key=settings.minimax_api_key,
-        base_url=base_url_override or settings.minimax_base_url,
-        model=model_override or settings.minimax_model,
+    return OpenAICompatibleChatClient(
+        PRESETS[provider],
+        api_key=keys[provider],
+        base_url=(settings.conversation_model_base_url if primary else None) or base_urls[provider],
+        model=(settings.conversation_model_name if primary else None) or models[provider],
         timeout_seconds=(
-            timeout_seconds
-            or settings.conversation_model_timeout_seconds
-            or settings.minimax_timeout_seconds
+            timeout_seconds or settings.conversation_model_timeout_seconds or timeouts[provider]
         ),
+        extra_payload=extra,
     )
 
 

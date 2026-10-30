@@ -10,8 +10,8 @@ import pytest
 from app.execution.conversation import ConversationExecutor
 from app.execution.draft import ReplyDraft, partial_reply
 from app.integrations.chat import ChatCompletion, ChatMessage, ProviderError, stream_within
-from app.integrations.deepseek import DeepSeekChatClient, DeepSeekError
 from app.integrations.fallback import FallbackChatClient
+from app.integrations.openai_compat import DEEPSEEK, OpenAICompatibleChatClient
 
 
 def _events(*chunks: dict) -> bytes:
@@ -66,7 +66,9 @@ def test_the_deepseek_client_streams_only_when_asked_and_reports_errors_plainly(
             )
         return httpx.Response(200, json={"choices": [{"message": {"content": "plain"}}]})
 
-    client = DeepSeekChatClient(api_key="k", transport=httpx.MockTransport(handler))
+    client = OpenAICompatibleChatClient(
+        DEEPSEEK, api_key="k", transport=httpx.MockTransport(handler)
+    )
     pieces: list[str] = []
     streamed = client.complete([ChatMessage("user", "hi")], on_text=pieces.append)
     plain = client.complete([ChatMessage("user", "hi")])
@@ -74,10 +76,10 @@ def test_the_deepseek_client_streams_only_when_asked_and_reports_errors_plainly(
     assert (streamed.text, plain.text) == ('{"reply": "Hi."}', "plain")
     assert pieces == ['{"reply": "Hi."}']
     assert seen[0]["stream"] is True and "stream" not in seen[1]
-    failing = DeepSeekChatClient(
-        api_key="k", transport=httpx.MockTransport(lambda r: httpx.Response(500))
+    failing = OpenAICompatibleChatClient(
+        DEEPSEEK, api_key="k", transport=httpx.MockTransport(lambda r: httpx.Response(500))
     )
-    with pytest.raises(DeepSeekError, match="HTTP 500"):
+    with pytest.raises(ProviderError, match="HTTP 500"):
         failing.complete([ChatMessage("user", "hi")], on_text=pieces.append)
 
 

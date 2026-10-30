@@ -10,8 +10,8 @@ from app.domain.enums import TaskStatus
 from app.execution import ConversationExecutor, ConversationTurn, FakeExecutor
 from app.execution.conversation import parse_reply
 from app.execution.fake import ExecutionCancelled
-from app.integrations.chat import ChatCompletion, ChatMessage
-from app.integrations.kimi import KimiChatClient, KimiError
+from app.integrations.chat import ChatCompletion, ChatMessage, ProviderError
+from app.integrations.openai_compat import KIMI, OpenAICompatibleChatClient
 from app.services import TaskService
 from app.worker import TaskWorker
 
@@ -47,7 +47,9 @@ def test_kimi_client_posts_chat_completion_and_reads_usage() -> None:
             },
         )
 
-    client = KimiChatClient(api_key="sk-test", transport=httpx.MockTransport(handler))
+    client = OpenAICompatibleChatClient(
+        KIMI, api_key="sk-test", transport=httpx.MockTransport(handler)
+    )
     completion = client.complete([ChatMessage("user", "Hi")], max_tokens=50)
 
     assert completion == ChatCompletion("Hello there.", "kimi-for-coding-highspeed", 12, 3, "kimi")
@@ -61,8 +63,10 @@ def test_kimi_errors_do_not_leak_key_or_body() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"error": {"message": "bad key sk-secret"}})
 
-    client = KimiChatClient(api_key="sk-secret", transport=httpx.MockTransport(handler))
-    with pytest.raises(KimiError) as error:
+    client = OpenAICompatibleChatClient(
+        KIMI, api_key="sk-secret", transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(ProviderError) as error:
         client.complete([ChatMessage("user", "Hi")])
     assert str(error.value) == "Kimi returned HTTP 401"
 
