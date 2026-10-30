@@ -226,3 +226,46 @@ def test_follow_up_prompt_carries_the_parent_summary_not_its_events(
     assert 'Task "Add authentication"' in carried
     assert "Status: failed" in carried
     assert "Error: Android integration incomplete" in carried
+
+
+def test_a_message_sent_with_reply_queues_its_reply_in_the_same_request(
+    client: TestClient,
+) -> None:
+    chat_id = _chat(client)
+    posted = client.post(
+        f"/chat-sessions/{chat_id}/messages",
+        json={
+            "content": "What's on today?",
+            "reply": True,
+            "local_time": "2026-10-30T09:15",
+            "timezone": "Europe/Stockholm",
+            "repository_id": "not-a-registered-repo",
+        },
+    ).json()
+
+    task = posted["task"]
+    assert task is not None
+    assert task["original_request"] == "What's on today?"
+    assert task["required_capabilities"] == []
+    # The user's own clock goes with it; an unknown picked repository does not.
+    context = task["source_context"]
+    assert (context["local_time"], context["timezone"]) == ("2026-10-30T09:15", "Europe/Stockholm")
+    assert "selected_repository_id" not in context
+    (listed,) = client.get(f"/chat-sessions/{chat_id}/tasks").json()["tasks"]
+    assert listed["id"] == task["id"]
+    # A second request for the same message (an old cached page) gets the same task.
+    again = client.post(
+        f"/chat-sessions/{chat_id}/messages/{posted['message']['id']}/task", json={}
+    ).json()
+    assert again["id"] == task["id"]
+
+
+def test_a_note_handled_at_once_queues_no_reply(client: TestClient) -> None:
+    chat_id = _chat(client)
+    posted = client.post(
+        f"/chat-sessions/{chat_id}/messages", json={"content": "note: buy milk", "reply": True}
+    ).json()
+
+    assert posted["decision"]["handled"] is True
+    assert posted["task"] is None
+    assert client.get(f"/chat-sessions/{chat_id}/tasks").json()["tasks"] == []

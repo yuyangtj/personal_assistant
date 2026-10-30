@@ -19,6 +19,7 @@ from app.persistence.models import CodingRunModel, TaskModel
 from app.repositories import RepositoryRegistry
 from app.services import TaskService
 from app.worker import TaskWorker
+from app.worker.jobs import deployment_sync
 from app.workflows import (
     WorkflowIntegrationUnavailableError,
     WorkflowRegistry,
@@ -291,45 +292,47 @@ def test_sync_running_deployments_reports_finished_runs(
     assert workflows.get_run(actions_id).status == "running"
 
 
-def _worker(service: TaskService, workflows: WorkflowService, **options) -> TaskWorker:
-    executors = {"fake": FakeExecutor(delay_seconds=0)}
-    return TaskWorker(
+class RecordingNotifier:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str, int]] = []
+
+    def send(self, title: str, message: str, *, priority: int = 3, path: str = "") -> bool:
+        self.sent.append((title, message, priority))
+        return True
+
+
+def test_the_deployment_job_completes_deployments_and_pushes_how_they_ended(
+    workflows: WorkflowService,
+    spool: HostDeployerSpool,
+) -> None:
+    run_id = _approved_run(workflows)
+    workflows.start_deployment(run_id, github=GitHub())
+    _report(spool, run_id, "succeeded", "promote")
+    notifier = RecordingNotifier()
+
+    assert deployment_sync(workflows, notifier)() == [run_id]
+    assert workflows.get_run(run_id).status == "completed"
+    assert [(title, priority) for title, _, priority in notifier.sent] == [
+        ("Deployment completed", 3)
+    ]
+
+
+def test_the_coding_worker_runs_no_background_jobs(
+    service: TaskService, workflows: WorkflowService, spool: HostDeployerSpool
+) -> None:
+    run_id = _approved_run(workflows)
+    workflows.start_deployment(run_id, github=GitHub())
+    _report(spool, run_id, "succeeded", "promote")
+    coding_worker = TaskWorker(
         service=service,
-        executors=executors,
-        worker_id="test-worker",
+        executors={"fake": FakeExecutor(delay_seconds=0)},
+        worker_id="coding",
         workflow_service=workflows,
-        **options,
+        coding_only=True,
     )
 
-
-def test_idle_worker_completes_deployments(
-    service: TaskService,
-    workflows: WorkflowService,
-    spool: HostDeployerSpool,
-) -> None:
-    run_id = _approved_run(workflows)
-    workflows.start_deployment(run_id, github=GitHub())
-    _report(spool, run_id, "succeeded", "promote")
-
-    assert _worker(service, workflows).run_once() is False
-    assert workflows.get_run(run_id).status == "completed"
-
-
-def test_worker_throttles_and_coding_worker_skips_deployment_sync(
-    service: TaskService,
-    workflows: WorkflowService,
-    spool: HostDeployerSpool,
-) -> None:
-    run_id = _approved_run(workflows)
-    workflows.start_deployment(run_id, github=GitHub())
-
-    coding_worker = _worker(service, workflows, coding_only=True)
-    worker = _worker(service, workflows, deployment_sync_interval_seconds=3600)
-    worker.run_once()
-    _report(spool, run_id, "succeeded", "promote")
-
-    coding_worker.run_once()
-    worker.run_once()
+    assert coding_worker.jobs == []
+    assert coding_worker.run_once() is False
     assert workflows.get_run(run_id).status == "running"
 
 

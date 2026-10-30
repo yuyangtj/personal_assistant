@@ -45,7 +45,7 @@ class MessageAttachment(BaseModel):
 
 
 class AppendChatMessageRequest(BaseModel):
-    """A turn of conversation. Posting one never launches work."""
+    """A turn of conversation. It launches work only with ``reply`` (the chat agent's answer)."""
 
     content: str = Field(min_length=1, max_length=20_000)
     #: The repository picked in the console; the chat agent treats it as a hint, not an intent.
@@ -55,6 +55,9 @@ class AppendChatMessageRequest(BaseModel):
     timezone: str | None = Field(default=None, max_length=64)
     #: Context attached on the phone (the screen the user was on); at most one.
     attachments: list[MessageAttachment] = Field(default_factory=list, max_length=1)
+    #: Queue the chat agent's reply in the same request when the message isn't handled at
+    #: once (the console sets it). Without it, posting a message never launches work.
+    reply: bool = False
 
 
 class CreateTaskFromMessageRequest(BaseModel):
@@ -162,6 +165,8 @@ class AppendChatMessageResponse(BaseModel):
     decision: MessageHandling | None = None
     #: Slugs of work items this message focused the chat on through #mentions.
     focused_work_items: list[str] = Field(default_factory=list)
+    #: The reply task queued for it (``reply`` was set and nothing answered it at once).
+    task: TaskResponse | None = None
 
 
 class TaskArtifactReference(BaseModel):
