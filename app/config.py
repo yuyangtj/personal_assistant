@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import types
+from collections.abc import Mapping
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
+from typing import Any, Union, get_args, get_origin, get_type_hints
 
 
 def _as_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env(*names: str) -> Any:
+    """An optional setting read from these variables (first set wins) instead of
+    ``ASSISTANT_<NAME>``: provider keys keep their usual names."""
+    return field(default=None, metadata={"env": names})
+
+
+def expanded(default: Path | None) -> Any:
+    """A path setting where ``~`` means the home directory."""
+    return field(default=default, metadata={"expanduser": True})
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,24 +51,24 @@ class Settings:
     brief_writeback_enabled: bool = False
     ntfy_topic_url: str | None = None
     #: Web search for the research agent: DeepSeek, Tavily or Brave, the first key set wins.
-    deepseek_api_key: str | None = None
-    tavily_api_key: str | None = None
+    deepseek_api_key: str | None = env("DEEPSEEK_API_KEY")
+    tavily_api_key: str | None = env("TAVILY_API_KEY")
     #: The mcp-tools gateway (Willys, Lidl); the grocery agent is installed when it is set.
     mcp_gateway_url: str | None = None
     mcp_gateway_token: str | None = None
     toolsets_directory: Path = Path("toolsets")
-    brave_search_api_key: str | None = None
+    brave_search_api_key: str | None = env("BRAVE_SEARCH_API_KEY")
     ntfy_token: str | None = None
     public_url: str | None = None
     default_timezone: str = "UTC"
     scheduler_interval_seconds: float = 20.0
     brief_writeback_idle_seconds: int = 600
     default_repository_id: str | None = None
-    kimi_api_key: str | None = None
+    kimi_api_key: str | None = env("ASSISTANT_KIMI_API_KEY", "KIMI_API_KEY")
     kimi_base_url: str = "https://api.kimi.com/coding/v1"
     kimi_model: str = "kimi-for-coding-highspeed"
     kimi_timeout_seconds: float = 30.0
-    minimax_api_key: str | None = None
+    minimax_api_key: str | None = env("ASSISTANT_MINIMAX_API_KEY", "MINIMAX_API_KEY")
     minimax_base_url: str = "https://api.minimax.chat/v1"
     minimax_model: str = "MiniMax-M3"
     minimax_timeout_seconds: float = 30.0
@@ -64,11 +78,13 @@ class Settings:
     deepseek_thinking: bool = False
     deepseek_timeout_seconds: float = 30.0
     #: Gemini for chat (OpenAI-compatible API); the voice's key is used when unset.
-    gemini_api_key: str | None = None
+    gemini_api_key: str | None = env(
+        "GEMINI_API_KEY", "ASSISTANT_GEMINI_TTS_API_KEY", "GEMINI_TTS_API_KEY"
+    )
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     gemini_model: str = "gemini-3.8-flash"
     gemini_reasoning_effort: str = "low"
-    gemini_tts_api_key: str | None = None
+    gemini_tts_api_key: str | None = env("ASSISTANT_GEMINI_TTS_API_KEY", "GEMINI_TTS_API_KEY")
     gemini_tts_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_tts_model: str = "gemini-3.1-flash-tts-preview"
     gemini_tts_voice: str = "Achird"
@@ -77,8 +93,8 @@ class Settings:
     code_agent_enabled: bool = False
     #: In order; a provider that is rate-limited or not logged in hands over to the next.
     code_agent_providers: str = "claude,codex,kimi,minimax-claude"
-    code_repository_path: Path | None = None
-    code_worktree_root: Path = Path("/tmp/personal-assistant-worktrees")
+    code_repository_path: Path | None = expanded(None)
+    code_worktree_root: Path = expanded(Path("/tmp/personal-assistant-worktrees"))
     code_agent_executable: str = "codex"
     code_agent_model: str | None = None
     kimi_code_executable: str = "kimi"
@@ -88,9 +104,9 @@ class Settings:
     kimi_code_protocol: str = "acp"
     claude_code_executable: str = "claude"
     #: From ``claude setup-token``: Claude Code on the user's Claude subscription.
-    claude_code_oauth_token: str | None = None
+    claude_code_oauth_token: str | None = env("CLAUDE_CODE_OAUTH_TOKEN")
     #: Codex's home, holding the ChatGPT login (auth.json); must be writable and kept.
-    codex_home: Path | None = None
+    codex_home: Path | None = env("CODEX_HOME")
     #: False in the coding container, where Codex's own sandbox can't start.
     codex_own_sandbox: bool = True
     minimax_anthropic_base_url: str = "https://api.minimaxi.com/anthropic"
@@ -102,7 +118,7 @@ class Settings:
     coding_spec_enabled: bool = True
     coding_review_enabled: bool = True
     coding_planner_timeout_seconds: float = 90.0
-    github_token: str | None = None
+    github_token: str | None = env("ASSISTANT_GITHUB_TOKEN", "GITHUB_TOKEN")
     github_api_base_url: str = "https://api.github.com"
     github_repository: str | None = None
     github_base_branch: str = "main"
@@ -112,7 +128,7 @@ class Settings:
     conversation_model_provider: str = "minimax"
     conversation_model_fallback_provider: str | None = "auto"
     conversation_model_base_url: str | None = None
-    conversation_model_name: str | None = None
+    conversation_model_name: str | None = env("ASSISTANT_CONVERSATION_MODEL")
     conversation_model_timeout_seconds: float | None = None
     slack_signing_secret: str | None = None
     slack_bot_token: str | None = None
@@ -122,295 +138,55 @@ class Settings:
         return bool(self.deepseek_api_key or self.tavily_api_key or self.brave_search_api_key)
 
     @classmethod
-    def from_env(cls) -> Settings:
-        defaults = cls()
-        return cls(
-            database_url=os.getenv(
-                "ASSISTANT_DATABASE_URL",
-                defaults.database_url,
-            ),
-            auto_create_schema=_as_bool(
-                os.getenv("ASSISTANT_AUTO_CREATE_SCHEMA", str(defaults.auto_create_schema))
-            ),
-            worker_id=os.getenv("ASSISTANT_WORKER_ID", defaults.worker_id),
-            worker_reply_lane=_as_bool(
-                os.getenv("ASSISTANT_WORKER_REPLY_LANE", str(defaults.worker_reply_lane))
-            ),
-            worker_reply_poll_interval_seconds=float(
-                os.getenv(
-                    "ASSISTANT_WORKER_REPLY_POLL_INTERVAL_SECONDS",
-                    str(defaults.worker_reply_poll_interval_seconds),
-                )
-            ),
-            worker_poll_interval_seconds=float(
-                os.getenv(
-                    "ASSISTANT_WORKER_POLL_INTERVAL_SECONDS",
-                    str(defaults.worker_poll_interval_seconds),
-                )
-            ),
-            worker_lease_seconds=int(
-                os.getenv("ASSISTANT_WORKER_LEASE_SECONDS", str(defaults.worker_lease_seconds))
-            ),
-            coding_concurrency=max(
-                1,
-                int(os.getenv("ASSISTANT_CODING_CONCURRENCY", str(defaults.coding_concurrency))),
-            ),
-            worker_coding_only=_as_bool(
-                os.getenv("ASSISTANT_WORKER_CODING_ONLY", str(defaults.worker_coding_only))
-            ),
-            fake_executor_delay_seconds=float(
-                os.getenv(
-                    "ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS",
-                    str(defaults.fake_executor_delay_seconds),
-                )
-            ),
-            abilities_directory=Path(
-                os.getenv("ASSISTANT_ABILITIES_DIRECTORY", str(defaults.abilities_directory))
-            ),
-            repositories_directory=Path(
-                os.getenv(
-                    "ASSISTANT_REPOSITORIES_DIRECTORY",
-                    str(defaults.repositories_directory),
-                )
-            ),
-            workflows_directory=Path(
-                os.getenv(
-                    "ASSISTANT_WORKFLOWS_DIRECTORY",
-                    str(defaults.workflows_directory),
-                )
-            ),
-            coding_runners_directory=Path(
-                os.getenv(
-                    "ASSISTANT_CODING_RUNNERS_DIRECTORY",
-                    str(defaults.coding_runners_directory),
-                )
-            ),
-            validation_profiles_directory=Path(
-                os.getenv(
-                    "ASSISTANT_VALIDATION_PROFILES_DIRECTORY",
-                    str(defaults.validation_profiles_directory),
-                )
-            ),
-            deployment_targets_directory=Path(
-                os.getenv(
-                    "ASSISTANT_DEPLOYMENT_TARGETS_DIRECTORY",
-                    str(defaults.deployment_targets_directory),
-                )
-            ),
-            spaces_directory=Path(
-                os.getenv("ASSISTANT_SPACES_DIRECTORY", str(defaults.spaces_directory))
-            ),
-            avatar_assets_dir=(
-                Path(value) if (value := os.getenv("ASSISTANT_AVATAR_ASSETS_DIR")) else None
-            ),
-            deploy_spool_directory=(
-                Path(value) if (value := os.getenv("ASSISTANT_DEPLOY_SPOOL_DIRECTORY")) else None
-            ),
-            brief_writeback_enabled=_as_bool(
-                os.getenv(
-                    "ASSISTANT_BRIEF_WRITEBACK_ENABLED", str(defaults.brief_writeback_enabled)
-                )
-            ),
-            ntfy_topic_url=os.getenv("ASSISTANT_NTFY_TOPIC_URL") or None,
-            deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
-            deepseek_base_url=os.getenv("ASSISTANT_DEEPSEEK_BASE_URL", defaults.deepseek_base_url),
-            deepseek_model=os.getenv("ASSISTANT_DEEPSEEK_MODEL", defaults.deepseek_model),
-            deepseek_thinking=_as_bool(
-                os.getenv("ASSISTANT_DEEPSEEK_THINKING", str(defaults.deepseek_thinking))
-            ),
-            gemini_api_key=os.getenv("GEMINI_API_KEY")
-            or os.getenv("ASSISTANT_GEMINI_TTS_API_KEY")
-            or os.getenv("GEMINI_TTS_API_KEY")
-            or None,
-            gemini_base_url=os.getenv("ASSISTANT_GEMINI_BASE_URL", defaults.gemini_base_url),
-            gemini_model=os.getenv("ASSISTANT_GEMINI_MODEL", defaults.gemini_model),
-            gemini_reasoning_effort=os.getenv(
-                "ASSISTANT_GEMINI_REASONING_EFFORT", defaults.gemini_reasoning_effort
-            ),
-            deepseek_timeout_seconds=float(
-                os.getenv(
-                    "ASSISTANT_DEEPSEEK_TIMEOUT_SECONDS", str(defaults.deepseek_timeout_seconds)
-                )
-            ),
-            tavily_api_key=os.getenv("TAVILY_API_KEY") or None,
-            mcp_gateway_url=os.getenv("ASSISTANT_MCP_GATEWAY_URL") or None,
-            mcp_gateway_token=os.getenv("ASSISTANT_MCP_GATEWAY_TOKEN") or None,
-            toolsets_directory=Path(
-                os.getenv("ASSISTANT_TOOLSETS_DIRECTORY", str(defaults.toolsets_directory))
-            ),
-            brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY") or None,
-            ntfy_token=os.getenv("ASSISTANT_NTFY_TOKEN") or None,
-            public_url=os.getenv("ASSISTANT_PUBLIC_URL") or None,
-            default_timezone=os.getenv("ASSISTANT_DEFAULT_TIMEZONE", defaults.default_timezone),
-            scheduler_interval_seconds=float(
-                os.getenv(
-                    "ASSISTANT_SCHEDULER_INTERVAL_SECONDS",
-                    str(defaults.scheduler_interval_seconds),
-                )
-            ),
-            brief_writeback_idle_seconds=int(
-                os.getenv(
-                    "ASSISTANT_BRIEF_WRITEBACK_IDLE_SECONDS",
-                    str(defaults.brief_writeback_idle_seconds),
-                )
-            ),
-            default_repository_id=os.getenv("ASSISTANT_DEFAULT_REPOSITORY_ID") or None,
-            kimi_api_key=os.getenv("ASSISTANT_KIMI_API_KEY") or os.getenv("KIMI_API_KEY") or None,
-            kimi_base_url=os.getenv("ASSISTANT_KIMI_BASE_URL", defaults.kimi_base_url),
-            kimi_model=os.getenv("ASSISTANT_KIMI_MODEL", defaults.kimi_model),
-            kimi_timeout_seconds=float(
-                os.getenv("ASSISTANT_KIMI_TIMEOUT_SECONDS", str(defaults.kimi_timeout_seconds))
-            ),
-            minimax_api_key=os.getenv("ASSISTANT_MINIMAX_API_KEY")
-            or os.getenv("MINIMAX_API_KEY")
-            or None,
-            minimax_base_url=os.getenv(
-                "ASSISTANT_MINIMAX_BASE_URL",
-                defaults.minimax_base_url,
-            ),
-            minimax_model=os.getenv(
-                "ASSISTANT_MINIMAX_MODEL",
-                defaults.minimax_model,
-            ),
-            minimax_timeout_seconds=float(
-                os.getenv(
-                    "ASSISTANT_MINIMAX_TIMEOUT_SECONDS",
-                    str(defaults.minimax_timeout_seconds),
-                )
-            ),
-            gemini_tts_api_key=os.getenv("ASSISTANT_GEMINI_TTS_API_KEY")
-            or os.getenv("GEMINI_TTS_API_KEY")
-            or None,
-            gemini_tts_base_url=os.getenv(
-                "ASSISTANT_GEMINI_TTS_BASE_URL",
-                defaults.gemini_tts_base_url,
-            ),
-            gemini_tts_model=os.getenv(
-                "ASSISTANT_GEMINI_TTS_MODEL",
-                defaults.gemini_tts_model,
-            ),
-            gemini_tts_voice=os.getenv(
-                "ASSISTANT_GEMINI_TTS_VOICE",
-                defaults.gemini_tts_voice,
-            ),
-            gemini_tts_timeout_seconds=float(
-                os.getenv(
-                    "ASSISTANT_GEMINI_TTS_TIMEOUT_SECONDS",
-                    str(defaults.gemini_tts_timeout_seconds),
-                )
-            ),
-            gemini_tts_cache_entries=int(
-                os.getenv(
-                    "ASSISTANT_GEMINI_TTS_CACHE_ENTRIES",
-                    str(defaults.gemini_tts_cache_entries),
-                )
-            ),
-            code_agent_enabled=_as_bool(
-                os.getenv("ASSISTANT_CODE_AGENT_ENABLED", str(defaults.code_agent_enabled))
-            ),
-            code_agent_providers=os.getenv(
-                "ASSISTANT_CODE_AGENT_PROVIDERS", defaults.code_agent_providers
-            ),
-            code_repository_path=(
-                Path(value).expanduser()
-                if (value := os.getenv("ASSISTANT_CODE_REPOSITORY_PATH"))
-                else None
-            ),
-            code_worktree_root=Path(
-                os.getenv("ASSISTANT_CODE_WORKTREE_ROOT", str(defaults.code_worktree_root))
-            ).expanduser(),
-            code_agent_executable=os.getenv(
-                "ASSISTANT_CODE_AGENT_EXECUTABLE", defaults.code_agent_executable
-            ),
-            code_agent_model=os.getenv("ASSISTANT_CODE_AGENT_MODEL") or None,
-            kimi_code_executable=os.getenv(
-                "ASSISTANT_KIMI_CODE_EXECUTABLE", defaults.kimi_code_executable
-            ),
-            kimi_code_model=os.getenv("ASSISTANT_KIMI_CODE_MODEL") or None,
-            kimi_code_protocol=(
-                os.getenv("ASSISTANT_KIMI_CODE_PROTOCOL") or defaults.kimi_code_protocol
-            ).lower(),
-            claude_code_executable=os.getenv(
-                "ASSISTANT_CLAUDE_CODE_EXECUTABLE", defaults.claude_code_executable
-            ),
-            claude_code_oauth_token=os.getenv("CLAUDE_CODE_OAUTH_TOKEN") or None,
-            codex_home=Path(value) if (value := os.getenv("CODEX_HOME")) else None,
-            codex_own_sandbox=_as_bool(
-                os.getenv("ASSISTANT_CODEX_OWN_SANDBOX", str(defaults.codex_own_sandbox))
-            ),
-            minimax_anthropic_base_url=os.getenv(
-                "ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL",
-                defaults.minimax_anthropic_base_url,
-            ),
-            minimax_code_model=os.getenv("ASSISTANT_MINIMAX_CODE_MODEL") or None,
-            code_agent_rate_limit_cooldown_seconds=int(
-                os.getenv(
-                    "ASSISTANT_CODE_AGENT_RATE_LIMIT_COOLDOWN_SECONDS",
-                    str(defaults.code_agent_rate_limit_cooldown_seconds),
-                )
-            ),
-            code_agent_quota_cooldown_seconds=int(
-                os.getenv(
-                    "ASSISTANT_CODE_AGENT_QUOTA_COOLDOWN_SECONDS",
-                    str(defaults.code_agent_quota_cooldown_seconds),
-                )
-            ),
-            code_agent_timeout_seconds=int(
-                os.getenv(
-                    "ASSISTANT_CODE_AGENT_TIMEOUT_SECONDS",
-                    str(defaults.code_agent_timeout_seconds),
-                )
-            ),
-            code_agent_preflight_enabled=_as_bool(
-                os.getenv(
-                    "ASSISTANT_CODE_AGENT_PREFLIGHT_ENABLED",
-                    str(defaults.code_agent_preflight_enabled),
-                )
-            ),
-            coding_spec_enabled=_as_bool(
-                os.getenv("ASSISTANT_CODING_SPEC_ENABLED", str(defaults.coding_spec_enabled))
-            ),
-            coding_review_enabled=_as_bool(
-                os.getenv("ASSISTANT_CODING_REVIEW_ENABLED", str(defaults.coding_review_enabled))
-            ),
-            coding_planner_timeout_seconds=float(
-                os.getenv(
-                    "ASSISTANT_CODING_PLANNER_TIMEOUT_SECONDS",
-                    str(defaults.coding_planner_timeout_seconds),
-                )
-            ),
-            github_token=os.getenv("ASSISTANT_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or None,
-            github_api_base_url=os.getenv(
-                "ASSISTANT_GITHUB_API_BASE_URL", defaults.github_api_base_url
-            ),
-            github_repository=os.getenv("ASSISTANT_GITHUB_REPOSITORY") or None,
-            github_base_branch=os.getenv(
-                "ASSISTANT_GITHUB_BASE_BRANCH", defaults.github_base_branch
-            ),
-            github_remote=os.getenv("ASSISTANT_GITHUB_REMOTE", defaults.github_remote),
-            github_draft_pull_requests=_as_bool(
-                os.getenv(
-                    "ASSISTANT_GITHUB_DRAFT_PULL_REQUESTS",
-                    str(defaults.github_draft_pull_requests),
-                )
-            ),
-            approval_token=os.getenv("ASSISTANT_APPROVAL_TOKEN") or None,
-            conversation_model_provider=os.getenv(
-                "ASSISTANT_CONVERSATION_MODEL_PROVIDER",
-                defaults.conversation_model_provider,
-            ),
-            conversation_model_fallback_provider=os.getenv(
-                "ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER",
-                defaults.conversation_model_fallback_provider,
+    def env_names(cls) -> dict[str, tuple[str, ...]]:
+        """Each setting's environment variables: ``ASSISTANT_<NAME>`` unless a field names
+        its own (provider keys keep their usual names); with several, the first set wins."""
+        return {
+            item.name: item.metadata.get("env", (f"ASSISTANT_{item.name.upper()}",))
+            for item in fields(cls)
+        }
+
+    @classmethod
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
+        """Settings from the environment. Unset keeps the default; for an optional setting
+        an empty value means None; anything else is read as the setting's type."""
+        environ = os.environ if environ is None else environ
+        hints = get_type_hints(cls)
+        names = cls.env_names()
+        values: dict[str, object] = {}
+        for item in fields(cls):
+            candidates = names[item.name]
+            raw = (
+                environ.get(candidates[0])
+                if len(candidates) == 1
+                else next((environ[name] for name in candidates if environ.get(name)), None)
             )
-            or None,
-            conversation_model_base_url=os.getenv("ASSISTANT_CONVERSATION_MODEL_BASE_URL") or None,
-            conversation_model_name=os.getenv("ASSISTANT_CONVERSATION_MODEL") or None,
-            conversation_model_timeout_seconds=(
-                float(value)
-                if (value := os.getenv("ASSISTANT_CONVERSATION_MODEL_TIMEOUT_SECONDS"))
-                else None
-            ),
-            slack_signing_secret=os.getenv("ASSISTANT_SLACK_SIGNING_SECRET") or None,
-            slack_bot_token=os.getenv("ASSISTANT_SLACK_BOT_TOKEN") or None,
+            if raw is None:
+                continue
+            kind, optional = _kind(hints[item.name])
+            if optional and raw == "":
+                values[item.name] = None
+            else:
+                values[item.name] = _parse(raw, kind, expand=item.metadata.get("expanduser"))
+        settings = cls(**values)
+        return replace(
+            settings,
+            coding_concurrency=max(1, settings.coding_concurrency),
+            kimi_code_protocol=(settings.kimi_code_protocol or cls().kimi_code_protocol).lower(),
         )
+
+
+def _kind(hint: object) -> tuple[type, bool]:
+    """The setting's type, and whether it may be None."""
+    if get_origin(hint) in (Union, types.UnionType):
+        options = [option for option in get_args(hint) if option is not type(None)]
+        return options[0], True
+    return hint, False  # type: ignore[return-value]
+
+
+def _parse(raw: str, kind: type, *, expand: bool | None) -> object:
+    if kind is bool:
+        return _as_bool(raw)
+    if kind is Path:
+        return Path(raw).expanduser() if expand else Path(raw)
+    return kind(raw)
