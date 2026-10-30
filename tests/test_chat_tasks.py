@@ -6,9 +6,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from app.capabilities import CapabilityRegistry
 from app.execution import ConversationExecutor
-from app.manager import DeterministicManager
 from app.services import TaskService
 from app.worker import TaskWorker
 from tests.test_conversation import RecordingChatClient
@@ -208,11 +206,6 @@ def test_follow_up_prompt_carries_the_parent_summary_not_its_events(
     )
     worker = TaskWorker(
         service=service,
-        manager=DeterministicManager(
-            CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(
-                ["model-conversation"]
-            )
-        ),
         executors={"model-conversation": ConversationExecutor(chat_client)},
         worker_id="test-worker",
         lease_seconds=30,

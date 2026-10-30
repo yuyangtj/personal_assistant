@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.capabilities.models import CapabilityManifest
 from app.coding.decision import CodingRunnerManifest
 from app.deployments import DeploymentTarget
 from app.domain.enums import EventType, TaskStatus
@@ -49,7 +48,7 @@ class AppendChatMessageRequest(BaseModel):
     """A turn of conversation. Posting one never launches work."""
 
     content: str = Field(min_length=1, max_length=20_000)
-    #: The client's repository picker; triage treats it as an override, not an intent.
+    #: The repository picked in the console; the chat agent treats it as a hint, not an intent.
     repository_id: str | None = Field(default=None, min_length=1, max_length=120)
     #: The user's clock, so "tomorrow at 9" resolves in their timezone.
     local_time: str | None = Field(default=None, max_length=40)
@@ -113,7 +112,7 @@ class ChatMessageResponse(BaseModel):
     linked_task_id: str | None
     #: Choices, links and cards to render under the text (see app.chat.blocks).
     blocks: list[dict[str, Any]] = Field(default_factory=list)
-    #: For a user message: how it was routed and why (see app.chat.turns.triage_message).
+    #: For a user message: how it was routed and why (see app.chat.turns.handle_message).
     routing: dict[str, Any] | None = None
     #: For an assistant reply: Warm, Curious, Excited, Concerned or Neutral (the avatar's).
     emotion: str | None = None
@@ -129,20 +128,20 @@ class ChatMessageResponse(BaseModel):
         return cls.model_validate(message)
 
 
-class TriageOptionResponse(BaseModel):
+class MessageOption(BaseModel):
     label: str
     intent: str
     repository_id: str | None = None
 
 
-class TriageDecisionResponse(BaseModel):
+class MessageHandling(BaseModel):
     intent: str
     goal: str
     reason: str
     confidence: float
     repository_id: str | None = None
     question: str | None = None
-    options: list[TriageOptionResponse] = Field(default_factory=list)
+    options: list[MessageOption] = Field(default_factory=list)
     action: dict[str, Any] | None = None
     capabilities: list[str] = Field(default_factory=list)
     space: str | None = None
@@ -160,7 +159,7 @@ class TriageDecisionResponse(BaseModel):
 class AppendChatMessageResponse(BaseModel):
     message: ChatMessageResponse
     #: What the server decided this message needs (answer, propose work, or ask).
-    decision: TriageDecisionResponse | None = None
+    decision: MessageHandling | None = None
     #: Slugs of work items this message focused the chat on through #mentions.
     focused_work_items: list[str] = Field(default_factory=list)
 
@@ -337,10 +336,6 @@ class EventListResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
-
-
-class CapabilityListResponse(BaseModel):
-    capabilities: list[CapabilityManifest]
 
 
 class RepositoryResponse(BaseModel):

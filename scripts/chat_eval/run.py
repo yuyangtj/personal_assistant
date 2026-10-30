@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-os.chdir(ROOT)  # capabilities/, toolsets/ and the rest are found relative to the repo
+os.chdir(ROOT)  # abilities/, toolsets/ and the rest are found relative to the repo
 
 # Production's choices (.env.remote.example), unless the environment says otherwise.
 for key, value in {
@@ -46,14 +46,13 @@ for key, value in {
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
-from app.capabilities import CapabilityRegistry  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.execution.tool_agent import ToolAgentExecutor  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.persistence.models import ExecutionModel  # noqa: E402
 from app.work.memory import MemoryService  # noqa: E402
 from app.work.purchases import PurchaseService  # noqa: E402
-from app.worker import TaskWorker, add_chat_executors, build_manager  # noqa: E402
+from app.worker import TaskWorker, add_chat_executors  # noqa: E402
 
 SCENARIOS = Path(__file__).with_name("scenarios.json")
 #: The phone's clock, now: reminders are checked against the real time ("tomorrow at 9").
@@ -106,12 +105,8 @@ class Harness:
             state.workflow_service,
             state.repository_registry,
         )
-        registry = CapabilityRegistry.from_directory(
-            self.settings.capabilities_directory
-        ).restricted_to_adapters(executors)
         self.worker = TaskWorker(
             service=state.task_service,
-            manager=build_manager(self.settings, registry),
             executors=executors,
             worker_id="chat-eval",
             workflow_service=state.workflow_service,

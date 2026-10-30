@@ -9,7 +9,6 @@ state, and accept an authenticated decision.
 | Workflow | Purpose | Privileged boundary |
 | --- | --- | --- |
 | `coding-change` | Change an already registered repository | Review the exact PR head before trusted merge |
-| `repository-onboarding` | Add a repository to the trusted registry | Approve registry and permission scope before activation |
 | `assistant-deployment` | Deploy a reviewed immutable assistant commit | Separate deployment approval before migration or promotion |
 
 The manifests in `workflows/` define the ordered stages. They are operator-controlled
@@ -109,6 +108,5 @@ Workflow runs may link to a chat session and task. Those records, messages, task
 events all live in PostgreSQL, so replacing API or worker containers does not erase the
 conversation. Deployments must preserve the database volume and run ordered migrations.
 
-Repository onboarding remains proposal-only until its trusted activation adapter is
-implemented. Production rollback remains manual: a failed deployment is recorded and
+Production rollback remains manual: a failed deployment is recorded and
 the existing release is left for the operator to inspect or redeploy explicitly.

@@ -24,13 +24,13 @@ from app.api.schemas import (
     CreateChatSessionRequest,
     CreateCodingWorkflowFromMessageRequest,
     CreateTaskFromMessageRequest,
+    MessageHandling,
     TaskListResponse,
     TaskResponse,
-    TriageDecisionResponse,
     UpdateChatSessionRequest,
     WorkflowRunResponse,
 )
-from app.chat.turns import private_memory_text, propose_coding_run, triage_message
+from app.chat.turns import handle_message, private_memory_text, propose_coding_run
 from app.chat.uploads import MAX_UPLOAD_CHARACTERS, TARGETS, UploadError, detect_target
 from app.services import (
     ChatMessageNotFoundError,
@@ -194,7 +194,7 @@ def append_chat_message(
     return AppendChatMessageResponse(
         message=ChatMessageResponse.from_model(posted.message),
         focused_work_items=posted.focused_work_items,
-        decision=triage_message(request, chat_session_id, body, posted.message.id),
+        decision=handle_message(request, chat_session_id, body, posted.message.id),
     )
 
 
@@ -325,7 +325,7 @@ def _remember_privately(
     return AppendChatMessageResponse(
         message=ChatMessageResponse.from_model(posted.message),
         focused_work_items=[],
-        decision=TriageDecisionResponse(
+        decision=MessageHandling(
             intent="direct_action",
             goal="",
             reason="Saved as a private memory",

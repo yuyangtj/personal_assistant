@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 
-from app.capabilities import CapabilityRegistry
 from app.execution.base import ConversationTurn, ExecutionResult
-from app.manager import DeterministicManager
 from app.services import TaskService
 from app.worker import TaskWorker
 
@@ -34,12 +32,8 @@ def test_coding_execution_does_not_read_private_or_general_chat_context(
     service: TaskService, monkeypatch
 ) -> None:
     executor = RecordingCodingExecutor()
-    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(
-        {executor.id}
-    )
     worker = TaskWorker(
         service=service,
-        manager=DeterministicManager(registry),
         executors={executor.id: executor},
         worker_id="coding",
         coding_only=True,

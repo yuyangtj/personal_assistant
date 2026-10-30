@@ -7,14 +7,12 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from app.capabilities import CapabilityRegistry
 from app.coding.reports import with_work_item_context
 from app.domain.enums import TaskStatus
 from app.domain.work_items import Brief, render_work_item_context
 from app.execution.base import ExecutionResult
 from app.execution.conversation import ConversationExecutor
 from app.integrations.chat import ChatCompletion, ChatMessage
-from app.manager import DeterministicManager
 from app.persistence.database import Database
 from app.persistence.models import TaskModel, WorkItemEventModel, utc_now
 from app.services import TaskService
@@ -118,10 +116,8 @@ def test_work_item_context_reaches_the_conversation_model(
             return ExecutionResult(output={"summary": "ok", "reply": "ok"})
 
     executors = {"model-conversation": Conversation()}
-    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(executors)
     TaskWorker(
         service=service,
-        manager=DeterministicManager(registry),
         executors=executors,
         worker_id="test",
     ).run_once()
@@ -267,10 +263,8 @@ def test_brief_writeback_runs_off_the_task_loop(service: TaskService) -> None:
             return 0
 
     executors = {"model-conversation": object()}
-    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(executors)
     worker = TaskWorker(
         service=service,
-        manager=DeterministicManager(registry),
         executors=executors,  # type: ignore[arg-type]
         worker_id="test",
         brief_writeback=SlowJob(),  # type: ignore[arg-type]
@@ -285,7 +279,6 @@ def test_brief_writeback_runs_off_the_task_loop(service: TaskService) -> None:
 
     coding_worker = TaskWorker(
         service=service,
-        manager=DeterministicManager(registry),
         executors=executors,  # type: ignore[arg-type]
         worker_id="coding",
         coding_only=True,

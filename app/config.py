@@ -23,7 +23,6 @@ class Settings:
     #: How many coding agents the coding worker runs at once.
     coding_concurrency: int = 2
     fake_executor_delay_seconds: float = 0.1
-    capabilities_directory: Path = Path("capabilities")
     abilities_directory: Path = Path("abilities")
     repositories_directory: Path = Path("repositories")
     workflows_directory: Path = Path("workflows")
@@ -163,12 +162,6 @@ class Settings:
                 os.getenv(
                     "ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS",
                     str(defaults.fake_executor_delay_seconds),
-                )
-            ),
-            capabilities_directory=Path(
-                os.getenv(
-                    "ASSISTANT_CAPABILITIES_DIRECTORY",
-                    str(defaults.capabilities_directory),
                 )
             ),
             abilities_directory=Path(

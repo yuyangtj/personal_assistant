@@ -9,7 +9,7 @@ from typing import Protocol
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from app.capabilities.models import IDENTIFIER_PATTERN
+from app.domain.identifiers import IDENTIFIER_PATTERN
 from app.providers import ProviderStateStore
 
 

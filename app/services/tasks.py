@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from app.capabilities.models import IDENTIFIER_PATTERN
 from app.domain.enums import CODING_CAPABILITIES, EventType, TaskStatus
+from app.domain.identifiers import IDENTIFIER_PATTERN
 from app.domain.task_context import build_task_context
 from app.domain.work_items import WorkItemLink
 from app.persistence.models import ChatMessageModel, CodingRunModel, TaskEventModel, TaskModel

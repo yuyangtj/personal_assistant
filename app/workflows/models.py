@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.capabilities.models import IDENTIFIER_PATTERN
+from app.domain.identifiers import IDENTIFIER_PATTERN
 
 
 class WorkflowStageKind(StrEnum):

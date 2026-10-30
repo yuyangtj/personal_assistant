@@ -7,14 +7,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.capabilities import CapabilityRegistry
 from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
 from app.config import Settings
 from app.domain.enums import TaskStatus
 from app.execution.base import ExecutionResult
 from app.execution.fake import FakeExecutor
 from app.integrations.fallback import FallbackChatClient
-from app.manager import DeterministicManager, TaskManager
 from app.persistence.database import Database
 from app.services import TaskService
 from app.worker import (
@@ -22,7 +20,6 @@ from app.worker import (
     _build_code_agent_runners,
     build_coding_executor,
     build_conversation_executor,
-    build_manager,
     preflight_coding_executor,
 )
 
@@ -31,14 +28,11 @@ def make_worker(
     service: TaskService,
     *,
     delay: float = 0.0,
-    manager: TaskManager | None = None,
     executors: Mapping[str, FakeExecutor] | None = None,
 ) -> TaskWorker:
     installed = executors or {"fake": FakeExecutor(delay_seconds=delay)}
-    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(installed)
     return TaskWorker(
         service=service,
-        manager=manager or DeterministicManager(registry),
         executors=installed,
         worker_id="test-worker",
         lease_seconds=30,
@@ -209,14 +203,6 @@ def test_runtime_conversation_rejects_unknown_provider() -> None:
         build_conversation_executor(Settings(conversation_model_provider="unknown"))
 
 
-def test_runtime_manager_is_deterministic_by_default() -> None:
-    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters({"fake"})
-
-    manager = build_manager(Settings(), registry)
-
-    assert isinstance(manager, DeterministicManager)
-
-
 def test_runtime_coding_agent_is_opt_in_and_requires_scoped_configuration() -> None:
     assert build_coding_executor(Settings()) is None
 
@@ -266,8 +252,6 @@ def test_worker_completes_task_and_records_ordered_events(service: TaskService) 
     assert [event.event_type for event in events] == [
         "TASK_CREATED",
         "TASK_PLANNING_STARTED",
-        "PLAN_CREATED",
-        "MANAGER_DECISION_CREATED",
         "CAPABILITY_SELECTED",
         "EXECUTION_STARTED",
         "EXECUTION_OUTPUT_RECEIVED",
@@ -344,7 +328,7 @@ def test_task_fails_cleanly_when_no_enabled_capability_matches(
     failed = service.get_task(task.id)
     assert failed.status == TaskStatus.FAILED.value
     assert service.list_events(task.id)[-1].event_type == "TASK_FAILED"
-    assert "No enabled capability provides" in service.list_events(task.id)[-1].payload["error"]
+    assert "No installed executor provides" in service.list_events(task.id)[-1].payload["error"]
     reply = service.list_events(task.id)[-2]
     assert reply.event_type == "ASSISTANT_REPLY"
     assert reply.payload["outcome"] == "failed"
