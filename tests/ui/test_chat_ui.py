@@ -166,32 +166,38 @@ def test_the_stats_page_shows_the_work_done(page: Page, live_server: str) -> Non
     expect(page.locator("#stats-body tbody tr")).to_have_count(1)
 
 
-def test_the_repository_picked_above_the_chat_is_sent_with_the_message(
+def test_one_request_sends_the_message_and_queues_its_reply_with_the_picked_repository(
     page: Page, live_server: str, api: httpx.Client
 ) -> None:
     chat = api.post("/chat-sessions", json={}).json()["id"]
-    messages = [
-        api.post(f"/chat-sessions/{chat}/messages", json={"content": text}).json()["message"]["id"]
-        for text in ("What's this repo about", "and another thing")
-    ]
-    sent: list[dict] = []
+    posts: list[tuple[str, dict]] = []
     page.on(
         "request",
-        lambda r: r.method == "POST" and r.url.endswith("/task") and sent.append(r.post_data_json),
+        lambda r: (
+            r.method == "POST"
+            and "/chat-sessions/" in r.url
+            and posts.append((r.url, r.post_data_json))
+        ),
     )
     page.goto(f"{live_server}/ui#/chats/{chat}")
-    expect(page.locator("#transcript")).to_contain_text("What's this repo about")
+    expect(page.locator("#input")).to_be_visible()
 
-    # The reply task is made by the console, once the server has routed the message.
     pick_repository(page, "analytics-agent-playground")
-    page.evaluate("id => createTask(id)", messages[0])
-    eventually(lambda: len(sent) == 1)
-    assert sent[0]["source_context"]["selected_repository_id"] == "analytics-agent-playground"
-
+    say(page, "What's this repo about")
+    eventually(lambda: len(api.get(f"/chat-sessions/{chat}/tasks").json()["tasks"]) == 1)
     pick_repository(page, "")  # "Pick for me": nothing is sent
-    page.evaluate("id => createTask(id)", messages[1])
-    eventually(lambda: len(sent) == 2)
-    assert "selected_repository_id" not in sent[1]["source_context"]
+    say(page, "and another thing")
+    eventually(lambda: len(api.get(f"/chat-sessions/{chat}/tasks").json()["tasks"]) == 2)
+
+    # One POST per message, no second request to queue the reply.
+    assert [url.rsplit("/", 1)[-1] for url, _ in posts] == ["messages", "messages"]
+    assert all(body["reply"] is True for _, body in posts)
+    first, second = sorted(
+        api.get(f"/chat-sessions/{chat}/tasks").json()["tasks"], key=lambda t: t["created_at"]
+    )
+    assert first["source_context"]["selected_repository_id"] == "analytics-agent-playground"
+    assert "selected_repository_id" not in second["source_context"]
+    assert first["source_context"]["local_time"]  # the user's clock went with the message
 
 
 def test_the_stats_page_lists_what_the_assistant_can_do(page: Page, live_server: str) -> None:
