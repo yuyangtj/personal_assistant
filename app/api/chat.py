@@ -174,7 +174,7 @@ def append_chat_message(
     body: AppendChatMessageRequest,
     request: Request,
 ) -> AppendChatMessageResponse:
-    """Record what the user said. Nothing is executed until a task is confirmed."""
+    """Record what the user said; with ``reply``, also queue the chat agent's reply."""
     private = private_memory_text(body.content)
     if private is not None:
         return _remember_privately(request, chat_session_id, private)
@@ -191,11 +191,40 @@ def append_chat_message(
         raise HTTPException(status_code=404, detail="Chat session not found") from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    decision = handle_message(request, chat_session_id, body, posted.message.id)
+    task = None
+    if body.reply and not (decision.handled or decision.intent == "direct_action"):
+        # The chat agent's reply, queued in the same request: the clock it is told is the
+        # one sent with the message.
+        context: dict[str, object] = {"local_time": body.local_time, "timezone": body.timezone}
+        if body.repository_id:
+            context["selected_repository_id"] = body.repository_id
+        task = TaskResponse.from_model(
+            task_service(request).create_task_from_message(
+                chat_session_id,
+                posted.message.id,
+                source_context=_known_selected_repository(request, context),
+            )
+        )
     return AppendChatMessageResponse(
         message=ChatMessageResponse.from_model(posted.message),
         focused_work_items=posted.focused_work_items,
-        decision=handle_message(request, chat_session_id, body, posted.message.id),
+        decision=decision,
+        task=task,
     )
+
+
+def _known_selected_repository(request: Request, context: dict[str, object]) -> dict[str, object]:
+    """The repository picked in the console is information for the reply, never an order to
+    code: it only travels along if it is a registered one."""
+    context = {key: value for key, value in context.items() if value is not None}
+    selected = context.pop("selected_repository_id", None)
+    if isinstance(selected, str):
+        with contextlib.suppress(LookupError):
+            context["selected_repository_id"] = request.app.state.repository_registry.get(
+                selected
+            ).id
+    return context
 
 
 class ChatUploadRequest(BaseModel):
@@ -350,15 +379,9 @@ def create_task_from_chat_message(
 ) -> TaskResponse:
     """Launch the work a chat message asked for, on the user's explicit confirmation."""
     reject_direct_coding(body.required_capabilities, body.repository_id, body.source_context)
-    source_context = repository_context(request, body.source_context, body.repository_id)
-    # The repository picked in the console is information for the reply, never an order to
-    # code: it only travels along if it is a registered one.
-    selected = source_context.pop("selected_repository_id", None)
-    if isinstance(selected, str):
-        with contextlib.suppress(LookupError):
-            source_context["selected_repository_id"] = request.app.state.repository_registry.get(
-                selected
-            ).id
+    source_context = _known_selected_repository(
+        request, repository_context(request, body.source_context, body.repository_id)
+    )
     try:
         task = task_service(request).create_task_from_message(
             chat_session_id,
