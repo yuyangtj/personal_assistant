@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from app.capabilities.models import IDENTIFIER_PATTERN
+from app.domain.identifiers import IDENTIFIER_PATTERN
 
 
 class DeploymentStrategy(StrEnum):

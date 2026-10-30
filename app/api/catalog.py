@@ -1,4 +1,4 @@
-"""What the assistant has configured: capabilities, repositories, runners, targets, health."""
+"""What the assistant has configured: repositories, runners, targets, health."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from fastapi import APIRouter, Request
 from sqlalchemy import text
 
 from app.api.schemas import (
-    CapabilityListResponse,
     CodingRunnerListResponse,
     DeploymentTargetListResponse,
     HealthResponse,
@@ -19,7 +18,6 @@ from app.api.schemas import (
     ValidationProfileListResponse,
     WorkflowListResponse,
 )
-from app.capabilities.models import CapabilityKind
 
 router = APIRouter()
 
@@ -29,19 +27,6 @@ def health(request: Request) -> HealthResponse:
     with request.app.state.database.session() as session:
         session.execute(text("SELECT 1"))
     return HealthResponse(status="ok")
-
-
-@router.get("/capabilities", response_model=CapabilityListResponse)
-def list_capabilities(
-    request: Request,
-    kind: CapabilityKind | None = None,
-    include_disabled: bool = True,
-) -> CapabilityListResponse:
-    capabilities = request.app.state.capability_registry.list(
-        kind=kind,
-        include_disabled=include_disabled,
-    )
-    return CapabilityListResponse(capabilities=capabilities)
 
 
 @router.get("/repositories", response_model=RepositoryListResponse)

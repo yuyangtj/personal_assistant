@@ -44,7 +44,6 @@ services:
         condition: service_completed_successfully
     environment:
       ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:${ASSISTANT_POSTGRES_PASSWORD}@postgres:5432/assistant
-      ASSISTANT_CAPABILITIES_DIRECTORY: /service/capabilities
       ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
       ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
       ASSISTANT_CODING_RUNNERS_DIRECTORY: /service/coding-runners
@@ -123,7 +122,6 @@ services:
         condition: service_completed_successfully
     environment:
       ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:${ASSISTANT_POSTGRES_PASSWORD}@postgres:5432/assistant
-      ASSISTANT_CAPABILITIES_DIRECTORY: /service/capabilities
       ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
       ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
       ASSISTANT_CODING_RUNNERS_DIRECTORY: /service/coding-runners
@@ -204,7 +202,6 @@ services:
       GIT_ASKPASS: /usr/local/bin/assistant-git-askpass
       GIT_TERMINAL_PROMPT: "0"
       ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant_coding:${ASSISTANT_CODING_POSTGRES_PASSWORD:?set ASSISTANT_CODING_POSTGRES_PASSWORD}@postgres:5432/assistant
-      ASSISTANT_CAPABILITIES_DIRECTORY: /service/capabilities
       ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
       ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
       ASSISTANT_CODING_RUNNERS_DIRECTORY: /service/coding-runners

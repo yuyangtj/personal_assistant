@@ -172,7 +172,8 @@ outside routing.
 ## Picking the executor
 
 A task names the capabilities it needs (`required_capabilities`: none for a chat reply,
-`web_research`, or `coding` and `pull_request_creation`). `DeterministicManager` picks the
-enabled capability in `capabilities/` that provides them, and the worker runs its adapter.
-No model takes part in this. (A model-assisted manager existed behind a setting that was
-never turned on; it was removed on 2026-10-25.)
+`web_research`, or `coding` and `pull_request_creation`). `adapter_for` in
+`app/execution/routing.py` picks the first installed executor that provides all of them, from
+a short table in code. No model takes part in this. (The manager and the `capabilities/`
+manifests it read were removed on 2026-10-30; only their adapter and "provides" lists were
+ever used.)

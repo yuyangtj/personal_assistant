@@ -6,14 +6,12 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from app.capabilities import CapabilityRegistry
 from app.domain.enums import TaskStatus
 from app.execution import ConversationExecutor, ConversationTurn, FakeExecutor
 from app.execution.conversation import parse_reply
 from app.execution.fake import ExecutionCancelled
 from app.integrations.chat import ChatCompletion, ChatMessage
 from app.integrations.kimi import KimiChatClient, KimiError
-from app.manager import DeterministicManager
 from app.services import TaskService
 from app.worker import TaskWorker
 
@@ -126,23 +124,13 @@ def test_executor_does_not_call_model_when_cancelled() -> None:
     assert client.calls == []
 
 
-def test_registry_disables_capabilities_without_installed_adapters() -> None:
-    registry = CapabilityRegistry.from_directory("capabilities")
-    assert registry.select(["task_execution"]).id == "model-conversation"
-    assert (
-        registry.restricted_to_adapters({"fake"}).select(["task_execution"]).id == "fake-executor"
-    )
-
-
 def _conversation_worker(service: TaskService, client: RecordingChatClient) -> TaskWorker:
     executors = {
         "fake": FakeExecutor(delay_seconds=0),
         "model-conversation": ConversationExecutor(client),
     }
-    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(executors)
     return TaskWorker(
         service=service,
-        manager=DeterministicManager(registry),
         executors=executors,
         worker_id="test-worker",
         lease_seconds=30,

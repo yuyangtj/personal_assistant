@@ -57,7 +57,7 @@ uses `.coding-worktrees/` for disposable task worktrees. Override
 `ASSISTANT_HOST_REPOSITORY_PERSONAL_ASSISTANT_PATH` when the trusted checkout lives
 elsewhere. Coding tasks remain queued when this profile is not running.
 
-Merge is intentionally not a manager capability. After human review,
+Merge is intentionally not something any executor can do. After human review,
 `GET /tasks/{task_id}/pull-request-status` reports live checks for the exact head. Both
 ready-for-review and `POST /tasks/{task_id}/pull-request-approval` require every
 manifest-declared check to pass. Merge approval also requires the exact reviewed head SHA
@@ -69,11 +69,10 @@ exact-SHA approval. Configuration and examples are in
 
 ## Conversational replies with Kimi or MiniMax
 
-The worker installs the provider-neutral `model-conversation` capability (priority 20)
-when at least one configured provider key is available. It answers everyday requests with short,
-speakable replies through an OpenAI-compatible API. Without that key, routing falls
-back to the fake executor, because only capabilities whose adapter is installed can be
-selected (`CapabilityRegistry.restricted_to_adapters`).
+The worker installs the provider-neutral `model-conversation` executor when at least one
+configured provider key is available. It answers everyday requests with short, speakable
+replies through an OpenAI-compatible API. Without that key, chat replies go to the fake
+executor, because only installed executors can be chosen (`app/execution/routing.py`).
 
 | Variable | Default |
 | --- | --- |

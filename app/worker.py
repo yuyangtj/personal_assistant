@@ -26,7 +26,6 @@ from app.assistant.tools import (
     repository_tools,
     store_tools,
 )
-from app.capabilities import CapabilityRegistry
 from app.chat.routines import start_routine as run_routine
 from app.chat.titles import TitleJob, TitleWriter
 from app.coding.base import CodeAgentRunner
@@ -49,11 +48,10 @@ from app.delivery import DeliveryService
 from app.deployments import DeploymentRegistry, HostDeployerSpool
 from app.execution import ConversationExecutor, Executor, FakeExecutor
 from app.execution.fake import ExecutionCancelled
+from app.execution.routing import DEFAULT_REQUIREMENTS, adapter_for
 from app.execution.tool_agent import ToolAgentExecutor
 from app.integrations.factory import chat_client_chain
 from app.integrations.github import GitHubClient
-from app.manager import DeterministicManager, TaskManager
-from app.manager.decisions import DelegateDecision, FailDecision
 from app.notify import Notifier, NullNotifier, build_notifier
 from app.persistence.database import Database
 from app.persistence.models import ScheduleModel
@@ -79,10 +77,6 @@ from app.worker_liveness import WorkerHeartbeat, container_instance_id
 from app.workflows import WorkflowRegistry, WorkflowService
 
 logger = logging.getLogger(__name__)
-
-
-class ExecutorAdapterNotFoundError(LookupError):
-    pass
 
 
 class ProgressReporter:
@@ -439,17 +433,11 @@ def build_conversation_executor(settings: Settings) -> ConversationExecutor | No
     return ConversationExecutor(client)
 
 
-def build_manager(settings: Settings, registry: CapabilityRegistry) -> TaskManager:
-    """Picks the executor for a task from the capabilities it needs."""
-    return DeterministicManager(registry)
-
-
 class TaskWorker:
     def __init__(
         self,
         *,
         service: TaskService,
-        manager: TaskManager,
         executors: Mapping[str, Executor],
         worker_id: str,
         lease_seconds: int = 60,
@@ -475,7 +463,6 @@ class TaskWorker:
         notifier: Notifier | None = None,
     ):
         self.service = service
-        self.manager = manager
         self.executors = dict(executors)
         self.worker_id = worker_id
         self.lease_seconds = lease_seconds
@@ -533,41 +520,20 @@ class TaskWorker:
         heartbeat.start()
         execution_id: str | None = None
         try:
-            outcome = self.manager.decide(task)
-            decision = outcome.decision
-            self.service.record_plan(
-                task.id,
-                [
-                    "Resolve the task's required capabilities",
-                    "Select an enabled registered capability",
-                    "Execute through its configured adapter",
-                    "Validate that a structured result was produced",
-                ],
-                claim_id=claim_id,
-            )
-            self.service.record_manager_decision(
-                task.id,
-                decision.model_dump(mode="json"),
-                claim_id=claim_id,
-            )
-            if isinstance(decision, FailDecision):
+            adapter = adapter_for(task.required_capabilities or (), self.executors)
+            if adapter is None:
                 self.service.fail_task(
                     task.id,
-                    error=decision.reason,
+                    error="No installed executor provides: "
+                    + ", ".join(task.required_capabilities or DEFAULT_REQUIREMENTS),
                     reply="Sorry, I can't do that yet. I don't have a tool for it.",
                     claim_id=claim_id,
                 )
                 return True
-            if not isinstance(decision, DelegateDecision):
-                raise TypeError(f"Unsupported manager decision: {decision.action}")
-            executor = self.executors.get(decision.adapter)
-            if executor is None:
-                raise ExecutorAdapterNotFoundError(
-                    f"No executor is installed for adapter: {decision.adapter}"
-                )
+            executor = self.executors[adapter]
             execution_id = self.service.start_execution(
                 task.id,
-                capability_id=decision.capability_id,
+                capability_id=adapter,
                 executor_id=executor.id,
                 execution_input={"request": task.original_request},
                 claim_id=claim_id,
@@ -594,11 +560,11 @@ class TaskWorker:
                 execution_context["progress"] = ProgressReporter(
                     self.service, task.id, claim_id=claim_id
                 )
-            if executor.id in {"supervisor", "model-conversation"}:
+            if executor.id == "model-conversation":
                 # Their tools act in this chat: a reminder, a list entry, a coding run.
                 execution_context["chat_session_id"] = task.chat_session_id
                 execution_context["origin_message_id"] = task.origin_message_id
-            if executor.id in {"model-conversation", "tool-agent", "supervisor"}:
+            if executor.id in {"model-conversation", "tool-agent"}:
                 work_items = self.service.work_item_context(task)
                 if work_items:
                     execution_context["work_items"] = work_items
@@ -1048,11 +1014,6 @@ def main() -> None:
             "Coding pull-request agent enabled for repositories: %s",
             ", ".join(sorted(coding_executor.executors)),
         )
-    # Only capabilities whose adapter is installed in this worker can be selected.
-    registry = CapabilityRegistry.from_directory(
-        settings.capabilities_directory
-    ).restricted_to_adapters(executors)
-    manager = build_manager(settings, registry)
     notifier = build_notifier(
         settings.ntfy_topic_url, token=settings.ntfy_token, public_url=settings.public_url
     )
@@ -1081,7 +1042,6 @@ def main() -> None:
         )
     worker = TaskWorker(
         service=task_service,
-        manager=manager,
         executors=executors,
         worker_id=settings.worker_id,
         lease_seconds=settings.worker_lease_seconds,
@@ -1133,7 +1093,6 @@ def main() -> None:
         extra_workers.append(
             TaskWorker(
                 service=task_service,
-                manager=manager,
                 executors=executors,
                 worker_id=f"{settings.worker_id}-replies",
                 lease_seconds=settings.worker_lease_seconds,
@@ -1159,7 +1118,6 @@ def main() -> None:
             extra_workers.append(
                 TaskWorker(
                     service=task_service,
-                    manager=manager,
                     executors={**executors, extra_executor.id: extra_executor},
                     worker_id=f"{settings.worker_id}-{index}",
                     lease_seconds=settings.worker_lease_seconds,

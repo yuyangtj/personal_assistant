@@ -198,7 +198,7 @@ def test_timeline_merges_item_history_with_whitelisted_run_events(
     task = client.post(
         "/tasks", json={"request": "Draft the login copy", "work_item_id": item["id"]}
     ).json()
-    service.record_plan(task["id"], ["internal step"])
+    service.record_progress(task["id"], "internal step", "tool")
     client.post("/tasks", json={"request": "Unrelated chat turn"})
 
     entries = client.get(f"/work-items/{item['id']}/timeline").json()["entries"]
@@ -214,7 +214,7 @@ def test_timeline_merges_item_history_with_whitelisted_run_events(
         "STATUS_CHANGED",
         "WORK_ITEM_CREATED",
     }
-    assert "PLAN_CREATED" not in {entry["event_type"] for entry in everything}
+    assert "TASK_PROGRESS" not in {entry["event_type"] for entry in everything}
     assert all(entry["work_item_id"] == item["id"] for entry in everything)
     oldest = entries[-1]["at"]
     assert (

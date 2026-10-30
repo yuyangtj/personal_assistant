@@ -7,10 +7,8 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 
 from app.assistant.reporter import Reporter
-from app.capabilities import CapabilityRegistry
 from app.chat.routines import start_routine
 from app.execution.conversation import ConversationExecutor
-from app.manager import DeterministicManager
 from app.schedules import Recurrence, ScheduleKind, ScheduleService
 from app.services import TaskService
 from app.worker import TaskWorker
@@ -36,10 +34,8 @@ def _routine(service: TaskService, message: str, *, quiet: bool = False, chat: s
 
 def _worker(service: TaskService, client: RecordingChatClient, notifier) -> TaskWorker:
     executors = {"model-conversation": ConversationExecutor(client)}
-    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(executors)
     return TaskWorker(
         service=service,
-        manager=DeterministicManager(registry),
         executors=executors,
         worker_id="test-worker",
         lease_seconds=30,

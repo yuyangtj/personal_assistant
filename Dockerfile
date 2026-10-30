@@ -7,7 +7,6 @@ WORKDIR /service
 
 COPY pyproject.toml README.md ./
 COPY app ./app
-COPY capabilities ./capabilities
 COPY abilities ./abilities
 COPY repositories ./repositories
 COPY workflows ./workflows

@@ -6,10 +6,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from app.assistant.reporter import Reporter
-from app.capabilities import CapabilityRegistry
 from app.delivery import DeliveryService
 from app.execution.conversation import REPORT, ConversationExecutor
-from app.manager import DeterministicManager
 from app.services import TaskService
 from app.worker import TaskWorker
 from tests.test_conversation import RecordingChatClient
@@ -25,10 +23,8 @@ class FailingChat(RecordingChatClient):
 
 def _worker(service: TaskService, client, notifier) -> TaskWorker:
     executors = {"model-conversation": ConversationExecutor(client)}
-    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(executors)
     return TaskWorker(
         service=service,
-        manager=DeterministicManager(registry),
         executors=executors,
         worker_id="test-worker",
         lease_seconds=30,

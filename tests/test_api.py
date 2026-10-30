@@ -107,7 +107,6 @@ def test_workflow_run_requires_explicit_authorized_decision(client: TestClient) 
     assert {item["id"] for item in workflows.json()["workflows"]} == {
         "assistant-deployment",
         "coding-change",
-        "repository-onboarding",
     }
 
     created = client.post(
@@ -208,15 +207,6 @@ def test_workflow_run_validates_registered_repository_and_required_inputs(
         },
     )
     assert unknown_repository.status_code == 422
-
-    malformed_onboarding = client.post(
-        "/workflow-runs",
-        json={
-            "workflow_id": "repository-onboarding",
-            "input": {"github_repository": "https://github.com/owner/repo"},
-        },
-    )
-    assert malformed_onboarding.status_code == 422
 
 
 def test_chat_message_can_propose_one_coding_workflow_then_link_started_task(
@@ -561,30 +551,6 @@ def test_speech_returns_cached_wav_with_provider_headers(client: TestClient) -> 
 def test_speech_rejects_blank_or_oversized_text(client: TestClient) -> None:
     assert client.post("/speech", json={"text": "   "}).status_code == 422
     assert client.post("/speech", json={"text": "x" * 601}).status_code == 422
-
-
-def test_capabilities_include_enabled_and_planned_adapters(client: TestClient) -> None:
-    response = client.get("/capabilities")
-    assert response.status_code == 200
-    capabilities = response.json()["capabilities"]
-    assert [capability["id"] for capability in capabilities] == [
-        "coding-pull-request",
-        "fake-executor",
-        "model-conversation",
-        "tool-agent",
-    ]
-    enabled_by_id = {c["id"]: c["availability"]["enabled"] for c in capabilities}
-    assert enabled_by_id["coding-pull-request"] is True
-    assert enabled_by_id["fake-executor"] is True
-    assert enabled_by_id["model-conversation"] is True
-
-    enabled = client.get("/capabilities", params={"include_disabled": False}).json()
-    assert [capability["id"] for capability in enabled["capabilities"]] == [
-        "coding-pull-request",
-        "fake-executor",
-        "model-conversation",
-        "tool-agent",
-    ]
 
 
 def test_task_accepts_explicit_capability_requirements(client: TestClient) -> None:

@@ -11,7 +11,6 @@ def test_built_in_workflows_define_explicit_approval_boundaries() -> None:
     assert [workflow.id for workflow in registry.list()] == [
         "assistant-deployment",
         "coding-change",
-        "repository-onboarding",
     ]
     coding = registry.get("coding-change")
     assert coding.required_inputs == ("repository_id", "request")

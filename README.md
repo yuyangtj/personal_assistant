@@ -46,7 +46,7 @@ What is built and what is next:
 | `app/execution` | Chat model and research agent executors |
 | `app/web` | The console (`index.html`, `static/`) and its PWA files |
 | `app/worker.py`, `app/main.py` | Worker and API entry points |
-| `capabilities/`, `workflows/`, `repositories/`, `spaces/` | YAML configuration |
+| `abilities/`, `workflows/`, `repositories/`, `spaces/` | YAML configuration |
 | `migrations/` | Ordered SQL migrations (re-run on every deploy, so idempotent) |
 | `scripts/`, `deploy/` | Server deployment: host deployer, redeploy with rollback, Caddy |
 | `android-assistant/` | The Android app (`shell/`) |

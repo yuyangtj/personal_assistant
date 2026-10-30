@@ -5,6 +5,9 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.assistant.supervisor import SupervisorTools
+from app.execution.routing import adapter_for
+
+ROUTED = {"coding-pull-request", "tool-agent", "model-conversation", "fake"}
 
 
 def _tools(client: TestClient) -> SupervisorTools:
@@ -180,8 +183,6 @@ def test_redirecting_a_finishing_run_is_refused(client: TestClient) -> None:
 
 
 def test_a_revision_can_be_routed_to_the_coding_agent(client: TestClient) -> None:
-    from app.capabilities import CapabilityRegistry
-
     chat, message, run = _started_run(client)
     service = client.app.state.task_service
     execution_id = _execution(client, run["task_id"])
@@ -195,12 +196,9 @@ def test_a_revision_can_be_routed_to_the_coding_agent(client: TestClient) -> Non
     _tools(client).message_agent(run["id"][:8], "Use a different icon.", chat)
 
     revision = service.get_task(service.get_task(run["task_id"]).superseded_by_task_id)
-    # The worker's manager picks the agent by what it provides; this used to fail with
+    # The worker picks the agent by what it provides; this used to fail with
     # "No enabled capability provides: coding-pull-request".
-    chosen = CapabilityRegistry.from_directory("capabilities").select(
-        revision.required_capabilities
-    )
-    assert chosen.id == "coding-pull-request"
+    assert adapter_for(revision.required_capabilities, ROUTED) == "coding-pull-request"
 
 
 def _open_pr_with_revision(client: TestClient) -> tuple[str, dict, str]:

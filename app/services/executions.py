@@ -86,36 +86,6 @@ class ExecutionOperations(ServiceBase):
             task.updated_at = datetime.now(UTC)
             return True
 
-    def record_plan(self, task_id: str, plan: list[str], *, claim_id: str | None = None) -> None:
-        with self.database.session() as session, session.begin():
-            task = self._require_task(session, task_id, for_update=True)
-            if TaskStatus(task.status) != TaskStatus.PLANNING or (
-                claim_id is not None and not self._has_active_claim(task, claim_id)
-            ):
-                return
-            TaskRepository.append_event(
-                session,
-                task,
-                EventType.PLAN_CREATED,
-                {"steps": plan},
-            )
-
-    def record_manager_decision(
-        self, task_id: str, decision: dict[str, Any], *, claim_id: str | None = None
-    ) -> None:
-        with self.database.session() as session, session.begin():
-            task = self._require_task(session, task_id, for_update=True)
-            if TaskStatus(task.status) != TaskStatus.PLANNING or (
-                claim_id is not None and not self._has_active_claim(task, claim_id)
-            ):
-                return
-            TaskRepository.append_event(
-                session,
-                task,
-                EventType.MANAGER_DECISION_CREATED,
-                decision,
-            )
-
     def start_execution(
         self,
         task_id: str,

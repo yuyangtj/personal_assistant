@@ -32,7 +32,6 @@ from app.workflows.models import WorkflowRunStatus
 from app.workflows.registry import WorkflowRegistry
 
 HOST_DEPLOYER_REPORT_TIMEOUT = timedelta(minutes=30)
-GITHUB_REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
 
 
 class WorkflowRunNotFoundError(LookupError):
@@ -84,9 +83,6 @@ class WorkflowService:
         if repository_id:
             repository = self.repository_registry.get(str(repository_id))
             normalized_input["repository_id"] = repository.id
-        github_repository = normalized_input.get("github_repository")
-        if github_repository and not GITHUB_REPOSITORY_PATTERN.fullmatch(str(github_repository)):
-            raise ValueError("github_repository must be in owner/repository format")
         if manifest.id == "assistant-deployment":
             if self.deployment_registry is None:
                 raise ValueError("Deployment registry is not configured")

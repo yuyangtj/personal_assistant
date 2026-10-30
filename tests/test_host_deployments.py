@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from app.capabilities import CapabilityRegistry
 from app.deployments import (
     DeploymentRegistry,
     DeploymentStrategy,
@@ -15,7 +14,6 @@ from app.deployments import (
 from app.domain.enums import TaskStatus
 from app.execution.fake import FakeExecutor
 from app.integrations.github import GitHubWorkflowRun
-from app.manager import DeterministicManager
 from app.persistence.database import Database
 from app.persistence.models import CodingRunModel, TaskModel
 from app.repositories import RepositoryRegistry
@@ -295,10 +293,8 @@ def test_sync_running_deployments_reports_finished_runs(
 
 def _worker(service: TaskService, workflows: WorkflowService, **options) -> TaskWorker:
     executors = {"fake": FakeExecutor(delay_seconds=0)}
-    registry = CapabilityRegistry.from_directory("capabilities").restricted_to_adapters(executors)
     return TaskWorker(
         service=service,
-        manager=DeterministicManager(registry),
         executors=executors,
         worker_id="test-worker",
         workflow_service=workflows,

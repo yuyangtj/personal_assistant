@@ -1,1 +1,1 @@
-"""Chat: what a message needs, offers and choices, quick actions."""
+"""Chat: handling a message (the note rule, choices), quick actions, titles and routines."""

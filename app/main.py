@@ -6,7 +6,6 @@ from app.abilities import AbilityRegistry
 from app.api.routes import router
 from app.api.web import app_signing_fingerprints
 from app.api.work_items import router as work_items_router
-from app.capabilities import CapabilityRegistry
 from app.coding.decision import CodingRunnerRegistry
 from app.config import Settings
 from app.deployments import DeploymentRegistry, HostDeployerSpool
@@ -27,14 +26,8 @@ from app.work.spaces import SpaceRegistry
 from app.workflows import WorkflowRegistry, WorkflowService
 
 
-def create_app(
-    settings: Settings | None = None,
-    capability_registry: CapabilityRegistry | None = None,
-) -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
-    registry = capability_registry or CapabilityRegistry.from_directory(
-        resolved_settings.capabilities_directory
-    )
     repository_registry = RepositoryRegistry.from_directory(
         resolved_settings.repositories_directory
     )
@@ -69,7 +62,6 @@ def create_app(
     application.state.work_item_service = WorkItemService(database)
     application.state.schedule_service = ScheduleService(database)
     application.state.space_registry = space_registry
-    application.state.capability_registry = registry
     application.state.repository_registry = repository_registry
     application.state.workflow_registry = workflow_registry
     application.state.coding_runner_registry = coding_runner_registry

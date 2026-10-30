@@ -11,7 +11,7 @@ import re
 
 from fastapi import Request
 
-from app.api.schemas import AppendChatMessageRequest, TriageDecisionResponse
+from app.api.schemas import AppendChatMessageRequest, MessageHandling
 from app.chat.blocks import pending_choices, settle
 from app.chat.direct_actions import DirectAction, note_rule, run_direct_action
 from app.schedules import zone
@@ -54,9 +54,9 @@ def private_memory_text(content: str) -> str | None:
     return match["text"].strip() if match and match["text"].strip() else None
 
 
-def triage_message(
+def handle_message(
     request: Request, chat_session_id: str, body: AppendChatMessageRequest, message_id: str
-) -> TriageDecisionResponse:
+) -> MessageHandling:
     """Decide what a just-stored message needs; never raises (rules are the fallback).
 
     The decision and where it led are kept on the message, so "why did it do that" can
@@ -88,7 +88,7 @@ def triage_message(
 
 def _route_message(
     request: Request, chat_session_id: str, body: AppendChatMessageRequest, message_id: str
-) -> TriageDecisionResponse:
+) -> MessageHandling:
     service = request.app.state.task_service
     # The assistant's suggestion buttons are only suggestions: a tap sends the label as an
     # ordinary message. Whatever is said next settles them, so they can't be tapped twice.
@@ -106,7 +106,7 @@ def _route_message(
             offer_message.id, settle(offer_message.blocks or [], block["id"], chosen=chosen)
         )
     action = note_rule(body.content)
-    response = TriageDecisionResponse(
+    response = MessageHandling(
         intent="direct_action" if action else "answer",
         goal=body.content[:500],
         reason="An explicit note." if action else "The chat agent answers.",
@@ -125,8 +125,8 @@ def _run_instantly(
     chat_session_id: str,
     body: AppendChatMessageRequest,
     action: DirectAction,
-    response: TriageDecisionResponse,
-) -> TriageDecisionResponse:
+    response: MessageHandling,
+) -> MessageHandling:
     """T0: done now, without a chat model; the reply lands in the transcript."""
     service = request.app.state.task_service
     timezone = body.timezone or request.app.state.settings.default_timezone

@@ -133,7 +133,7 @@ def test_expired_lease_cannot_be_renewed_before_recovery(
     assert service.is_cancelled(task.id, claim_id=claimed.claim_id)
 
 
-def test_stale_plan_and_progress_are_ignored(service: TaskService, database: Database) -> None:
+def test_stale_progress_is_ignored(service: TaskService, database: Database) -> None:
     task = service.create_task(request="Keep event history clean")
     first = service.claim_next_task(worker_id="worker-a", lease_seconds=30)
     assert first is not None
@@ -143,13 +143,11 @@ def test_stale_plan_and_progress_are_ignored(service: TaskService, database: Dat
     assert second is not None
     events_before = [event.id for event in service.list_events(task.id)]
 
-    service.record_plan(task.id, ["stale"], claim_id=first.claim_id)
-    service.record_manager_decision(task.id, {"stale": True}, claim_id=first.claim_id)
     service.record_progress(task.id, "stale progress", "tool", claim_id=first.claim_id)
 
     assert [event.id for event in service.list_events(task.id)] == events_before
-    service.record_plan(task.id, ["fresh"], claim_id=second.claim_id)
-    assert service.list_events(task.id)[-1].event_type == "PLAN_CREATED"
+    service.record_progress(task.id, "fresh progress", "tool", claim_id=second.claim_id)
+    assert service.list_events(task.id)[-1].event_type == "TASK_PROGRESS"
 
 
 def test_user_cancellation_marks_only_the_running_execution_cancelled(
