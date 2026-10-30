@@ -26,7 +26,6 @@ class Settings:
     abilities_directory: Path = Path("abilities")
     repositories_directory: Path = Path("repositories")
     workflows_directory: Path = Path("workflows")
-    coding_runners_directory: Path = Path("coding-runners")
     validation_profiles_directory: Path = Path("validation-profiles")
     deployment_targets_directory: Path = Path("deployment-targets")
     spaces_directory: Path = Path("spaces")
@@ -177,12 +176,6 @@ class Settings:
                 os.getenv(
                     "ASSISTANT_WORKFLOWS_DIRECTORY",
                     str(defaults.workflows_directory),
-                )
-            ),
-            coding_runners_directory=Path(
-                os.getenv(
-                    "ASSISTANT_CODING_RUNNERS_DIRECTORY",
-                    str(defaults.coding_runners_directory),
                 )
             ),
             validation_profiles_directory=Path(

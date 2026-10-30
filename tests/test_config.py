@@ -20,7 +20,6 @@ def test_settings_are_loaded_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("ASSISTANT_CODE_AGENT_ENABLED", "true")
     monkeypatch.setenv("ASSISTANT_REPOSITORIES_DIRECTORY", "/srv/repository-registry")
     monkeypatch.setenv("ASSISTANT_WORKFLOWS_DIRECTORY", "/srv/workflow-registry")
-    monkeypatch.setenv("ASSISTANT_CODING_RUNNERS_DIRECTORY", "/srv/coding-runners")
     monkeypatch.setenv("ASSISTANT_DEFAULT_REPOSITORY_ID", "analytics-agent-playground")
     monkeypatch.setenv("ASSISTANT_CODE_AGENT_PROVIDERS", "kimi,minimax-claude,codex")
     monkeypatch.setenv("ASSISTANT_CODE_REPOSITORY_PATH", "/srv/repositories/widget")
@@ -63,7 +62,6 @@ def test_settings_are_loaded_from_environment(monkeypatch) -> None:
     assert settings.code_agent_enabled is True
     assert settings.repositories_directory == Path("/srv/repository-registry")
     assert settings.workflows_directory == Path("/srv/workflow-registry")
-    assert settings.coding_runners_directory == Path("/srv/coding-runners")
     assert settings.default_repository_id == "analytics-agent-playground"
     assert settings.code_agent_providers == "kimi,minimax-claude,codex"
     assert settings.code_repository_path == Path("/srv/repositories/widget")

@@ -85,20 +85,6 @@ def test_provider_runtime_state_is_visible_without_exposing_credentials(
     assert "token" not in response.text.lower()
 
 
-def test_coding_runner_registry_is_visible(client: TestClient) -> None:
-    response = client.get("/coding-runners")
-
-    assert response.status_code == 200
-    runners = response.json()["runners"]
-    assert {runner["id"] for runner in runners} == {
-        "claude-code",
-        "kimi-code",
-        "minimax-claude-code",
-        "codex-cli",
-    }
-    assert all("cost_tier" in runner and "reasoning_tier" in runner for runner in runners)
-
-
 def test_workflow_run_requires_explicit_authorized_decision(client: TestClient) -> None:
     client.app.state.approval_token = "workflow-approval-secret"
 

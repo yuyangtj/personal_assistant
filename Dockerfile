@@ -10,7 +10,6 @@ COPY app ./app
 COPY abilities ./abilities
 COPY repositories ./repositories
 COPY workflows ./workflows
-COPY coding-runners ./coding-runners
 COPY validation-profiles ./validation-profiles
 COPY deployment-targets ./deployment-targets
 COPY spaces ./spaces

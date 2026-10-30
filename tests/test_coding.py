@@ -854,3 +854,32 @@ def test_a_run_that_only_leaves_generated_files_changed_nothing(tmp_path: Path) 
             request="Do nothing",
             is_cancelled=lambda: False,
         )
+
+
+def test_coding_runners_run_in_the_configured_order_whatever_the_request(
+    tmp_path: Path,
+) -> None:
+    repository, _remote = _repository(tmp_path)
+    ran: list[str] = []
+
+    def agent(name: str):
+        class Agent:
+            provider = name
+
+            def run(self, **_kwargs) -> CodeAgentReport:
+                ran.append(name)
+                return CodeAgentReport(summary=f"{name} did it")
+
+        return Agent()
+
+    chain = FallbackCodeAgentRunner([agent("kimi-code"), agent("claude-code")])
+    # A small docs fix used to be reordered by a scoring engine; the configured order wins.
+    report = chain.run(
+        worktree=repository,
+        request="Fix a typo in the README",
+        timeout_seconds=60,
+        is_cancelled=lambda: False,
+    )
+
+    assert ran == ["kimi-code"]
+    assert report.summary == "kimi-code did it"

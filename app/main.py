@@ -6,7 +6,6 @@ from app.abilities import AbilityRegistry
 from app.api.routes import router
 from app.api.web import app_signing_fingerprints
 from app.api.work_items import router as work_items_router
-from app.coding.decision import CodingRunnerRegistry
 from app.config import Settings
 from app.deployments import DeploymentRegistry, HostDeployerSpool
 from app.integrations.gemini_tts import GeminiTtsClient
@@ -33,9 +32,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     ability_registry = AbilityRegistry.from_directory(resolved_settings.abilities_directory)
     workflow_registry = WorkflowRegistry.from_directory(resolved_settings.workflows_directory)
-    coding_runner_registry = CodingRunnerRegistry.from_directory(
-        resolved_settings.coding_runners_directory
-    )
     validation_profile_registry = ValidationProfileRegistry.from_directory(
         resolved_settings.validation_profiles_directory
     )
@@ -64,7 +60,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.space_registry = space_registry
     application.state.repository_registry = repository_registry
     application.state.workflow_registry = workflow_registry
-    application.state.coding_runner_registry = coding_runner_registry
     application.state.validation_profile_registry = validation_profile_registry
     application.state.deployment_registry = deployment_registry
     application.state.workflow_service = WorkflowService(
