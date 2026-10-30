@@ -35,6 +35,63 @@ jobs:
       - name: Validate Compose configuration
         run: docker compose config --quiet
 
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: assistant
+          POSTGRES_USER: assistant
+          POSTGRES_PASSWORD: assistant
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U assistant -d assistant"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: assistant
+      PGPASSWORD: assistant
+      PGDATABASE: assistant
+      ASSISTANT_CODING_POSTGRES_PASSWORD: ci-coding-password
+      ASSISTANT_TEST_POSTGRES_OWNER_URL: postgresql+psycopg://assistant:assistant@localhost:5432/assistant
+      ASSISTANT_TEST_POSTGRES_CODING_URL: postgresql+psycopg://assistant_coding:ci-coding-password@localhost:5432/assistant
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install locked dependencies
+        run: |
+          python -m pip install uv
+          uv sync --locked --all-groups
+      - name: Run migrations
+        env:
+          MIGRATIONS_DIRECTORY: ${{ github.workspace }}/migrations
+          CODING_PASSWORD_SQL: ${{ github.workspace }}/deploy/postgres/coding-worker-password.sql
+        run: |
+          sh scripts/migrate.sh
+          psql -v ON_ERROR_STOP=1 -c "INSERT INTO tasks (id, original_request, current_goal, status) VALUES ('00000000-0000-0000-0000-000000000035', 'migration sentinel', 'migration sentinel', 'created')"
+          sh scripts/migrate.sh
+          test "$(psql -tA -c "SELECT original_request FROM tasks WHERE id = '00000000-0000-0000-0000-000000000035'")" = "migration sentinel"
+          sh scripts/migrate.sh &
+          first=$!
+          sh scripts/migrate.sh &
+          second=$!
+          sh scripts/migrate.sh &
+          third=$!
+          wait "$first"
+          wait "$second"
+          wait "$third"
+          test "$(psql -tA -c "SELECT original_request FROM tasks WHERE id = '00000000-0000-0000-0000-000000000035'")" = "migration sentinel"
+      - name: PostgreSQL integration tests
+        run: uv run pytest -m postgres
+
   # The console's JavaScript, in a real browser against a real server (tests/ui).
   ui:
     runs-on: ubuntu-latest

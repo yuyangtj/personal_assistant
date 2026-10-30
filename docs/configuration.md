@@ -32,8 +32,21 @@ worktree to its clean starting commit. Durable phase checkpoints and worker leas
 interrupted run reconcile its branch and PR without repeating completed publication steps.
 
 Local Compose keeps coding execution opt-in. The normal `docker compose up` starts only
-chat and non-coding work. To test an approved coding workflow locally, export the Kimi,
-MiniMax, and GitHub credentials, then start the isolated coding profile:
+chat and non-coding work. `ASSISTANT_CODING_POSTGRES_PASSWORD` sets the separate
+`assistant_coding` database password; the local default is `assistant-coding`, while remote
+Compose requires a unique random value. The migration runner applies this password after
+running the migrations, so changing it takes effect on the next migration run.
+
+The internal `private` network connects the API, general worker, Caddy and MCP services.
+PostgreSQL and migrations use only the internal `database` network. The coding worker is on
+`database` plus its own outbound-only `coding-egress` network, and shares no network with
+the API, Caddy or MCP. Its database role can operate only on coding tasks and their related
+queue, execution, checkpoint and workflow rows. It has no notes, memories, chat, schedule,
+work-item, digest, purchase or passkey table privileges; coding replies cross that boundary
+only through the task-validated `post_coding_assistant_reply` database function.
+
+To test an approved coding workflow locally, export the Kimi, MiniMax, and GitHub
+credentials, then start the isolated coding profile:
 
 ```bash
 docker compose --profile coding up -d --build coding-worker

@@ -26,12 +26,38 @@ usage() {
     echo "Usage: $0 [minimax|kimi|deepseek|gemini]  (default: keep the provider set in .env.remote)" >&2
 }
 
+api_is_healthy() {
+    "${compose[@]}" exec -T api python -c \
+        'import json, urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2))["status"] == "ok"' \
+        >/dev/null 2>&1
+}
+
+public_is_healthy() {
+    curl --fail --silent --show-error --max-time 3 \
+        "https://${ASSISTANT_DOMAIN}/health" >/dev/null 2>&1
+}
+
+workers_are_healthy() {
+    "${compose[@]}" exec -T worker python -m app.worker_liveness >/dev/null 2>&1 || return 1
+    if "${compose[@]}" config --services | grep -qx coding-worker; then
+        "${compose[@]}" exec -T coding-worker python -m app.worker_liveness >/dev/null 2>&1 || return 1
+    fi
+}
+
+refresh_caddy() {
+    # `up -d` can leave a config-only change and its single-file mount untouched.
+    if ! "${compose[@]}" exec -T caddy cat /etc/caddy/Caddyfile 2>/dev/null \
+        | cmp -s - "${REPOSITORY_ROOT}/deploy/Caddyfile"; then
+        echo "The Caddyfile changed; restarting the web proxy..."
+        "${compose[@]}" up -d --no-deps --force-recreate caddy
+    fi
+}
+
 wait_for_health() {
-    local _
-    for _ in $(seq 1 30); do
-        if "${compose[@]}" exec -T api python -c \
-            'import json, urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2))["status"] == "ok"' \
-            >/dev/null 2>&1; then
+    local mode="${1:-full}" _
+    for _ in $(seq 1 60); do
+        if api_is_healthy && public_is_healthy \
+            && { [[ "${mode}" == legacy ]] || workers_are_healthy; }; then
             return 0
         fi
         sleep 2
@@ -131,6 +157,7 @@ unset ASSISTANT_CONVERSATION_MODEL_FALLBACK_PROVIDER
 unset ASSISTANT_WEB_PASSWORD_HASH
 
 compose=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+ASSISTANT_DOMAIN="$(sed -n 's/^ASSISTANT_DOMAIN=//p' "${ENV_FILE}" | tail -n 1)"
 "${compose[@]}" config --quiet
 
 if "${compose[@]}" ps --status running --services 2>/dev/null | grep -qx postgres; then
@@ -157,8 +184,9 @@ export ASSISTANT_IMAGE_TAG="${release_tag}"
 # exist for the API's bind mount, and empty is fine.
 mkdir -p "${ASSISTANT_AVATAR_ASSETS_HOST:-/srv/personal-assistant/avatar-assets}"
 "${compose[@]}" up -d --build --remove-orphans
+refresh_caddy || true  # the public health check below drives rollback
 
-echo "Waiting for the API health check..."
+echo "Waiting for the service and public HTTPS health checks..."
 healthy=false
 if [[ "${SIMULATE_HEALTH_FAILURE}" == 1 ]]; then
     echo "ASSISTANT_DEPLOY_SIMULATE_HEALTH_FAILURE=1: treating the health check as failed." >&2
@@ -167,19 +195,21 @@ elif wait_for_health; then
 fi
 
 if [[ "${healthy}" != true ]]; then
-    echo "Release ${release_tag} did not become healthy within 60 seconds." >&2
+    echo "Release ${release_tag} did not become healthy within 120 seconds." >&2
     "${compose[@]}" ps >&2
-    "${compose[@]}" logs --tail=80 api migrate postgres >&2
+    "${compose[@]}" logs --tail=80 api worker coding-worker caddy migrate postgres >&2
     if [[ ! "${previous_tag}" =~ ^[0-9a-f]{40}$ || "${previous_tag}" == "${release_tag}" ]]; then
         echo "No earlier release image is recorded, so there is nothing to roll back to." >&2
         exit 1
     fi
     echo "Rolling back to release ${previous_tag}..." >&2
     export ASSISTANT_IMAGE_TAG="${previous_tag}"
-    # Migrations are backward compatible, so the previous images run on the new schema.
-    if "${compose[@]}" up -d --no-build --remove-orphans && wait_for_health; then
-        echo "Rolled back: release ${previous_tag} is serving." >&2
-        exit "${EXIT_ROLLED_BACK}"
+    # Older images predate worker liveness; migrations remain backward compatible.
+    if "${compose[@]}" up -d --no-build --remove-orphans; then
+        if refresh_caddy && wait_for_health legacy; then
+            echo "Rolled back: release ${previous_tag} is serving." >&2
+            exit "${EXIT_ROLLED_BACK}"
+        fi
     fi
     echo "Rollback to ${previous_tag} also failed to become healthy." >&2
     exit 1
@@ -189,13 +219,5 @@ printf '%s\n' "${release_tag}" > "${CURRENT_TAG_FILE}"
 prune_release_images
 prune_build_cache
 
-# `up -d` leaves Caddy running for a config-only change, and its single-file mount keeps
-# the old Caddyfile after a checkout replaces it: recreate it when the two differ.
-if ! "${compose[@]}" exec -T caddy cat /etc/caddy/Caddyfile 2>/dev/null \
-    | cmp -s - "${REPOSITORY_ROOT}/deploy/Caddyfile"; then
-    echo "The Caddyfile changed; restarting the web proxy..."
-    "${compose[@]}" up -d --no-deps --force-recreate caddy
-fi
-
 "${compose[@]}" ps
-echo "Deployment complete: https://$(sed -n 's/^ASSISTANT_DOMAIN=//p' "${ENV_FILE}" | tail -n 1)"
+echo "Deployment complete: https://${ASSISTANT_DOMAIN}"

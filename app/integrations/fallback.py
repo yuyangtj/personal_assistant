@@ -39,8 +39,13 @@ class FallbackChatClient:
         tools: list[dict[str, Any]] | None = None,
         on_text: Callable[[str], None] | None = None,
     ) -> ChatCompletion:
+        """``on_text`` may have a ``restart()`` (see ReplyDraft): it is called before each
+        later attempt, so a failed provider's partial text never mixes into the next one's."""
         extra: dict[str, Any] = {"tools": tools} if tools else {}
-        for client in self.clients:
+        restart = getattr(on_text, "restart", None)
+        for index, client in enumerate(self.clients):
+            if index and callable(restart):
+                restart()
             streamed = {"on_text": on_text} if on_text and getattr(client, "streams", False) else {}
             try:
                 completion = client.complete(messages, max_tokens=max_tokens, **extra, **streamed)

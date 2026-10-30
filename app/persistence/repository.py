@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.enums import CODING_CAPABILITIES, EventType, TaskStatus
@@ -44,15 +44,42 @@ class ChatMessageRepository:
         chat_session_id: str,
         *,
         limit: int = 500,
+        before: tuple[datetime, str] | None = None,
     ) -> list[ChatMessageModel]:
-        return list(
+        messages, _ = ChatMessageRepository.list_page(
+            session, chat_session_id, limit=limit, before=before
+        )
+        return messages
+
+    @staticmethod
+    def list_page(
+        session: Session,
+        chat_session_id: str,
+        *,
+        limit: int = 500,
+        before: tuple[datetime, str] | None = None,
+    ) -> tuple[list[ChatMessageModel], bool]:
+        statement = select(ChatMessageModel).where(
+            ChatMessageModel.chat_session_id == chat_session_id
+        )
+        if before is not None:
+            created_at, message_id = before
+            statement = statement.where(
+                or_(
+                    ChatMessageModel.created_at < created_at,
+                    (ChatMessageModel.created_at == created_at)
+                    & (ChatMessageModel.id < message_id),
+                )
+            )
+        newest_first = list(
             session.scalars(
-                select(ChatMessageModel)
-                .where(ChatMessageModel.chat_session_id == chat_session_id)
-                .order_by(ChatMessageModel.created_at, ChatMessageModel.id)
-                .limit(limit)
+                statement.order_by(
+                    ChatMessageModel.created_at.desc(), ChatMessageModel.id.desc()
+                ).limit(limit + 1)
             )
         )
+        has_older = len(newest_first) > limit
+        return list(reversed(newest_first[:limit])), has_older
 
     @staticmethod
     def latest(session: Session, chat_session_id: str) -> ChatMessageModel | None:
@@ -70,12 +97,13 @@ class ChatMessageRepository:
         chat_session_id: str,
         role: str,
         content: str,
+        message_id: str | None = None,
         linked_task_id: str | None = None,
         blocks: list[dict[str, Any]] | None = None,
         emotion: str | None = None,
     ) -> ChatMessageModel:
         message = ChatMessageModel(
-            id=str(uuid4()),
+            id=message_id or str(uuid4()),
             chat_session_id=chat_session_id,
             role=role,
             content=content,
@@ -86,6 +114,10 @@ class ChatMessageRepository:
         )
         session.add(message)
         return message
+
+
+#: How many batches of 100 queued tasks one claim or sweep looks through at most.
+SCAN_BATCHES = 10
 
 
 class TaskRepository:
@@ -164,46 +196,96 @@ class TaskRepository:
         coding_only: bool = False,
         lane: str = "all",
     ) -> TaskModel | None:
-        """``lane``: "replies" takes only chat replies, "background" everything else."""
-        candidates = list(
-            session.scalars(
-                select(TaskModel)
-                .where(
-                    TaskModel.status == TaskStatus.CREATED.value,
-                    TaskModel.cancel_requested.is_(False),
+        """``lane``: "replies" takes only chat replies, "background" everything else.
+
+        Eligibility is checked in Python (it reads JSON columns), so a poll looks at most
+        ``SCAN_BATCHES`` batches of the queue: a large backlog of other lanes' work can't
+        make every idle poll scan all of it.
+        """
+        after: tuple[datetime, str] | None = None
+        for _ in range(SCAN_BATCHES):
+            candidates = TaskRepository._created_batch(session, after=after)
+            if not candidates:
+                return None
+            for candidate in candidates:
+                if not TaskRepository._eligible(
+                    candidate,
+                    supports_coding=supports_coding,
+                    coding_only=coding_only,
+                    lane=lane,
+                ):
+                    continue
+                task = session.scalar(
+                    select(TaskModel)
+                    .where(
+                        TaskModel.id == candidate.id,
+                        TaskModel.status == TaskStatus.CREATED.value,
+                        TaskModel.cancel_requested.is_(False),
+                    )
+                    .with_for_update(skip_locked=True)
+                    .execution_options(populate_existing=True)
                 )
-                .order_by(TaskModel.created_at)
-                .limit(100)
-                .with_for_update(skip_locked=True)
+                if task is None or not TaskRepository._eligible(
+                    task,
+                    supports_coding=supports_coding,
+                    coding_only=coding_only,
+                    lane=lane,
+                ):
+                    continue
+                task.status = TaskStatus.PLANNING.value
+                task.claimed_by = worker_id
+                task.claim_id = str(uuid4())
+                task.lease_expires_at = datetime.now(UTC) + timedelta(seconds=lease_seconds)
+                TaskRepository.append_event(
+                    session,
+                    task,
+                    EventType.TASK_PLANNING_STARTED,
+                    {"worker_id": worker_id},
+                )
+                return task
+            after = (candidates[-1].created_at, candidates[-1].id)
+        return None
+
+    @staticmethod
+    def _created_batch(
+        session: Session,
+        *,
+        after: tuple[datetime, str] | None,
+        limit: int = 100,
+    ) -> list[TaskModel]:
+        statement = select(TaskModel).where(
+            TaskModel.status == TaskStatus.CREATED.value,
+            TaskModel.cancel_requested.is_(False),
+        )
+        if after is not None:
+            created_at, task_id = after
+            statement = statement.where(
+                or_(
+                    TaskModel.created_at > created_at,
+                    (TaskModel.created_at == created_at) & (TaskModel.id > task_id),
+                )
+            )
+        return list(
+            session.scalars(statement.order_by(TaskModel.created_at, TaskModel.id).limit(limit))
+        )
+
+    @staticmethod
+    def _eligible(
+        task: TaskModel,
+        *,
+        supports_coding: bool,
+        coding_only: bool,
+        lane: str,
+    ) -> bool:
+        return (
+            not TaskRepository._is_malformed_repository_task(task)
+            and (lane == "all" or (lane == "replies") == TaskRepository.is_reply(task))
+            and (
+                TaskRepository._is_coding_task(task)
+                if coding_only
+                else supports_coding or not TaskRepository._is_coding_task(task)
             )
         )
-        task = next(
-            (
-                candidate
-                for candidate in candidates
-                if not TaskRepository._is_malformed_repository_task(candidate)
-                and (lane == "all" or (lane == "replies") == TaskRepository.is_reply(candidate))
-                and (
-                    TaskRepository._is_coding_task(candidate)
-                    if coding_only
-                    else supports_coding or not TaskRepository._is_coding_task(candidate)
-                )
-            ),
-            None,
-        )
-        if task is None:
-            return None
-
-        task.status = TaskStatus.PLANNING.value
-        task.claimed_by = worker_id
-        task.lease_expires_at = datetime.now(UTC) + timedelta(seconds=lease_seconds)
-        TaskRepository.append_event(
-            session,
-            task,
-            EventType.TASK_PLANNING_STARTED,
-            {"worker_id": worker_id},
-        )
-        return task
 
     @staticmethod
     def is_reply(task: TaskModel) -> bool:
@@ -239,16 +321,32 @@ class TaskRepository:
     @staticmethod
     def malformed_queued(session: Session, *, limit: int = 20) -> list[TaskModel]:
         """Queued tasks naming a repository without a coding capability; no worker runs them."""
-        candidates = session.scalars(
-            select(TaskModel)
-            .where(TaskModel.status == TaskStatus.CREATED.value)
-            .order_by(TaskModel.created_at)
-            .limit(100)
-            .with_for_update(skip_locked=True)
-        )
-        return [task for task in candidates if TaskRepository._is_malformed_repository_task(task)][
-            :limit
-        ]
+        malformed: list[TaskModel] = []
+        after: tuple[datetime, str] | None = None
+        for _ in range(SCAN_BATCHES):
+            if len(malformed) >= limit:
+                break
+            candidates = TaskRepository._created_batch(session, after=after)
+            if not candidates:
+                break
+            for candidate in candidates:
+                if not TaskRepository._is_malformed_repository_task(candidate):
+                    continue
+                task = session.scalar(
+                    select(TaskModel)
+                    .where(
+                        TaskModel.id == candidate.id,
+                        TaskModel.status == TaskStatus.CREATED.value,
+                    )
+                    .with_for_update(skip_locked=True)
+                    .execution_options(populate_existing=True)
+                )
+                if task is not None and TaskRepository._is_malformed_repository_task(task):
+                    malformed.append(task)
+                    if len(malformed) == limit:
+                        break
+            after = (candidates[-1].created_at, candidates[-1].id)
+        return malformed
 
     @staticmethod
     def recover_expired(session: Session, *, now: datetime) -> list[str]:
@@ -283,6 +381,7 @@ class TaskRepository:
                 execution.completed_at = now
             task.status = TaskStatus.CREATED.value
             task.claimed_by = None
+            task.claim_id = None
             task.lease_expires_at = None
             TaskRepository.append_event(
                 session,

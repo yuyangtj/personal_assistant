@@ -140,7 +140,9 @@ class _Recorder:
     def __init__(self) -> None:
         self.recorded: list[tuple[str, str]] = []
 
-    def record_progress(self, task_id: str, text: str, kind: str) -> None:
+    def record_progress(
+        self, task_id: str, text: str, kind: str, *, claim_id: str | None = None
+    ) -> None:
         self.recorded.append((kind, text))
 
 

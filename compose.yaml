@@ -14,6 +14,11 @@ services:
       - "127.0.0.1:${ASSISTANT_POSTGRES_PORT:-5432}:5432"
     volumes:
       - assistant-postgres:/var/lib/postgresql/data
+    networks:
+      - database
+      # Docker publishes no ports for a container only on internal networks; this one
+      # exists so the 127.0.0.1 port above works for local tests and psql.
+      - postgres-host
 
   migrate:
     image: postgres:17-alpine
@@ -22,12 +27,14 @@ services:
         condition: service_healthy
     environment:
       PGPASSWORD: assistant
+      ASSISTANT_CODING_POSTGRES_PASSWORD: ${ASSISTANT_CODING_POSTGRES_PASSWORD:-assistant-coding}
     volumes:
       - ./migrations:/migrations:ro
-    command:
-      - sh
-      - -c
-      - for migration in /migrations/*.sql; do psql -h postgres -U assistant -d assistant -v ON_ERROR_STOP=1 -f "$${migration}"; done
+      - ./scripts/migrate.sh:/scripts/migrate.sh:ro
+      - ./deploy/postgres/coding-worker-password.sql:/database/coding-worker-password.sql:ro
+    command: ["sh", "/scripts/migrate.sh"]
+    networks:
+      - database
 
   api:
     build: .
@@ -59,6 +66,16 @@ services:
     ports:
       - "127.0.0.1:${ASSISTANT_API_PORT:-8000}:8000"
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - private
+      - database
+      - egress
 
   worker:
     build: .
@@ -125,6 +142,16 @@ services:
       ASSISTANT_GITHUB_DRAFT_PULL_REQUESTS: ${ASSISTANT_GITHUB_DRAFT_PULL_REQUESTS:-true}
       ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS: ${ASSISTANT_FAKE_EXECUTOR_DELAY_SECONDS:-0.1}
     command: ["python", "-m", "app.worker"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker_liveness"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+    networks:
+      - private
+      - database
+      - egress
 
   coding-worker:
     profiles: ["coding"]
@@ -148,7 +175,7 @@ services:
       GIT_CONFIG_COUNT: "1"
       GIT_CONFIG_KEY_0: safe.directory
       GIT_CONFIG_VALUE_0: /workspace/repos/personal-assistant
-      ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant:assistant@postgres:5432/assistant
+      ASSISTANT_DATABASE_URL: postgresql+psycopg://assistant_coding:${ASSISTANT_CODING_POSTGRES_PASSWORD:-assistant-coding}@postgres:5432/assistant
       ASSISTANT_CAPABILITIES_DIRECTORY: /service/capabilities
       ASSISTANT_REPOSITORIES_DIRECTORY: /service/repositories
       ASSISTANT_WORKFLOWS_DIRECTORY: /service/workflows
@@ -168,6 +195,12 @@ services:
       ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL: ${ASSISTANT_MINIMAX_ANTHROPIC_BASE_URL:-https://api.minimaxi.com/anthropic}
       ASSISTANT_GITHUB_TOKEN: ${ASSISTANT_GITHUB_TOKEN:-}
       ASSISTANT_GITHUB_API_BASE_URL: ${ASSISTANT_GITHUB_API_BASE_URL:-https://api.github.com}
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker_liveness"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
     volumes:
       - type: bind
         source: ${ASSISTANT_HOST_REPOSITORY_PERSONAL_ASSISTANT_PATH:-.}
@@ -175,6 +208,9 @@ services:
       - type: bind
         source: ${ASSISTANT_HOST_CODE_WORKTREE_ROOT:-./.coding-worktrees}
         target: /workspace/worktrees
+    networks:
+      - database
+      - coding-egress
 
   # The MCP servers (Willys, Lidl) and their gateway, from the private mcp-servers repo
   # (checked out at ../mcps by default). Opt-in: docker compose --profile mcp up.
@@ -193,6 +229,18 @@ services:
       - mcp-sessions:/home/node
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    networks:
+      - private
+      - egress
+
+networks:
+  private:
+    internal: true
+  database:
+    internal: true
+  egress:
+  coding-egress:
+  postgres-host:
 
 volumes:
   assistant-postgres:

@@ -33,7 +33,10 @@ packages = ["app"]
 testpaths = ["tests"]
 # The browser tests (tests/ui) need Chromium and run in their own CI job: pytest -m ui
 addopts = "-q -m 'not ui'"
-markers = ["ui: browser tests of the console; need Chromium (uv run playwright install chromium)"]
+markers = [
+    "ui: browser tests of the console; need Chromium (uv run playwright install chromium)",
+    "postgres: integration tests needing explicit owner and coding PostgreSQL test URLs",
+]
 
 [tool.ruff]
 target-version = "py312"

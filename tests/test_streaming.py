@@ -9,8 +9,9 @@ import pytest
 
 from app.execution.conversation import ConversationExecutor
 from app.execution.draft import ReplyDraft, partial_reply
-from app.integrations.chat import ChatCompletion, ChatMessage, stream_within
+from app.integrations.chat import ChatCompletion, ChatMessage, ProviderError, stream_within
 from app.integrations.deepseek import DeepSeekChatClient, DeepSeekError
+from app.integrations.fallback import FallbackChatClient
 
 
 def _events(*chunks: dict) -> bytes:
@@ -138,6 +139,35 @@ def test_the_agent_reports_the_reply_a_sentence_at_a_time() -> None:
     ]
 
 
+class FailingStreamingChat(StreamingChat):
+    def complete(self, messages, *, max_tokens=700, on_text=None, **_):
+        if on_text:
+            on_text(self.text)
+        raise ProviderError("stream failed")
+
+
+def test_fallback_streaming_does_not_reuse_the_failed_attempt_draft() -> None:
+    reported: list[tuple[str, str]] = []
+    executor = ConversationExecutor(
+        FallbackChatClient(
+            [
+                FailingStreamingChat('{"reply": "Primary partial'),
+                StreamingChat('{"reply": "Fallback answer."}'),
+            ]
+        )
+    )
+
+    result = executor.execute(
+        task_id="t",
+        request="hello",
+        is_cancelled=lambda: False,
+        context={"progress": lambda text, kind: reported.append((kind, text))},
+    )
+
+    assert result.output["reply"] == "Fallback answer."
+    assert [text for kind, text in reported if kind == "draft"] == ["Fallback answer."]
+
+
 def test_the_task_api_carries_the_draft_apart_from_the_step(client) -> None:
     service = client.app.state.task_service
     chat = service.create_chat_session().id
@@ -151,3 +181,42 @@ def test_the_task_api_carries_the_draft_apart_from_the_step(client) -> None:
 
     assert shown["progress"] == "Looking at Willys"
     assert shown["draft"] == "Willys has coffee on offer."
+
+
+class PassThrough:
+    """A wrapper around a chat client (retry, logging): it hands on_text through as is."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def complete(self, messages, **kwargs):
+        return self.inner.complete(messages, **kwargs)
+
+
+def test_a_wrapped_fallback_chain_still_starts_each_attempt_afresh() -> None:
+    reported: list[tuple[str, str]] = []
+    executor = ConversationExecutor(
+        PassThrough(
+            FallbackChatClient(
+                [
+                    FailingStreamingChat('{"reply": "Primary partial. More'),
+                    StreamingChat('{"reply": "Fallback answer."}'),
+                ]
+            )
+        )
+    )
+
+    executor.execute(
+        task_id="t",
+        request="hello",
+        is_cancelled=lambda: False,
+        context={"progress": lambda text, kind: reported.append((kind, text))},
+    )
+
+    assert [text for kind, text in reported if kind == "draft"] == [
+        "Primary partial.",
+        "Fallback answer.",
+    ]

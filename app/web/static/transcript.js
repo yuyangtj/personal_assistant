@@ -4,9 +4,13 @@
 async function openChat(id) {
   state.chatId = id;
   state.transcriptSignature = null;  // a different chat: draw it even if it looks the same
+  state.messages = [];
+  state.nextBefore = null;
+  state.transcriptLoaded = false;
+  state.loadingEarlier = false;
   if (!id) {
     stopPolling();
-    state.messages = []; state.tasks = []; state.focus = [];
+    state.tasks = []; state.focus = [];
     $("chat-title").textContent = "No conversation open";
     $("transcript").innerHTML = `<div class="empty">Start or pick a conversation.</div>`;
     $("status").textContent = "";
@@ -28,30 +32,42 @@ document.addEventListener("visibilitychange", () => {
   if (state.chatId) { state.pollStarted = Date.now(); refreshTranscript(); }
 });
 
+function mergeMessages(...pages) {
+  const byId = new Map();
+  for (const page of pages) for (const message of page) byId.set(message.id, message);
+  return [...byId.values()].sort((a, b) =>
+    new Date(a.created_at) - new Date(b.created_at) || a.id.localeCompare(b.id));
+}
+
 async function refreshTranscript() {
   if (!state.chatId) return;
+  const chatId = state.chatId;
   try {
     const [msgs, tasks, runs, focus] = await Promise.all([
-      api(`/chat-sessions/${state.chatId}/messages`),
-      api(`/chat-sessions/${state.chatId}/tasks`),
-      api(`/workflow-runs?chat_session_id=${encodeURIComponent(state.chatId)}&limit=50`),
-      api(`/chat-sessions/${state.chatId}/focus`),
+      api(`/chat-sessions/${chatId}/messages`),
+      api(`/chat-sessions/${chatId}/tasks`),
+      api(`/workflow-runs?chat_session_id=${encodeURIComponent(chatId)}&limit=50`),
+      api(`/chat-sessions/${chatId}/focus`),
     ]);
+    if (state.chatId !== chatId) return;
+    const messages = mergeMessages(state.messages, msgs.messages);
+    if (!state.transcriptLoaded) state.nextBefore = msgs.next_before;
+    state.transcriptLoaded = true;
     // Draw only when something is different, so text you selected stays selected.
-    const signature = JSON.stringify([msgs, tasks, runs, focus,
-      state.pending.filter((entry) => entry.chatId === state.chatId).map((entry) => entry.messageId)]);
+    const signature = JSON.stringify([messages, tasks, runs, focus,
+      state.pending.filter((entry) => entry.chatId === chatId).map((entry) => entry.messageId)]);
     const changed = signature !== state.transcriptSignature;
     state.transcriptSignature = signature;
+    state.messages = messages;
     state.tasks = tasks.tasks;
     if (changed) {
       state.focus = focus.work_items;
       renderFocusBar();
-      state.messages = msgs.messages;
       state.workflowRuns = runs.runs.filter((run) => run.workflow_id === "coding-change");
       speakDraftIfWaiting();
       speakReplyIfWaiting();
       syncPhoneAlarmsAfterReply();
-      const chat = state.chats.find((c) => c.id === state.chatId);
+      const chat = state.chats.find((c) => c.id === chatId);
       $("chat-title").textContent = chat ? chat.title : "Conversation";
       renderTranscript();
     }
@@ -70,6 +86,32 @@ async function refreshTranscript() {
     if (changed && state.taskId) renderTask(state.taskId);
     if (!state.stickyError) clearError();
   } catch (e) { fail(e); }
+}
+
+async function loadEarlierMessages() {
+  if (!state.chatId || !state.nextBefore || state.loadingEarlier) return;
+  const chatId = state.chatId;
+  const before = state.nextBefore;
+  const transcript = $("transcript");
+  const previousHeight = transcript.scrollHeight;
+  const previousTop = transcript.scrollTop;
+  state.loadingEarlier = true;
+  let button = transcript.querySelector("[data-load-earlier]");
+  if (button) { button.disabled = true; button.textContent = "Loading…"; }
+  try {
+    const page = await api(`/chat-sessions/${chatId}/messages?before=${encodeURIComponent(before)}`);
+    if (state.chatId !== chatId) return;
+    state.messages = mergeMessages(state.messages, page.messages);
+    state.nextBefore = page.next_before;
+    state.transcriptSignature = null;
+    renderTranscript();
+    transcript.scrollTop = previousTop + transcript.scrollHeight - previousHeight;
+  } catch (e) { fail(e); }
+  finally {
+    state.loadingEarlier = false;
+    button = transcript.querySelector("[data-load-earlier]");
+    if (button) { button.disabled = false; button.textContent = "Load earlier"; }
+  }
 }
 
 const CODING_CAPABILITIES = ["coding", "pull_request_creation", "coding-pull-request"];
@@ -154,7 +196,7 @@ function renderTranscript() {
   const byId = Object.fromEntries(state.tasks.map((t) => [t.id, t]));
   const atBottom = $("transcript").scrollHeight - $("transcript").scrollTop
     - $("transcript").clientHeight < 80;
-  $("transcript").innerHTML = state.messages.map((m) => {
+  const messages = state.messages.map((m) => {
     const linked = m.linked_task_id ? byId[m.linked_task_id] : null;
     // Every chat reply runs as a small task; only real work, running, or failed tasks
     // earn a card, so ordinary conversation reads like a chat.
@@ -175,6 +217,9 @@ function renderTranscript() {
     return `<div class="msg ${m.role}"><div class="who">${who}</div>`
       + `<div class="bubble">${esc(m.content)}${extras}</div></div>${draft}`;
   }).join("") + pendingTurns() || `<div class="empty">No messages yet.</div>`;
+  const earlier = state.nextBefore ? `<button type="button" class="quiet" data-load-earlier`
+    + ` ${state.loadingEarlier ? "disabled" : ""}>${state.loadingEarlier ? "Loading…" : "Load earlier"}</button>` : "";
+  $("transcript").innerHTML = earlier + messages;
   if (atBottom || state.pending.length) $("transcript").scrollTop = $("transcript").scrollHeight;
   window.avatarEvent?.("transcript", avatarTranscriptState());
 }

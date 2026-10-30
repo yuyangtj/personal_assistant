@@ -328,6 +328,7 @@ class ChatSessionListResponse(BaseModel):
 
 class ChatMessageListResponse(BaseModel):
     messages: list[ChatMessageResponse]
+    next_before: str | None = None
 
 
 class EventListResponse(BaseModel):

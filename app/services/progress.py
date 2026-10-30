@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 class ProgressOperations(ServiceBase):
     """What running agents report, and what the user tells them while they run."""
 
-    def record_progress(self, task_id: str, text: str, kind: str) -> None:
+    def record_progress(
+        self, task_id: str, text: str, kind: str, *, claim_id: str | None = None
+    ) -> None:
         """Note what a running agent is doing; best effort, never raises."""
         text = text.strip()[:2000]
         if not text:
@@ -26,7 +28,9 @@ class ProgressOperations(ServiceBase):
         try:
             with self.database.session() as session, session.begin():
                 task = self._require_task(session, task_id, for_update=True)
-                if TaskStatus(task.status) in TERMINAL_STATUSES:
+                if TaskStatus(task.status) in TERMINAL_STATUSES or (
+                    claim_id is not None and not self._has_active_claim(task, claim_id)
+                ):
                     return
                 TaskRepository.append_event(
                     session, task, EventType.TASK_PROGRESS, {"text": text, "kind": kind}

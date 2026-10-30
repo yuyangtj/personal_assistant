@@ -161,9 +161,13 @@ class Harness:
             capability_id="coding-pull-request",
             executor_id="coding-pull-request",
             execution_input={},
+            claim_id=claimed.claim_id,
         )
         service.start_validation(
-            run.task_id, execution, output={"summary": seed["summary"], "tests": ["pytest"]}
+            run.task_id,
+            execution,
+            output={"summary": seed["summary"], "tests": ["pytest"]},
+            claim_id=claimed.claim_id,
         )
         number = seed.get("pr", 131)
         service.request_approval(
@@ -171,6 +175,7 @@ class Harness:
             execution,
             artifacts=[],
             approval={"number": number, "url": f"https://github.com/acme/app/pull/{number}"},
+            claim_id=claimed.claim_id,
         )
 
     def messages(self, chat: str) -> list[dict]:

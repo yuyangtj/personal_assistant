@@ -62,7 +62,9 @@ class ChatSessionModel(Base):
 
 class ChatMessageModel(Base):
     __tablename__ = "chat_messages"
-    __table_args__ = (Index("ix_chat_messages_session_created", "chat_session_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_chat_messages_session_created", "chat_session_id", "created_at", "id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     chat_session_id: Mapped[str] = mapped_column(
@@ -116,11 +118,12 @@ class TaskModel(Base):
     external_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     external_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     claimed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    claim_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    #: When this finished background work was reported to the Assistant conversation.
+    #: When this finished background work was queued for reporting to Assistant.
     reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: When the Assistant last raised it as stuck or still waiting for review.
     followed_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -397,6 +400,31 @@ class ScheduleModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+
+
+class OutboxDeliveryModel(Base):
+    __tablename__ = "outbox_deliveries"
+    __table_args__ = (Index("ix_outbox_deliveries_due", "available_at", "created_at", "id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class WorkerHeartbeatModel(Base):
+    __tablename__ = "worker_heartbeats"
+    __table_args__ = (Index("ix_worker_heartbeats_freshness", "instance_id", "heartbeat_at"),)
+
+    worker_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    instance_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    lane: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class PasskeyModel(Base):

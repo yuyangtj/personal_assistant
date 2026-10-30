@@ -16,6 +16,7 @@ from app.services import TaskService
 from app.worker import TaskWorker
 from tests.test_conversation import RecordingChatClient
 from tests.test_direct_actions import _do
+from tests.test_reporter import _drain
 from tests.test_schedules import RecordingNotifier
 
 NOW = datetime(2026, 10, 5, 7, 0, tzinfo=UTC)
@@ -110,7 +111,7 @@ def test_only_a_watch_that_triggered_is_a_must_know(service: TaskService) -> Non
     assert notifier.sent == []
     # The run that triggered is a must-know in the Assistant's report; the other is not.
     report = Reporter(service, service.database).run_due(now=datetime.now(UTC) + timedelta(hours=1))
-    items = service.get_task(report).source_context["report"]
+    items = service.get_task(_drain(service, report)).source_context["report"]
     assert [(item["result"], item["must_push"]) for item in items] == [
         ("Still 54 kr.", False),
         ("Down to 45 kr this week!", True),

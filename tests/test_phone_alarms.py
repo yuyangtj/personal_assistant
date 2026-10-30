@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
+from app.delivery import DeliveryService
 from app.persistence.database import Database
 from app.schedules import (
     Recurrence,
@@ -76,8 +77,11 @@ def test_what_the_phone_has_gets_no_push_and_alarms_stay_out_of_the_chat(
     mark_on_phone(database, {alarm.id: int((NOW + timedelta(days=1)).timestamp() * 1000)})
     notifier = RecordingNotifier()
 
-    scheduler = Scheduler(database, start_run=lambda _s: None, notifier=notifier, clock=lambda: NOW)
+    scheduler = Scheduler(database, clock=lambda: NOW)
     assert scheduler.run_due() == 2
+    DeliveryService(
+        database, service, start_run=lambda _schedule, _key: None, notifier=notifier
+    ).run_due()
 
     # The phone rings the alarm; the reminder it never picked up goes through ntfy.
     assert notifier.sent == [("Reminder", "Reminder: Call mum", 4)]
@@ -86,8 +90,9 @@ def test_what_the_phone_has_gets_no_push_and_alarms_stay_out_of_the_chat(
     # A day on, the phone still has it; the day after is past what it had: pushed, loudly.
     for days in (1, 2):
         at = NOW + timedelta(days=days)
-        Scheduler(
-            database, start_run=lambda _s: None, notifier=notifier, clock=lambda at=at: at
+        Scheduler(database, clock=lambda at=at: at).run_due()
+        DeliveryService(
+            database, service, start_run=lambda _schedule, _key: None, notifier=notifier
         ).run_due()
     assert notifier.sent[1:] == [("Alarm", "Alarm: Wake up", 5)]
 

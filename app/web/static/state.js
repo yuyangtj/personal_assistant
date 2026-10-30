@@ -8,7 +8,8 @@ const state = { chats: [], archivedChats: [], showArchived: false, chatMenu: nul
                 workflowRuns: [], items: [], focus: [], itemId: null,
                 itemRef: null,
                 // Messages being sent (shown at once), when polling started, what was last drawn.
-                pending: [], pollStarted: null, transcriptSignature: null, stickyError: false };
+                pending: [], pollStarted: null, transcriptSignature: null, stickyError: false,
+                nextBefore: null, transcriptLoaded: false, loadingEarlier: false };
 
 // Every view has its own address: #/chats/<id>, #/items/<slug>; ?task=<id> or
 // ?workflow=<id> opens a drawer over either, so back/forward, reload and push links work.

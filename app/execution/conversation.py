@@ -214,7 +214,8 @@ class ConversationExecutor:
             extra: dict[str, Any] = {"tools": schemas} if schemas else {}
             if streaming:
                 # The reply a sentence at a time, so the phone can start speaking early.
-                extra["on_text"] = ReplyDraft(lambda text: progress(text, "draft")).feed
+                # The draft itself (not .feed): a fallback chain restarts it per attempt.
+                extra["on_text"] = ReplyDraft(lambda text: progress(text, "draft"))
             return self.client.complete(messages, max_tokens=MAX_TOKENS, **extra)
 
         completion = complete()

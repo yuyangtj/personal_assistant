@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from fastapi.testclient import TestClient
 
+from app.delivery import DeliveryService
 from app.notify import NtfyNotifier
 from app.persistence.database import Database
 from app.schedules import Recurrence, ScheduleKind, Scheduler, ScheduleService, next_occurrence
@@ -75,10 +76,17 @@ def test_reminders_post_push_and_close_or_repeat(database: Database, service: Ta
     )
     notifier = RecordingNotifier()
 
-    fired = Scheduler(database, start_run=lambda _s: None, notifier=notifier, clock=lambda: now)
+    scheduler = Scheduler(database, clock=lambda: now)
+    delivery = DeliveryService(
+        database,
+        service,
+        start_run=lambda _schedule, _key: None,
+        notifier=notifier,
+    )
 
-    assert fired.run_due() == 2
-    assert fired.run_due() == 0
+    assert scheduler.run_due() == 2
+    assert scheduler.run_due() == 0
+    assert delivery.run_due() == 2
     assert [(title, message) for title, message, _ in notifier.sent] == [
         ("Reminder", "Reminder: Stand-up"),
         ("Reminder", "Reminder: Call mum"),
@@ -104,11 +112,15 @@ def test_failed_reminder_push_is_logged_with_the_schedule_id(
         chat_session_id=chat.id,
     )
 
-    scheduler = Scheduler(
-        database, start_run=lambda _s: None, notifier=FailingNotifier(), clock=lambda: now
+    Scheduler(database, clock=lambda: now).run_due()
+    delivery = DeliveryService(
+        database,
+        service,
+        start_run=lambda _schedule, _key: None,
+        notifier=FailingNotifier(),
     )
     with caplog.at_level("WARNING"):
-        assert scheduler.run_due() == 1
+        assert delivery.run_due() == 0
 
     assert any(reminder.id in record.message for record in caplog.records)
 
@@ -117,8 +129,12 @@ def test_failed_reminder_push_is_logged_with_the_schedule_id(
     schedules.create(
         kind=ScheduleKind.REMINDER, message="Water plants", run_at=now - timedelta(minutes=1)
     )
+    Scheduler(database, clock=lambda: now).run_due()
     with caplog.at_level("WARNING"):
-        assert Scheduler(database, start_run=lambda _s: None, clock=lambda: now).run_due() == 1
+        assert (
+            DeliveryService(database, service, start_run=lambda _schedule, _key: None).run_due()
+            == 1
+        )
     assert not [r for r in caplog.records if "push failed" in r.message]
 
 
@@ -133,12 +149,13 @@ def test_routines_start_a_run(database: Database, service: TaskService) -> None:
     )
     started: list[str] = []
 
-    def start_run(schedule) -> str:
+    def start_run(schedule, _external_key: str) -> str:
         started.append(schedule.message)
         return service.create_task(request=schedule.message).id
 
     notifier = RecordingNotifier()
-    Scheduler(database, start_run=start_run, notifier=notifier, clock=lambda: now).run_due()
+    Scheduler(database, clock=lambda: now).run_due()
+    DeliveryService(database, service, start_run=start_run, notifier=notifier).run_due()
 
     assert started == ["Summarize my open work"]
     # The run pushes its result when it finishes (worker), not that it started.
