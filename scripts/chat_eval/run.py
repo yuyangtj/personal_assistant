@@ -177,18 +177,14 @@ class Harness:
         return self.client.get(f"/chat-sessions/{chat}/messages").json()["messages"]
 
     def say(self, chat: str, text: str, *, screen: str | None = None) -> dict:
-        """One turn: post it, queue a reply if nothing handled it, let the worker finish."""
+        """One turn: post it (the reply is queued with it, as the console does), let the
+        worker finish."""
         started = time.monotonic()
-        body: dict[str, Any] = {"content": text, **CLOCK}
+        body: dict[str, Any] = {"content": text, "reply": True, **CLOCK}
         if screen:  # the phone's screen, shared with the message
             body["attachments"] = [{"kind": "screen", "app": "Chrome", "text": screen}]
         posted = self.client.post(f"/chat-sessions/{chat}/messages", json=body).json()
         message_id = posted["message"]["id"]
-        if not posted["decision"]["handled"]:
-            self.client.post(
-                f"/chat-sessions/{chat}/messages/{message_id}/task",
-                json={"source_context": {"client": "chat-eval", **CLOCK}},
-            )
         deadline = time.monotonic() + TURN_TIMEOUT_SECONDS
         while self.worker.run_once() and time.monotonic() < deadline:
             pass

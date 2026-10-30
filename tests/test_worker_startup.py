@@ -16,17 +16,30 @@ def test_the_worker_starts_with_a_gateway_and_no_search_key(
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("ASSISTANT_GITHUB_TOKEN", raising=False)
     started: list[set[str]] = []
-    monkeypatch.setattr(
-        worker.TaskWorker,
-        "run_forever",
-        lambda self: started.append(set(self.executors)),
-    )
+    names: list[str] = []
+
+    def record(self) -> None:
+        if self.jobs:
+            names.extend(job.name for job in self.jobs)
+        started.append(set(self.executors))
+
+    monkeypatch.setattr(worker.TaskWorker, "run_forever", record)
 
     worker.main()
 
     assert "model-conversation" in started[0]
     assert "tool-agent" not in started[0]
+    # The general worker's jobs (no GitHub token here, so no PR sync; briefs are off).
+    assert names == [
+        "schedules",
+        "reports",
+        "deliveries",
+        "deployments",
+        "recent-days",
+        "chat-titles",
+    ]
 
 
 def test_the_coding_worker_starts_without_the_shopping_files(
@@ -48,6 +61,4 @@ def test_the_coding_worker_starts_without_the_shopping_files(
     assert started
     assert set(started[0].executors) == set()
     assert started[0].memory_service is None
-    assert started[0].scheduler is None
-    assert started[0].reporter is None
-    assert started[0].delivery is None
+    assert started[0].jobs == []  # no schedules, reports, deliveries or model jobs

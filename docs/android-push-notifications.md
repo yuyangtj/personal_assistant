@@ -9,7 +9,7 @@ because it handles links to the console's host.
   (with `ASSISTANT_NTFY_TOKEN` if the topic is protected). When `ASSISTANT_PUBLIC_URL`
   is set, a `Click` link into the console is added. With no topic URL, pushes are off.
 - **What pushes:** reminders (`app/schedules.py`), and the worker's results, PRs ready
-  for review, failed runs and deployments (`app/worker.py`).
+  for review, failed runs and deployments (`app/worker/`).
 - **Setup:** see `.env.remote.example`. Install the ntfy app, subscribe to a
   hard-to-guess topic, and put its full URL in the server's environment.
 
