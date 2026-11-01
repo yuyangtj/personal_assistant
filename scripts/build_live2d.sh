@@ -43,14 +43,27 @@ s = s.replace("export const ResourcesPath = '../../Resources/';", "export const 
 s = s.replace("export const ShaderPath = '../../Framework/Shaders/WebGL/';", "export const ShaderPath = '/ui/avatar-assets/Framework/Shaders/WebGL/';")
 open(f"{src}/lappdefine.ts", "w").write(s)
 edit("lappview.ts", [("    let imageName = '';", "    let imageName = '';\n    if (imageName === '') return; // no background or buttons in the avatar")])
-edit("lappsubdelegate.ts", [("gl.clearColor(0.0, 0.0, 0.0, 1.0);", "gl.clearColor(0.0, 0.0, 0.0, 0.0);")])
+edit("lappsubdelegate.ts", [
+    ("gl.clearColor(0.0, 0.0, 0.0, 1.0);", "gl.clearColor(0.0, 0.0, 0.0, 0.0);"),
+    # Drawing at 0x0 (the stage hidden behind another view) throws and ends the loop for
+    # good; wait for a size instead, the resize stays pending until then.
+    ("    if (this._glManager.getGl().isContextLost()) {\n      return;\n    }",
+     "    if (this._glManager.getGl().isContextLost()) {\n      return;\n    }\n"
+     "    if (!this._canvas.clientWidth || !this._canvas.clientHeight) {\n      return;\n    }"),
+])
 edit("lappdelegate.ts", [
     ("      canvas.style.width = `${width}vw`;\n      canvas.style.height = `${height}vh`;",
      "      canvas.style.width = '100%';\n      canvas.style.height = '100%';"),
     ("      document.body.appendChild(canvas);", "      ((window as any).__live2dHost || document.body).appendChild(canvas);"),
+    # Each load of the bundle is one generation; a reload (after the GPU context is lost)
+    # stops the old one's loop.
+    ("export let s_instance: LAppDelegate = null;",
+     "export let s_instance: LAppDelegate = null;\n"
+     "const LIVE2D_GEN = ((window as any).__live2dGen = ((window as any).__live2dGen || 0) + 1);"),
     # The sample can't be shut down and started again, so the avatar pauses instead.
     ("      if (s_instance == null) {\n        return;\n      }",
      "      if (s_instance == null) {\n        return;\n      }\n"
+     "      if ((window as any).__live2dGen !== LIVE2D_GEN) return;\n"
      "      if ((window as any).__live2dPaused) {\n"
      "        (window as any).__live2dResume = () => requestAnimationFrame(loop);\n"
      "        return;\n      }"),
@@ -103,8 +116,10 @@ cp "$SDK/Core/live2dcubismcore.min.js" "$OUT/Core/"
 cp -R "$SDK/Framework/Shaders/WebGL" "$OUT/Framework/Shaders/"
 cp -R "$MODEL" "$OUT/Resources/$NAME"
 # The sample loads <name>/<name>.model3.json, which is how the model ships.
+# The script is cached for a week; its version in the address makes a new build load at once.
+VERSION="$(shasum "$OUT/live2d-avatar.js" | cut -c1-12)"
 cat > "$OUT/manifest.json" <<JSON
-{"model": "$NAME", "script": "live2d-avatar.js", "core": "Core/live2dcubismcore.min.js",
+{"model": "$NAME", "script": "live2d-avatar.js?v=$VERSION", "core": "Core/live2dcubismcore.min.js",
  "frame": {"zoom": 4.2, "y": 0.7}}
 JSON
 du -sh "$OUT" | awk '{print "built " $1 " into " $2}'
