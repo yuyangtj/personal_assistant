@@ -407,6 +407,57 @@ class ClaudeCodeRunner:
             f"{self.display_name} completed the requested repository change",
         )
 
+    def ask(
+        self,
+        *,
+        worktree: Path,
+        prompt: str,
+        timeout_seconds: int,
+        is_cancelled: Callable[[], bool],
+        on_progress: ProgressCallback | None = None,
+    ) -> str:
+        """One read-only session in the checkout (planning): its final text answer.
+
+        The edit tools are switched off; the caller resets the worktree afterwards for
+        anything a shell command wrote.
+        """
+        command = [
+            self.executable,
+            "--print",
+            "--dangerously-skip-permissions",
+            "--disallowedTools",
+            ",".join(READ_ONLY_DISALLOWED_TOOLS),
+            "--verbose",
+            "--output-format",
+            "stream-json",
+        ]
+        if self.model:
+            command.extend(["--model", self.model])
+        environment = safe_agent_environment()
+        environment.update(self._environment)
+        output = run_code_agent_process(
+            command=[*command, prompt],
+            worktree=worktree,
+            timeout_seconds=timeout_seconds,
+            is_cancelled=is_cancelled,
+            environment=environment,
+            on_progress=on_progress,
+            display_name=self.display_name,
+            output_listener=lambda: ClaudeStreamProgress(worktree, on_progress),
+        )
+        result, is_error = final_result(output)
+        if is_error or result is None:
+            detail = result or output
+            raise CodingAgentError(
+                f"{self.display_name} could not answer",
+                category=failure_category(detail[-16_000:]),
+            )
+        return result
+
+
+#: Claude Code tools that change files; a planning session runs without them.
+READ_ONLY_DISALLOWED_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
+
 
 class FallbackCodeAgentRunner:
     """Tries coding runners in the configured order (``ASSISTANT_CODE_AGENT_PROVIDERS``),

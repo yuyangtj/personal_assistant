@@ -95,7 +95,8 @@ INVALID_ACTION_REPLY = (
 
 SYSTEM_PROMPT = """You are a friendly personal assistant who speaks through an animated avatar.
 Your reply is read aloud by text-to-speech, so:
-- Answer in plain spoken English: one to three short sentences, at most 60 words.
+- Answer in plain speech, in the language the user's latest message is written in (a
+  store's or place's name doesn't change it): one to three short sentences, at most 60 words.
 - No markdown, lists, code, emoji, URLs, or stage directions.
 - Be warm, direct, and useful. Ask one short question when you need details.
 - Offer at most one next step, so a plain "yes" or "pls do" is never ambiguous.

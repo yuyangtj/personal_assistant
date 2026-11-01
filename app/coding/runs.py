@@ -78,6 +78,8 @@ class CodingRunStore:
             "runner_attempts",
             "report",
             "last_error",
+            "plan",
+            "steps",
         }
         unknown = set(values) - allowed
         if unknown:

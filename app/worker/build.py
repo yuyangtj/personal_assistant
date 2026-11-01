@@ -27,6 +27,7 @@ from app.chat.routines import start_routine as run_routine
 from app.chat.titles import TitleJob, TitleWriter
 from app.coding.base import CodeAgentRunner
 from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
+from app.coding.plan import ClaudePlanner
 from app.coding.reconcile import PullRequestReconciler
 from app.coding.review import DiffReviewer
 from app.coding.runners import (
@@ -119,6 +120,18 @@ def build_coding_executor(
     )
     spec_writer = SpecWriter(planner) if planner and settings.coding_spec_enabled else None
     reviewer = DiffReviewer(planner) if planner and settings.coding_review_enabled else None
+    plan_writer = (
+        ClaudePlanner(
+            ClaudeCodeRunner.subscription(
+                oauth_token=settings.claude_code_oauth_token,
+                executable=settings.claude_code_executable,
+                model=settings.coding_plan_model,
+            ),
+            timeout_seconds=settings.coding_plan_timeout_seconds,
+        )
+        if settings.coding_plan_model and settings.claude_code_oauth_token
+        else None
+    )
     executors: dict[str, CodingPullRequestExecutor] = {}
     for manifest in registry.list():
         configured_path = os.getenv(manifest.path_env)
@@ -149,6 +162,7 @@ def build_coding_executor(
             github_repository=github_repository,
             github=github,
             agent=agent,
+            planner=plan_writer,
             base_branch=base_branch,
             remote=remote,
             timeout_seconds=settings.code_agent_timeout_seconds,
@@ -213,6 +227,7 @@ def _build_code_agent_runners(settings: Settings) -> list[CodeAgentRunner]:
                     ClaudeCodeRunner.subscription(
                         oauth_token=settings.claude_code_oauth_token,
                         executable=settings.claude_code_executable,
+                        model=settings.claude_code_model,
                     )
                 )
             else:
