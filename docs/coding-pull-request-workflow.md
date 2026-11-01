@@ -85,6 +85,16 @@ reply leaves the task running as it would without them):
    never block the draft PR; they appear in its notes, in the task output (`review`) and in
    the chat reply.
 
+**Planning in steps.** When `CLAUDE_CODE_OAUTH_TOKEN` is set, Claude Code on
+`ASSISTANT_CODING_PLAN_MODEL` (Opus) first reads the checkout with its edit tools switched
+off and writes a plan: goal, acceptance criteria, checks, and 2 to 8 steps, each with its
+files, exact instructions and when it is done. The agents (`ASSISTANT_CODE_AGENT_PROVIDERS`;
+Claude Code runs on `ASSISTANT_CLAUDE_CODE_MODEL`, Sonnet) then implement one step per
+session. Each finished step is committed in the worktree, so when an agent gets stuck on
+a step, the next agent in the order takes over that step with the earlier ones kept. The
+step commits are folded into the run's one commit. The plan replaces the short spec,
+and the reviewer checks against it. Without a usable plan the short spec is used.
+
 `ASSISTANT_CODING_SPEC_ENABLED`, `ASSISTANT_CODING_REVIEW_ENABLED` and
 `ASSISTANT_CODING_PLANNER_TIMEOUT_SECONDS` control them. The coding worker needs the same
 conversation-model settings as the API, because that model does both jobs.

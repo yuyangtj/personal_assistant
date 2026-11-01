@@ -15,6 +15,9 @@ Newer settings, all optional:
 | `CODEX_HOME` / `ASSISTANT_CODEX_OWN_SANDBOX` | `~/.codex` / `true` (`false` in the coding container) | Where Codex's ChatGPT login lives; Codex is skipped without `auth.json` there. In the locked-down container, the container is Codex's sandbox |
 | `ASSISTANT_KIMI_CODE_PROTOCOL` | `acp` | `acp` runs Kimi Code as a live session; `prompt` is the one-shot fallback |
 | `ASSISTANT_KIMI_CODE_MODEL` | `k3.1-pro` | The model Kimi Code runs on (`kimi-for-coding` is K2.8 Preview) |
+| `ASSISTANT_CODING_PLAN_MODEL` | `opus` | Claude Code on this model reads the code and plans each coding run in 2–8 small steps; empty falls back to the short spec |
+| `ASSISTANT_CODING_PLAN_TIMEOUT_SECONDS` | `600` | How long planning may take |
+| `ASSISTANT_CLAUDE_CODE_MODEL` | `sonnet` | The model Claude Code implements with; empty uses the subscription's default |
 | `ASSISTANT_CODING_SPEC_ENABLED` | `true` | A short spec (goal, acceptance criteria, scope) is written before a coding agent starts |
 | `ASSISTANT_CODING_REVIEW_ENABLED` | `true` | The diff is reviewed against the spec before the pull request opens |
 | `ASSISTANT_CODING_PLANNER_TIMEOUT_SECONDS` | `90` | How long the spec writer or reviewer may take; on a failure the task runs without them |
