@@ -212,6 +212,7 @@ class CodingPullRequestExecutor:
                 expected_sha=str(checkpoint.pull_request_head_sha),
             )
             delete_git_ref(self.repository_path, checkpoint_ref)
+            self._delete_step_refs(task_id)
             report = CodeAgentReport.model_validate(checkpoint.report)
             return ExecutionResult(
                 output=coding_output(
@@ -315,6 +316,7 @@ class CodingPullRequestExecutor:
                     pull_request_head_sha=pull_request.head_sha,
                 )
                 delete_git_ref(self.repository_path, checkpoint_ref)
+                self._delete_step_refs(task_id)
                 return ExecutionResult(
                     output=coding_output(
                         report,
@@ -345,7 +347,8 @@ class CodingPullRequestExecutor:
                         category="stale_revision",
                     )
                 git(self.repository_path, "worktree", "add", "--detach", str(worktree), start_ref)
-            else:
+            saved = None if revision else self._saved_progress(task_id, checkpoint)
+            if not revision:
                 git(
                     self.repository_path,
                     "worktree",
@@ -353,7 +356,7 @@ class CodingPullRequestExecutor:
                     "-b",
                     branch,
                     str(worktree),
-                    start_ref,
+                    saved["head"] if saved else start_ref,
                 )
             created = True
             if self.checkpoint_store is not None:
@@ -364,7 +367,16 @@ class CodingPullRequestExecutor:
             )
             spec_text = None
             plan = None
-            if self.planner is not None and not revision:
+            fold_base = git(worktree, "rev-parse", "HEAD").strip()
+            done_steps: list[dict[str, Any]] = []
+            if saved is not None:
+                plan, fold_base, done_steps = saved["plan"], saved["base"], saved["steps"]
+                report_milestone(
+                    progress,
+                    f"Resuming the plan: {len(done_steps)} of {len(plan.steps)} steps done",
+                )
+            elif self.planner is not None and not revision:
+                self._delete_step_refs(task_id)
                 report_milestone(progress, "Planning the change step by step")
                 plan = self.planner.plan(
                     request,
@@ -372,10 +384,17 @@ class CodingPullRequestExecutor:
                     is_cancelled=is_cancelled,
                     **optional(on_progress=progress),
                 )
-                if plan is not None:
-                    spec_text = render_plan(plan)
-                    if progress is not None:
-                        _report(progress, spec_text, "plan")
+                if plan is not None and self.checkpoint_store is not None:
+                    self.checkpoint_store.update(
+                        task_id,
+                        CodingRunPhase.AGENT_RUNNING,
+                        plan={**plan.model_dump(mode="json"), "base": fold_base},
+                        steps=[],
+                    )
+            if plan is not None:
+                spec_text = render_plan(plan)
+                if progress is not None:
+                    _report(progress, spec_text, "plan")
             if is_cancelled():
                 raise ExecutionCancelled("Coding task was cancelled")
             if plan is None and self.spec_writer is not None and not revision:
@@ -392,7 +411,10 @@ class CodingPullRequestExecutor:
                 agent_request += "\n\nADDITIONAL INSTRUCTIONS FROM THE USER:\n" + early
             if plan is not None:
                 report = self._run_steps(
+                    task_id=task_id,
                     plan=plan,
+                    base=fold_base,
+                    done=done_steps,
                     worktree=worktree,
                     agent_request=agent_request,
                     is_cancelled=is_cancelled,
@@ -500,6 +522,7 @@ class CodingPullRequestExecutor:
                     pull_request_head_sha=pull_request.head_sha,
                 )
             delete_git_ref(self.repository_path, checkpoint_ref)
+            self._delete_step_refs(task_id)
             return ExecutionResult(
                 output=coding_output(
                     report,
@@ -521,7 +544,10 @@ class CodingPullRequestExecutor:
     def _run_steps(
         self,
         *,
+        task_id: str,
         plan: CodingPlan,
+        base: str,
+        done: list[dict[str, Any]],
         worktree: Path,
         agent_request: str,
         is_cancelled: Callable[[], bool],
@@ -530,18 +556,20 @@ class CodingPullRequestExecutor:
     ) -> CodeAgentReport:
         """Implement the plan one step at a time, each in its own agent session.
 
-        Each finished step is committed in the worktree, so an agent that fails on a
-        later step (its partial work is reset) never loses the earlier ones, and the
-        next agent in the order carries on from there. At the end the step commits are
-        undone (their changes stay staged), so the run still makes one commit.
+        After each step its changes are committed in the worktree, the commit is kept
+        under a ref of its own, and a short note on it is saved with the run. An agent
+        that gets stuck on a step loses only that step (its partial work is reset) and
+        the next agent in the order carries on; a restarted run starts after the last
+        step saved. At the end the step commits are folded back onto ``base`` (their
+        changes stay staged), so the run still makes one commit.
         """
-        start = git(worktree, "rev-parse", "HEAD").strip()
+        done = list(done)
         deadline = time.monotonic() + self.timeout_seconds
-        summaries: list[str] = []
         tests: list[str] = []
         notes: list[str] = []
         total = len(plan.steps)
-        for number, step in enumerate(plan.steps, start=1):
+        for number in range(len(done) + 1, total + 1):
+            step = plan.steps[number - 1]
             remaining = int(deadline - time.monotonic())
             if remaining <= 0:
                 raise CodingAgentError(
@@ -551,14 +579,13 @@ class CodingPullRequestExecutor:
             report_milestone(progress, f"Step {number}/{total}: {step.title}")
             report = self.agent.run(
                 worktree=worktree,
-                request=step_request(agent_request, plan, number),
+                request=step_request(agent_request, plan, number, done),
                 timeout_seconds=remaining,
                 is_cancelled=is_cancelled,
                 **optional(on_progress=progress, next_guidance=guidance),
             )
             if is_cancelled():
                 raise ExecutionCancelled("Coding task was cancelled")
-            summaries.append(f"{number}. {step.title}: {report.summary}")
             tests += report.tests
             notes += report.notes
             stage_everything(worktree)
@@ -574,12 +601,67 @@ class CodingPullRequestExecutor:
                     "-m",
                     f"Step {number}: {step.title}"[:200],
                 )
-        git(worktree, "reset", "--soft", start)
+            commit = git(worktree, "rev-parse", "HEAD").strip()
+            # Kept outside the worktree, which a restarted run removes.
+            git(self.repository_path, "update-ref", _step_ref(task_id, number), commit)
+            done.append(
+                {
+                    "number": number,
+                    "title": step.title,
+                    "summary": report.summary[:1000],
+                    "commit": commit,
+                }
+            )
+            if self.checkpoint_store is not None:
+                self.checkpoint_store.update(task_id, CodingRunPhase.AGENT_RUNNING, steps=done)
+        git(worktree, "reset", "--soft", base)
         return CodeAgentReport(
-            summary="\n".join(summaries)[:4000],
+            summary="\n".join(
+                f"{entry['number']}. {entry['title']}: {entry['summary']}" for entry in done
+            )[:4000],
             tests=list(dict.fromkeys(tests))[:50],
             notes=list(dict.fromkeys(notes))[:50],
         )
+
+    def _saved_progress(self, task_id: str, checkpoint) -> dict[str, Any] | None:
+        """A plan saved by an earlier attempt of this run, and where its steps got to.
+
+        None starts the run afresh: no saved plan, a run past its steps, or step commits
+        that are missing or don't build on the plan's base.
+        """
+        if (
+            checkpoint is None
+            or checkpoint.phase != CodingRunPhase.AGENT_RUNNING.value
+            or not isinstance(checkpoint.plan, dict)
+        ):
+            return None
+        try:
+            plan = CodingPlan.model_validate(checkpoint.plan)
+        except ValueError:
+            return None
+        base = str(checkpoint.plan.get("base") or "")
+        steps = [entry for entry in checkpoint.steps or [] if isinstance(entry, dict)]
+        steps = steps[: len(plan.steps)]
+        head = str(steps[-1].get("commit") or "") if steps else base
+        if (
+            not base
+            or not head
+            or any(int(entry.get("number", 0)) != index for index, entry in enumerate(steps, 1))
+        ):
+            return None
+        try:
+            git(self.repository_path, "cat-file", "-e", f"{head}^{{commit}}")
+            git(self.repository_path, "merge-base", "--is-ancestor", base, head)
+        except CodingAgentError:
+            logger.warning("Saved steps of task %s are gone; planning again", task_id)
+            return None
+        return {"plan": plan, "base": base, "steps": steps, "head": head}
+
+    def _delete_step_refs(self, task_id: str) -> None:
+        prefix = _step_ref(task_id, 0).rsplit("/", 1)[0]
+        refs = git(self.repository_path, "for-each-ref", "--format=%(refname)", prefix)
+        for ref in refs.split():
+            delete_git_ref(self.repository_path, ref)
 
     def _validate_with_repair(
         self,
@@ -804,6 +886,10 @@ class CodingPullRequestExecutor:
                     details={"validation": results},
                 )
         return results
+
+
+def _step_ref(task_id: str, number: int) -> str:
+    return f"refs/assistant/steps/{task_id.replace('-', '')}/{number}"
 
 
 def _report(progress: ProgressCallback, text: str, kind: str) -> None:

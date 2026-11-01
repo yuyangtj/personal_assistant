@@ -131,17 +131,34 @@ def test_planning_runs_claude_read_only_on_the_planning_model(
     assert command[-1] == "plan it"
 
 
-def test_each_step_gets_the_whole_plan_and_only_its_own_task() -> None:
-    plan = CodingPlan.model_validate(PLAN)
+def test_a_step_sees_the_goal_the_notes_on_done_steps_and_only_its_own_instructions() -> None:
+    plan = CodingPlan.model_validate(
+        {**PLAN, "steps": [*PLAN["steps"], {"title": "Add tests", "instructions": "Test both"}]}
+    )
+    done = [{"number": 1, "title": "Add hello.txt", "summary": "Wrote hello.txt", "commit": "x"}]
 
-    second = step_request("Greet the user", plan, 2)
+    second = step_request("Greet the user", plan, 2, done)
 
-    assert render_plan(plan) in second
-    assert "NOW DO STEP 2 OF 2: Add bye.txt" in second
-    assert "Steps 1 to 1 are done" in second
+    assert "GOAL: Greet in two files" in second
+    assert "Out of scope: README.md" in second
+    assert "1. Add hello.txt: Wrote hello.txt" in second
+    assert "NOW DO STEP 2 OF 3: Add bye.txt" in second
+    assert "Write bye" in second
+    assert "Later steps, done separately (don't start them): 3. Add tests" in second
+    assert "Write hello" not in second  # another step's instructions
+    assert "Test both" not in second
     assert second.endswith("Greet the user")
-    assert "1. Add hello.txt (hello.txt)" in render_plan(plan)
+    assert "1. Add hello.txt (hello.txt)" in render_plan(plan)  # the reviewer's view
     assert "Done when: hello.txt exists" in render_plan(plan)
+
+
+def test_a_small_change_is_one_step() -> None:
+    plan = CodingPlan.model_validate({**PLAN, "steps": PLAN["steps"][:1]})
+
+    only = step_request("Greet", plan, 1)
+
+    assert "NOW DO STEP 1 OF 1" in only
+    assert "Done so far" not in only and "Later steps" not in only
 
 
 def test_a_planned_run_builds_step_by_step_and_opens_one_commit(tmp_path: Path) -> None:
@@ -219,3 +236,78 @@ def _checkout(tmp_path: Path):
 
     executor, _github, repository, _remote = _spec_executor(tmp_path, _RecordingAgent())
     return repository, executor
+
+
+def test_a_restarted_run_resumes_after_its_last_saved_step(tmp_path: Path, database) -> None:
+    from app.coding.runs import CodingRunStore
+    from app.services import TaskService
+
+    task = TaskService(database).create_task(request="Greet")
+    planner = _Planner(CodingPlan.model_validate(PLAN))
+
+    class _Dies(_StepAgent):
+        def run(self, *, request: str, **kwargs) -> CodeAgentReport:
+            if "NOW DO STEP 2" in request:
+                raise RuntimeError("the worker restarted")  # a deploy, say
+            return super().run(request=request, **kwargs)
+
+    first = _Dies("sonnet")
+    executor, _github, repository, _remote = _spec_executor(tmp_path, first)
+    executor.planner = planner
+    executor.checkpoint_store = CodingRunStore(database)
+    with pytest.raises(RuntimeError):
+        executor.execute(task_id=task.id, request="Greet", is_cancelled=lambda: False)
+
+    saved = CodingRunStore(database).get(task.id)
+    assert saved.plan["steps"][0]["title"] == "Add hello.txt"
+    assert [entry["number"] for entry in saved.steps] == [1]
+    assert saved.steps[0]["summary"] == "sonnet did step 1"
+
+    second = _StepAgent("kimi")
+    executor.agent = second
+    progress: list[tuple[str, str]] = []
+    executor.execute(
+        task_id=task.id,
+        request="Greet",
+        is_cancelled=lambda: False,
+        context={"progress": lambda text, kind: progress.append((kind, text))},
+    )
+
+    assert len(planner.requests) == 1  # not planned again
+    assert ("milestone", "Resuming the plan: 1 of 2 steps done") in progress
+    assert len(second.requests) == 1 and "NOW DO STEP 2 OF 2" in second.requests[0]
+    assert "1. Add hello.txt: sonnet did step 1" in second.requests[0]
+    branch = f"assistant/task-{task.id.replace('-', '')[:12]}"
+    git(repository, "fetch", "origin")
+    assert git(repository, "show", f"origin/{branch}:hello.txt") == "sonnet"
+    assert git(repository, "show", f"origin/{branch}:bye.txt") == "kimi"
+    assert git(repository, "rev-list", "--count", f"origin/main..origin/{branch}") == "1"
+    assert git(repository, "for-each-ref", "refs/assistant/steps") == ""  # cleaned up
+
+
+def test_saved_steps_whose_commits_are_gone_mean_planning_again(tmp_path: Path, database) -> None:
+    from app.coding.runs import CodingRunPhase, CodingRunStore
+    from app.services import TaskService
+
+    task = TaskService(database).create_task(request="Greet")
+    store = CodingRunStore(database)
+    executor, _github, _repository, _remote = _spec_executor(tmp_path, _StepAgent("sonnet"))
+    planner = _Planner(CodingPlan.model_validate(PLAN))
+    executor.planner = planner
+    executor.checkpoint_store = store
+    store.start(
+        task_id=task.id,
+        repository_id="default",
+        github_repository="acme/widget",
+        branch=f"assistant/task-{task.id.replace('-', '')[:12]}",
+    )
+    store.update(
+        task.id,
+        CodingRunPhase.AGENT_RUNNING,
+        plan={**PLAN, "base": "0" * 40},
+        steps=[{"number": 1, "title": "Add hello.txt", "summary": "x", "commit": "1" * 40}],
+    )
+
+    executor.execute(task_id=task.id, request="Greet", is_cancelled=lambda: False)
+
+    assert len(planner.requests) == 1

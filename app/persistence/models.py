@@ -291,6 +291,10 @@ class CodingRunModel(Base):
     )
     report: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The run's step plan (app/coding/plan.py), and a note and commit for each step done:
+    #: a restarted run carries on from the last finished step.
+    plan: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    steps: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now

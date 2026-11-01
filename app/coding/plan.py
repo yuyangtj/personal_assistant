@@ -1,10 +1,13 @@
 """A detailed plan for a coding task, written by a strong model that reads the code.
 
 The planner (Claude Code on Opus, read-only) explores the checkout and splits the change
-into small steps, each with its files, exact instructions and when it is done. A cheaper
-agent then implements one step at a time (``CodingPullRequestExecutor``), and the
-reviewer checks the result against the same plan. Planning is best effort: without a
-usable plan the run falls back to the short spec, or to the request alone.
+into small steps, each with its files, exact instructions and when it is done; a small
+change is one step. A cheaper agent then implements one step per session
+(``CodingPullRequestExecutor``), seeing only the goal, short notes on the finished
+steps, its own step and the titles of the rest. The plan and those notes are saved with
+the run (``coding_runs.plan`` and ``.steps``), so a restarted run carries on where it
+stopped. The reviewer checks the result against the whole plan. Planning is best
+effort: without a usable plan the run falls back to the short spec.
 """
 
 from __future__ import annotations
@@ -27,13 +30,15 @@ logger = logging.getLogger(__name__)
 MAX_STEPS = 8
 
 PLAN_PROMPT = """You plan a change to this repository; another, less capable coding agent
-will implement it one step at a time, seeing only your plan and the step it is on.
+will implement it one step at a time, seeing the goal, its own step and the titles of
+the others.
 Do not edit any file: read the code (the files, tests, AGENTS.md or CLAUDE.md) to plan.
 
 Make the plan concrete enough that each step needs no further design:
-- Split the work into 2 to 8 small steps, in the order they must be done. Each step is
-  one coherent edit an agent can finish and test on its own (say, a function and its
-  test), and leaves the repository working.
+- A small change (one idea, a few files) is one step. Split a bigger one into up to 8
+  small steps, in the order they must be done. Each step is one coherent edit an agent
+  can finish and test on its own (say, a function and its test), leaves the repository
+  working, and says everything its agent needs: it won't see the other steps' details.
 - In each step name the real files to change or add, and say exactly what to do: the
   functions, classes, settings or prompts to add or change, their names and behaviour,
   and which existing code to reuse or follow as the pattern.
@@ -104,24 +109,48 @@ def render_plan(plan: CodingPlan) -> str:
     return "\n".join(lines)
 
 
-def step_request(agent_request: str, plan: CodingPlan, number: int) -> str:
-    """The prompt for one step: the plan for context, then only this step to do."""
+#: How much of a finished step's report the later steps see.
+DONE_NOTE_CHARACTERS = 300
+
+
+def step_request(
+    agent_request: str, plan: CodingPlan, number: int, done: list[dict] | None = None
+) -> str:
+    """The prompt for one step, with only the context it needs.
+
+    The goal and limits, a short note on each finished step, this step in full, and the
+    titles of the steps still to come; not the other steps' instructions.
+    """
     step = plan.steps[number - 1]
-    done = (
-        f"Steps 1 to {number - 1} are done and their changes are in the checkout. "
-        if number > 1
-        else ""
-    )
-    return (
-        f"{STEP_HEADER}\n{render_plan(plan)}\nEND PLAN\n\n"
-        f"NOW DO STEP {number} OF {len(plan.steps)}: {step.title}\n"
-        f"{done}Do only this step, run its tests, and stop; later steps are done "
-        "separately.\n"
-        + (f"Files: {', '.join(step.files)}\n" if step.files else "")
-        + f"{step.instructions}\n"
-        + (f"Done when: {step.done_when}\n" if step.done_when else "")
-        + f"\n{agent_request}"
-    )
+    total = len(plan.steps)
+    lines = [f"GOAL: {plan.goal}"]
+    if plan.out_of_scope:
+        lines.append("Out of scope: " + "; ".join(plan.out_of_scope))
+    finished = [entry for entry in (done or []) if int(entry.get("number", 0)) < number]
+    if finished:
+        lines.append("Done so far (their changes are in the checkout):")
+        lines += [
+            f"{entry['number']}. {entry.get('title', '')}: "
+            + str(entry.get("summary", ""))[:DONE_NOTE_CHARACTERS]
+            for entry in finished
+        ]
+    later = plan.steps[number:]
+    if later:
+        lines.append(
+            "Later steps, done separately (don't start them): "
+            + "; ".join(f"{index}. {item.title}" for index, item in enumerate(later, number + 1))
+        )
+    lines += [
+        "",
+        f"NOW DO STEP {number} OF {total}: {step.title}",
+        "Do only this step, run its tests, and stop.",
+    ]
+    if step.files:
+        lines.append("Files: " + ", ".join(step.files))
+    lines.append(step.instructions)
+    if step.done_when:
+        lines.append(f"Done when: {step.done_when}")
+    return f"{STEP_HEADER}\n" + "\n".join(lines) + f"\nEND PLAN\n\n{agent_request}"
 
 
 class ClaudePlanner:
