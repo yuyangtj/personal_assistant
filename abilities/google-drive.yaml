@@ -1,0 +1,8 @@
+id: google-drive
+name: Google Drive
+summary: Look at the user's Google Drive without changing it - list a folder's files, or read a file's text (a Google Doc or Sheet is exported as text) - given a Drive link or id.
+example: "what's in the Project Plan doc on Drive?"
+kind: quick
+band: free
+requires: [google_drive]
+order: 95

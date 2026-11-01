@@ -131,10 +131,24 @@ class Settings:
     conversation_model_timeout_seconds: float | None = None
     slack_signing_secret: str | None = None
     slack_bot_token: str | None = None
+    #: Read-only Drive access as the user, through an OAuth refresh token (see README).
+    google_drive_client_id: str | None = env("GOOGLE_DRIVE_CLIENT_ID")
+    google_drive_client_secret: str | None = env("GOOGLE_DRIVE_CLIENT_SECRET")
+    google_drive_refresh_token: str | None = env("GOOGLE_DRIVE_REFRESH_TOKEN")
+    google_drive_api_base_url: str = "https://www.googleapis.com"
+    google_drive_timeout_seconds: float = 20.0
 
     @property
     def web_search_available(self) -> bool:
         return bool(self.deepseek_api_key or self.tavily_api_key or self.brave_search_api_key)
+
+    @property
+    def google_drive_available(self) -> bool:
+        return bool(
+            self.google_drive_client_id
+            and self.google_drive_client_secret
+            and self.google_drive_refresh_token
+        )
 
     @classmethod
     def env_names(cls) -> dict[str, tuple[str, ...]]:
