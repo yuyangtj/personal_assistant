@@ -107,7 +107,8 @@ class Settings:
     #: The model Claude Code implements with (empty: the subscription's default).
     claude_code_model: str | None = "sonnet"
     #: Claude Code on this model reads the code and plans each run in small steps that
-    #: the coding agents then implement one at a time (empty: no plan, the short spec).
+    #: the coding agents then implement one at a time, then reviews the result (empty:
+    #: no plan, the short spec and the diff-only review).
     coding_plan_model: str | None = "opus"
     coding_plan_timeout_seconds: int = 600
     #: Codex's home, holding the ChatGPT login (auth.json); must be writable and kept.
