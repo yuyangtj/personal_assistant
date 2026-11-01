@@ -286,6 +286,24 @@ def repository_tools(reader: Any) -> list[AssistantTool]:
     return tools
 
 
+def drive_tools(reader: Any) -> list[AssistantTool]:
+    """List a Drive folder, read a Drive file (Docs/Sheets exported as text); read-only."""
+    from app.tools.drive import TOOLS
+
+    name, (arguments, does) = next(iter(TOOLS.items()))
+    return [
+        AssistantTool(
+            name,
+            "google-drive",
+            arguments,
+            f"{does} (results are the file's own text)",
+            lambda a, c, name=name: reader.run(name, a),
+            lambda a: f"Looking at {str(a.get('url_or_id') or 'Drive')}",
+            changes=False,
+        )
+    ]
+
+
 def job_tools(tasks: Any, *, research: bool) -> list[AssistantTool]:
     """Hand a question to the research agent in the background; its answer is posted in the chat."""
 
