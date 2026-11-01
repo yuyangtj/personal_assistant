@@ -291,6 +291,10 @@ def check(turn: dict, expect: dict) -> list[str]:
         problems.append(f"proposed no {expect['action']} card; actions: {turn.get('actions')}")
     if expect.get("chart") and not any(b.get("type") == "chart" for b in turn["blocks"]):
         problems.append("no chart")
+    if expect.get("reply_in") == "chinese" and not any(
+        "\u4e00" <= ch <= "\u9fff" for ch in "".join(replies)
+    ):
+        problems.append("did not reply in Chinese")
     text = " ".join(replies).lower()
     # "or_tool": looking it up with that tool is as good as saying those words.
     looked_up = expect.get("or_tool") in {c.get("tool") for c in turn["tool_calls"]}
