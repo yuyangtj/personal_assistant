@@ -37,6 +37,9 @@
     {"say": "What are the opening hours of Moderna Museet in Stockholm?", "expect": {"tool": "research"}},
     {"say": "and is it open on Mondays?", "expect": {"no_offer": true}}
   ]},
+  {"name": "chinese-question", "about": "影之刃零 (Phantom Blade Zero): with a prompt that said \"English\", the reply that started the research came back in Swedish.", "turns": [
+    {"say": "影之刃零有吸血武器吗", "expect": {"reply_in": "chinese"}}
+  ]},
   {"name": "yes-please-do", "about": "The phone once answered this follow-up itself, as small talk. It follows an offer to research, so it starts the research.", "needs": "search", "turns": [
     {"say": "Which street foods should I try in Shanghai? Keep it short, and offer to research the best places for them.", "expect": {"reply_any": ["xiao", "sheng", "dumpling", "bun"]}},
     {"say": "Yes please do", "expect": {"tool": "research"}}
@@ -96,7 +99,7 @@
     {"say": "what is this about, in one sentence?", "screen": "Moderna Museet — Utställning: Hilma af Klint, 12 oktober–2 mars. Öppettider tis–sön 10–18, fredag till 20. Entré 150 kr.", "expect": {"reply_any": ["moderna", "museum", "exhibition", "utställning"]}}
   ]},
   {"name": "swedish-bookkeeping", "lists": ["Groceries"], "turns": [
-    {"say": "lägg till mjölk på inköpslistan", "expect": {"tool": "list_add"}}
+    {"say": "lägg till mjölk på inköpslistan", "expect": {"tool": "list_add", "reply_any": ["lagt", "tillagd", "inköpslistan", "listan"]}}
   ]},
   {"name": "whats-going-on", "about": "Looking across every chat: the work going on, and what was said in another conversation.", "turns": [
     {"say": "what's going on across my chats and work right now?", "expect": {"tools_any": ["overview"]}},
