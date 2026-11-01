@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Rebuilds and restarts the remote stack at origin/main.
 #
-# Exit codes: 0 deployed and healthy; 3 new release unhealthy and the previous release
-# was restored; any other non-zero value means the deployment failed.
+# Exit codes: 0 deployed and healthy; 3 new release unhealthy or not started and the
+# previous release was restored; any other non-zero value means the deployment failed.
 set -Eeuo pipefail
 
 SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +63,18 @@ wait_for_health() {
         sleep 2
     done
     return 1
+}
+
+start_release() {
+    # A change to the Compose networks can stop `up` partway: old containers still use
+    # the network it must replace. Removing the project's containers and networks
+    # (volumes stay) clears that, so retry once before the caller rolls back.
+    if "${compose[@]}" up -d --no-build --remove-orphans; then
+        return 0
+    fi
+    echo "Starting the release failed; removing the old containers and networks, then retrying..." >&2
+    "${compose[@]}" down --remove-orphans || true
+    "${compose[@]}" up -d --no-build --remove-orphans
 }
 
 prune_release_images() {
@@ -183,19 +195,25 @@ export ASSISTANT_IMAGE_TAG="${release_tag}"
 # The avatar's files are copied here by hand (docs/remote-hosting.md); the folder must
 # exist for the API's bind mount, and empty is fine.
 mkdir -p "${ASSISTANT_AVATAR_ASSETS_HOST:-/srv/personal-assistant/avatar-assets}"
-"${compose[@]}" up -d --build --remove-orphans
-refresh_caddy || true  # the public health check below drives rollback
+# Build before stopping anything, so a broken build leaves the current release serving.
+"${compose[@]}" build
 
-echo "Waiting for the service and public HTTPS health checks..."
 healthy=false
-if [[ "${SIMULATE_HEALTH_FAILURE}" == 1 ]]; then
-    echo "ASSISTANT_DEPLOY_SIMULATE_HEALTH_FAILURE=1: treating the health check as failed." >&2
-elif wait_for_health; then
-    healthy=true
+if ! start_release; then
+    echo "Release ${release_tag} failed to start." >&2
+else
+    refresh_caddy || true  # the public health check below drives rollback
+    echo "Waiting for the service and public HTTPS health checks..."
+    if [[ "${SIMULATE_HEALTH_FAILURE}" == 1 ]]; then
+        echo "ASSISTANT_DEPLOY_SIMULATE_HEALTH_FAILURE=1: treating the health check as failed." >&2
+    elif wait_for_health; then
+        healthy=true
+    else
+        echo "Release ${release_tag} did not become healthy within 120 seconds." >&2
+    fi
 fi
 
 if [[ "${healthy}" != true ]]; then
-    echo "Release ${release_tag} did not become healthy within 120 seconds." >&2
     "${compose[@]}" ps >&2
     "${compose[@]}" logs --tail=80 api worker coding-worker caddy migrate postgres >&2
     if [[ ! "${previous_tag}" =~ ^[0-9a-f]{40}$ || "${previous_tag}" == "${release_tag}" ]]; then
@@ -205,7 +223,7 @@ if [[ "${healthy}" != true ]]; then
     echo "Rolling back to release ${previous_tag}..." >&2
     export ASSISTANT_IMAGE_TAG="${previous_tag}"
     # Older images predate worker liveness; migrations remain backward compatible.
-    if "${compose[@]}" up -d --no-build --remove-orphans; then
+    if start_release; then
         if refresh_caddy && wait_for_health legacy; then
             echo "Rolled back: release ${previous_tag} is serving." >&2
             exit "${EXIT_ROLLED_BACK}"

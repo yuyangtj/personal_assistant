@@ -346,16 +346,20 @@ stack safely:
 4. Validates the Compose configuration.
 5. Backs up PostgreSQL to `backups/assistant-<time>.dump` if the database is running,
    keeping the newest 20 dumps and the last dump of each of the last 30 days.
-6. Builds and starts the release with images tagged by commit
-   (`personal-assistant:<sha>`); migrations run first.
+6. Builds the images, tagged by commit (`personal-assistant:<sha>`), before stopping
+   anything, so a failed build leaves the current release serving. Then starts the
+   release; migrations run first. If starting fails (for example, a network change that
+   old containers still use), it removes the project's containers and networks, keeping
+   volumes, and tries once more.
 7. Recreates Caddy when its configuration changed, then waits up to 120 seconds for the
    API `/health`, public HTTPS `/health`, and fresh heartbeats from every enabled worker.
 8. If healthy, records the release as current, prunes images beyond the current and the
    previous release, and removes Docker build cache unused for 3 days (6 hours when the
-   disk is over 85% full; `prune_build_cache` in `scripts/housekeeping.sh`). If not,
-   restarts the previous release's images without rebuilding.
+   disk is over 85% full; `prune_build_cache` in `scripts/housekeeping.sh`). If not, or
+   if the release would not start, restarts the previous release's images without
+   rebuilding.
 
-Exit codes: `0` deployed and healthy; `3` new release unhealthy and the previous one is
+Exit codes: `0` deployed and healthy; `3` new release unhealthy or not started and the previous one is
 serving again; anything else failed (including "no previous release to roll back to").
 
 From your laptop:
