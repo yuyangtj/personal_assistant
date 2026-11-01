@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -65,8 +66,13 @@ HOME_CHAT_TITLE = "Assistant"
 
 
 def _reply_payload(text: str, *, emotion: str, intensity: float, outcome: str) -> dict[str, Any]:
-    """User-facing speech for clients such as the Android avatar."""
-    normalized = " ".join(text.split())[:MAX_REPLY_CHARACTERS]
+    """User-facing speech for clients such as the Android avatar, and the chat message.
+
+    Line breaks stay (at most one blank line in a row), so an answer's list and its
+    "Sources:" section show as their own lines; spaces within a line are collapsed.
+    """
+    lines = [" ".join(line.split()) for line in text.strip().splitlines()]
+    normalized = re.sub(r"\n{3,}", "\n\n", "\n".join(lines))[:MAX_REPLY_CHARACTERS]
     return {"text": normalized, "emotion": emotion, "intensity": intensity, "outcome": outcome}
 
 
