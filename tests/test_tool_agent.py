@@ -168,3 +168,38 @@ def test_research_tasks_pass_the_coding_gate(client: TestClient) -> None:
 
     assert task.status_code == 201
     assert task.json()["required_capabilities"] == ["web_research"]
+
+
+def test_a_follow_up_question_is_researched_in_the_chats_context() -> None:
+    from app.execution.base import ConversationTurn
+
+    chat = ScriptedChat(
+        json.dumps({"action": "finish", "answer": "In chapter 3.", "sources": []}),
+    )
+    history = [
+        ConversationTurn(
+            "影之刃零有吸血武器吗", "有。核心吸血武器是【亡命斩马刀】……配饰【贪狼】也有攻击回血"
+        ),
+        # The research task starts before the reply that handed it off is posted.
+        ConversationTurn("贪狼在哪里可以找到", ""),
+    ]
+
+    ToolAgentExecutor(chat, FakeSearch()).execute(
+        task_id="t", request="贪狼在哪里可以找到", is_cancelled=lambda: False, history=history
+    )
+
+    sent = chat.requests[0]
+    context = [m.content for m in sent if m.role == "system" and "The chat so far" in m.content]
+    assert len(context) == 1
+    assert "User: 影之刃零有吸血武器吗" in context[0]
+    assert "Assistant: 有。核心吸血武器" in context[0]
+    assert context[0].count("贪狼在哪里可以找到") == 0  # the question itself comes once, last
+    assert (sent[-1].role, sent[-1].content) == ("user", "贪狼在哪里可以找到")
+
+
+def test_a_first_question_has_no_chat_context() -> None:
+    chat = ScriptedChat(json.dumps({"action": "finish", "answer": "A.", "sources": []}))
+
+    _run(ToolAgentExecutor(chat, FakeSearch()))
+
+    assert not any("The chat so far" in m.content for m in chat.requests[0])
