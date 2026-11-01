@@ -85,6 +85,24 @@ reply leaves the task running as it would without them):
    never block the draft PR; they appear in its notes, in the task output (`review`) and in
    the chat reply.
 
+**Planning in steps.** When `CLAUDE_CODE_OAUTH_TOKEN` is set, Claude Code on
+`ASSISTANT_CODING_PLAN_MODEL` (Opus) first reads the checkout with its edit tools switched
+off and writes a plan: goal, acceptance criteria, checks, and steps, each with its files,
+exact instructions and when it is done. A small change is one step; a bigger one up to 8.
+The run's code then hands the steps out one by one; each is its own agent session
+(`ASSISTANT_CODE_AGENT_PROVIDERS`; Claude Code runs on `ASSISTANT_CLAUDE_CODE_MODEL`,
+Sonnet) that sees only the goal and limits, a short note on each finished step, its own
+step in full and the titles of the rest.
+
+After each step its changes are committed in the worktree, the commit is kept under
+`refs/assistant/steps/<task>/<n>`, and a note on it is saved with the run
+(`coding_runs.plan` and `coding_runs.steps`). So an agent that gets stuck on a step
+loses only that step, and the next agent in the order takes it over; and a run that
+restarts (a deploy, a lost worker) skips planning and the finished steps and carries on.
+The step commits are folded into the run's one commit, and the refs are removed once
+the pull request is open. The reviewer checks against the whole plan. Without a usable
+plan the short spec is used, as before.
+
 `ASSISTANT_CODING_SPEC_ENABLED`, `ASSISTANT_CODING_REVIEW_ENABLED` and
 `ASSISTANT_CODING_PLANNER_TIMEOUT_SECONDS` control them. The coding worker needs the same
 conversation-model settings as the API, because that model does both jobs.

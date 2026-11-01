@@ -104,6 +104,12 @@ class Settings:
     claude_code_executable: str = "claude"
     #: From ``claude setup-token``: Claude Code on the user's Claude subscription.
     claude_code_oauth_token: str | None = env("CLAUDE_CODE_OAUTH_TOKEN")
+    #: The model Claude Code implements with (empty: the subscription's default).
+    claude_code_model: str | None = "sonnet"
+    #: Claude Code on this model reads the code and plans each run in small steps that
+    #: the coding agents then implement one at a time (empty: no plan, the short spec).
+    coding_plan_model: str | None = "opus"
+    coding_plan_timeout_seconds: int = 600
     #: Codex's home, holding the ChatGPT login (auth.json); must be writable and kept.
     codex_home: Path | None = env("CODEX_HOME")
     #: False in the coding container, where Codex's own sandbox can't start.
