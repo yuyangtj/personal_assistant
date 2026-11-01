@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import parse_qs
 
 import httpx
@@ -11,9 +12,11 @@ from app.assistant.tools import drive_tools
 from app.config import Settings
 from app.tools.drive import (
     DRIVE_FOLDER_MIME_TYPE,
+    MAX_READ_CHARACTERS,
     GoogleDriveClient,
     GoogleDriveError,
     GoogleDrivePermissionError,
+    GoogleDriveRateLimitError,
     GoogleDriveReader,
     extract_drive_id,
 )
@@ -325,3 +328,170 @@ def test_google_drive_ability_requires_configured_credentials() -> None:
 
     assert "google-drive" not in bare
     assert "google-drive" in full
+
+
+def _metadata(name: str, mime_type: str):
+    def api(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": DOC_ID, "name": name, "mimeType": mime_type})
+
+    return api
+
+
+def test_every_request_includes_shared_drives() -> None:
+    seen: list[httpx.Request] = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/drive/v3/files/folder0001xx":
+            return httpx.Response(
+                200,
+                json={"id": "folder0001xx", "name": "Team", "mimeType": DRIVE_FOLDER_MIME_TYPE},
+            )
+        return httpx.Response(200, json={"files": []})
+
+    GoogleDriveReader(_client(_token_or(api))).run("drive_read", {"url_or_id": "folder0001xx"})
+
+    metadata, listing = seen
+    assert metadata.url.params["supportsAllDrives"] == "true"
+    assert listing.url.params["supportsAllDrives"] == "true"
+    assert listing.url.params["includeItemsFromAllDrives"] == "true"
+    assert listing.url.params["corpora"] == "allDrives"
+
+
+def test_export_and_download_include_shared_drives() -> None:
+    seen: list[httpx.Request] = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, text="text")
+
+    client = _client(_token_or(api))
+    try:
+        client.export_text(DOC_ID, "text/plain")
+        client.download_text(DOC_ID)
+    finally:
+        client.close()
+
+    assert [request.url.params["supportsAllDrives"] for request in seen] == ["true", "true"]
+
+
+def _drive_error(status: int, reason: str) -> httpx.Response:
+    return httpx.Response(status, json={"error": {"code": status, "errors": [{"reason": reason}]}})
+
+
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [(403, "rateLimitExceeded"), (403, "userRateLimitExceeded"), (429, "rateLimitExceeded")],
+)
+def test_a_rate_limit_is_not_reported_as_no_access(status: int, reason: str) -> None:
+    client = _client(_token_or(lambda request: _drive_error(status, reason)))
+    try:
+        with pytest.raises(GoogleDriveRateLimitError):
+            client.get_metadata(DOC_ID)
+    finally:
+        client.close()
+
+    reader = GoogleDriveReader(_client(_token_or(lambda request: _drive_error(status, reason))))
+    result = reader.run("drive_read", {"url_or_id": DOC_ID})
+    assert "try again" in result and "no access" not in result
+
+
+def test_a_doc_too_large_to_export_says_so() -> None:
+    def api(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/export"):
+            return _drive_error(403, "exportSizeLimitExceeded")
+        return _metadata("Huge", "application/vnd.google-apps.document")(request)
+
+    result = GoogleDriveReader(_client(_token_or(api))).run("drive_read", {"url_or_id": DOC_ID})
+
+    assert result == (
+        "error: this file is too large for Google to export as text (its limit is 10 MB)"
+    )
+
+
+def test_a_403_without_a_known_reason_is_no_access() -> None:
+    reader = GoogleDriveReader(
+        _client(_token_or(lambda request: _drive_error(403, "insufficientFilePermissions")))
+    )
+
+    assert "no access" in reader.run("drive_read", {"url_or_id": DOC_ID})
+
+
+def test_the_access_token_is_reused_until_it_nearly_expires(monkeypatch) -> None:
+    now = [1000.0]
+    monkeypatch.setattr("app.tools.drive.time.monotonic", lambda: now[0])
+    token_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "oauth2.googleapis.com":
+            token_requests.append(request)
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        return _metadata("Plan", "text/plain")(request)
+
+    client = _client(handler)
+    try:
+        client.get_metadata(DOC_ID)
+        client.get_metadata(DOC_ID)
+        assert len(token_requests) == 1
+        now[0] += 3600 - 30  # inside the safety margin before expiry
+        client.get_metadata(DOC_ID)
+        assert len(token_requests) == 2
+    finally:
+        client.close()
+
+
+def test_a_rejected_token_is_dropped_so_the_next_call_gets_a_new_one() -> None:
+    token_requests: list[httpx.Request] = []
+    replies = [httpx.Response(401), None]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "oauth2.googleapis.com":
+            token_requests.append(request)
+            return httpx.Response(200, json=TOKEN_RESPONSE)
+        reply = replies.pop(0)
+        return reply or _metadata("Plan", "text/plain")(request)
+
+    client = _client(handler)
+    try:
+        with pytest.raises(GoogleDriveError):
+            client.get_metadata(DOC_ID)
+        assert client.get_metadata(DOC_ID)["name"] == "Plan"
+    finally:
+        client.close()
+
+    assert len(token_requests) == 2
+
+
+def test_a_long_file_says_it_was_cut_off() -> None:
+    long_text = "z" * (MAX_READ_CHARACTERS + 500)
+
+    def api(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("alt") == "media":
+            return httpx.Response(200, text=long_text)
+        return _metadata("log.txt", "text/plain")(request)
+
+    result = GoogleDriveReader(_client(_token_or(api))).run("drive_read", {"url_or_id": DOC_ID})
+
+    assert result.endswith("[cut off: showing the first 12,000 of 12,500 characters]")
+    assert result.count("z") == MAX_READ_CHARACTERS
+
+
+def test_a_short_file_has_no_cut_off_note() -> None:
+    def api(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("alt") == "media":
+            return httpx.Response(200, text="short")
+        return _metadata("a.txt", "text/plain")(request)
+
+    result = GoogleDriveReader(_client(_token_or(api))).run("drive_read", {"url_or_id": DOC_ID})
+
+    assert result == "a.txt (text/plain):\nshort"
+
+
+def test_the_server_passes_the_drive_credentials_to_the_chat_worker_and_api() -> None:
+    import yaml
+
+    services = yaml.safe_load(Path("compose.remote.yaml").read_text())["services"]
+    names = ("GOOGLE_DRIVE_CLIENT_ID", "GOOGLE_DRIVE_CLIENT_SECRET", "GOOGLE_DRIVE_REFRESH_TOKEN")
+    for service in ("worker", "api"):
+        assert set(names) <= set(services[service]["environment"]), service
+    assert not set(names) & set(services["coding-worker"]["environment"])

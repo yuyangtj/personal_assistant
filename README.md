@@ -95,7 +95,8 @@ account. It needs an OAuth client (Google Cloud Console, Drive API enabled, scop
 `drive.readonly`) and a refresh token for that account; set `GOOGLE_DRIVE_CLIENT_ID`,
 `GOOGLE_DRIVE_CLIENT_SECRET` and `GOOGLE_DRIVE_REFRESH_TOKEN` (see `.env.example`). Without
 them the ability is simply off. A file the credentials can't access comes back as a clear
-message instead of an error.
+message instead of an error. Publish the OAuth app in Google Cloud Console ("In
+production"); while it is in "Testing", Google expires the refresh token after 7 days.
 
 ## Deploy
 

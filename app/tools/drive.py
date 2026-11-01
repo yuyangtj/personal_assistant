@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any
 from urllib.parse import quote
 
@@ -42,6 +43,13 @@ TEXT_MIME_TYPES = {"application/json", "application/xml"}
 MAX_LISTED = 200
 MAX_READ_CHARACTERS = 12_000
 MAX_LIST_PAGES = 10
+#: Fetch a new access token this long before the old one expires.
+TOKEN_MARGIN_SECONDS = 60
+#: Shared-drive files are invisible unless every request asks for them.
+ALL_DRIVES = {"supportsAllDrives": "true"}
+#: The reasons Google gives with a 403 or 429 that don't mean "no access".
+RATE_LIMIT_REASONS = {"rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded"}
+EXPORT_TOO_LARGE_REASON = "exportSizeLimitExceeded"
 
 #: How the tool is described to the model.
 TOOLS = {
@@ -59,6 +67,10 @@ class GoogleDriveError(RuntimeError):
 
 class GoogleDrivePermissionError(GoogleDriveError):
     """The connected Google account has no access to the requested file or folder."""
+
+
+class GoogleDriveRateLimitError(GoogleDriveError):
+    """Google is limiting requests for now; trying again later may work."""
 
 
 class ToolError(ValueError):
@@ -103,13 +115,16 @@ class GoogleDriveClient:
         self._token_url = token_url
         self._base_url = base_url.rstrip("/")
         self._client = httpx.Client(timeout=timeout_seconds, transport=transport)
+        self._token: str | None = None
+        self._token_expires_at = 0.0
 
     def close(self) -> None:
         self._client.close()
 
     def get_metadata(self, file_id: str) -> dict[str, Any]:
         response = self._get(
-            f"/drive/v3/files/{quote(file_id)}", params={"fields": "id,name,mimeType"}
+            f"/drive/v3/files/{quote(file_id)}",
+            params={"fields": "id,name,mimeType", **ALL_DRIVES},
         )
         body = _json_object(response, "Google Drive returned an unexpected file response")
         if not isinstance(body.get("name"), str) or not isinstance(body.get("mimeType"), str):
@@ -124,6 +139,9 @@ class GoogleDriveClient:
                 "q": f"'{folder_id}' in parents and trashed = false",
                 "fields": "nextPageToken, files(id, name, mimeType)",
                 "pageSize": 100,
+                "corpora": "allDrives",
+                "includeItemsFromAllDrives": "true",
+                **ALL_DRIVES,
             }
             if page_token:
                 params["pageToken"] = page_token
@@ -147,15 +165,21 @@ class GoogleDriveClient:
 
     def export_text(self, file_id: str, export_mime_type: str) -> str:
         response = self._get(
-            f"/drive/v3/files/{quote(file_id)}/export", params={"mimeType": export_mime_type}
+            f"/drive/v3/files/{quote(file_id)}/export",
+            params={"mimeType": export_mime_type, **ALL_DRIVES},
         )
         return response.text
 
     def download_text(self, file_id: str) -> str:
-        response = self._get(f"/drive/v3/files/{quote(file_id)}", params={"alt": "media"})
+        response = self._get(
+            f"/drive/v3/files/{quote(file_id)}", params={"alt": "media", **ALL_DRIVES}
+        )
         return response.text
 
     def _access_token(self) -> str:
+        """The cached access token, or a new one when it is about to expire."""
+        if self._token and time.monotonic() < self._token_expires_at:
+            return self._token
         try:
             response = self._client.post(
                 self._token_url,
@@ -176,6 +200,10 @@ class GoogleDriveClient:
         token = body.get("access_token")
         if not isinstance(token, str) or not token:
             raise GoogleDriveError("Google returned an unexpected token response")
+        expires_in = body.get("expires_in")
+        lifetime = float(expires_in) if isinstance(expires_in, int | float) else 3600.0
+        self._token = token
+        self._token_expires_at = time.monotonic() + max(0.0, lifetime - TOKEN_MARGIN_SECONDS)
         return token
 
     def _get(self, path: str, *, params: dict[str, Any]) -> httpx.Response:
@@ -190,6 +218,20 @@ class GoogleDriveClient:
             raise GoogleDriveError(
                 f"Google Drive request failed: {type(error).__name__}"
             ) from error
+        if response.status_code in (403, 429):
+            reason = _error_reason(response)
+            if response.status_code == 429 or reason in RATE_LIMIT_REASONS:
+                raise GoogleDriveRateLimitError(
+                    "Google Drive is limiting requests right now; try again in a minute"
+                )
+            if reason == EXPORT_TOO_LARGE_REASON:
+                raise GoogleDriveError(
+                    "this file is too large for Google to export as text (its limit is 10 MB)"
+                )
+        if response.status_code == 401:
+            # The cached token was revoked or expired early; the next call gets a new one.
+            self._token = None
+            raise GoogleDriveError("Google rejected the Drive access token; try again")
         if response.status_code in (403, 404):
             raise GoogleDrivePermissionError(
                 "the connected Google account has no access to this file or folder (it may "
@@ -198,6 +240,17 @@ class GoogleDriveClient:
         if response.status_code not in range(200, 300):
             raise GoogleDriveError(f"Google Drive returned HTTP {response.status_code}")
         return response
+
+
+def _error_reason(response: httpx.Response) -> str | None:
+    """The machine-readable reason in a Drive error body, such as ``rateLimitExceeded``."""
+    try:
+        error = response.json().get("error")
+        details = error.get("errors") or []
+        reason = details[0].get("reason") if details else None
+    except (ValueError, AttributeError, TypeError, IndexError):
+        return None
+    return reason if isinstance(reason, str) else None
 
 
 def _json_object(response: httpx.Response, message: str) -> dict[str, Any]:
@@ -241,14 +294,14 @@ class GoogleDriveReader:
         export_mime_type = EXPORTABLE_MIME_TYPES.get(mime_type)
         if export_mime_type:
             text = self.client.export_text(file_id, export_mime_type)
-            return f"{name} ({mime_type}):\n{text[:MAX_READ_CHARACTERS]}"
+            return _file_text(name, mime_type, text)
         if not mime_type.startswith(TEXT_MIME_PREFIXES) and mime_type not in TEXT_MIME_TYPES:
             return (
                 f"can't read {name}: its type ({mime_type}) isn't text; only plain text "
                 "files and Google Docs/Sheets/Slides are supported"
             )
         text = self.client.download_text(file_id)
-        return f"{name} ({mime_type}):\n{text[:MAX_READ_CHARACTERS]}"
+        return _file_text(name, mime_type, text)
 
     def _list(self, folder_id: str, name: str) -> str:
         entries = self.client.list_folder(folder_id)
@@ -261,3 +314,13 @@ class GoogleDriveReader:
         if more > 0:
             lines.append(f"... and {more} more")
         return "\n".join(lines)
+
+
+def _file_text(name: str, mime_type: str, text: str) -> str:
+    """A file's text for the model, saying so when it was cut short."""
+    result = f"{name} ({mime_type}):\n{text[:MAX_READ_CHARACTERS]}"
+    if len(text) > MAX_READ_CHARACTERS:
+        result += (
+            f"\n[cut off: showing the first {MAX_READ_CHARACTERS:,} of {len(text):,} characters]"
+        )
+    return result
