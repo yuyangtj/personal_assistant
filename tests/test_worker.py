@@ -430,3 +430,25 @@ def test_failed_task_reply_uses_the_errors_user_message(service: TaskService) ->
     events = service.list_events(task.id)
     assert events[-1].payload["error"] == "internal detail"
     assert events[-2].payload["text"] == "The tests check still failed; work saved on branch x."
+
+
+def test_a_reply_keeps_its_lines_so_sources_follow_the_answer(service: TaskService) -> None:
+    answer = (
+        "有。核心吸血武器是【亡命斩马刀】。\n\n搭配要点：\n- 配饰【贪狼】也有攻击回血\n\n\n\n"
+        "Sources:\nhttps://example.com/a\nhttps://example.com/b"
+    )
+
+    class ResearchExecutor(FakeExecutor):
+        def execute(self, **kwargs) -> ExecutionResult:
+            return ExecutionResult(output={"summary": "Researched", "reply": answer})
+
+    chat = service.create_chat_session()
+    service.create_task(request="影之刃零有吸血武器吗", chat_session_id=chat.id, post_request=False)
+
+    assert make_worker(service, executors={"fake": ResearchExecutor()}).run_once() is True
+
+    [message] = [m for m in service.list_chat_messages(chat.id) if m.role == "assistant"]
+    assert message.content == (
+        "有。核心吸血武器是【亡命斩马刀】。\n\n搭配要点：\n- 配饰【贪狼】也有攻击回血\n\n"
+        "Sources:\nhttps://example.com/a\nhttps://example.com/b"
+    )
