@@ -293,8 +293,8 @@ def job_tools(tasks: Any, *, research: bool) -> list[AssistantTool]:
         def run(arguments: dict[str, Any], context: ToolContext) -> str:
             if not context.chat_session_id:
                 raise ToolError("this only works inside a chat")
-            # The user's own message, as they said it: the specialist sees the chat
-            # history too, and a rewritten request only grows (and slows it down).
+            # The user's own message, as they said it: the research agent reads the
+            # chat's latest turns for what it refers to (ToolAgentExecutor).
             question = (context.request or "").strip()
             if not question:
                 raise ToolError("there is no message to hand off")
