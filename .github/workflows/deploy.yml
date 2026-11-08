@@ -6,6 +6,11 @@ run-name: >-
 # Every merge to main deploys once CI has passed on it; reviewing and merging the pull
 # request is the approval. "Run workflow" redeploys main by hand (or a given commit, which
 # must still be main's head), and "force" deploys even while a coding run is executing.
+#
+# The run asks the site over HTTPS (/deploy/github) to deploy. Its only credential is a
+# token GitHub signs for this run (id-token: write); the site checks it came from this
+# workflow, on main, in the production environment, then deploys through its host
+# deployer. No secret is stored, and SSH stays closed to GitHub.
 on:
   workflow_run:
     workflows: [CI]
@@ -23,12 +28,13 @@ on:
         type: boolean
         default: false
       workflow_run_id:
-        description: Set by the console's GitHub Actions fallback; leave empty
+        description: Sent by the console's disabled GitHub Actions fallback; unused
         required: false
         type: string
 
 permissions:
   contents: read
+  id-token: write
 
 # One deployment at a time; a newer merge waiting here replaces an older waiting one.
 concurrency:
@@ -46,6 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 120
+    env:
+      SITE: ${{ vars.DEPLOY_URL || 'https://assistant.yangyu.se' }}
     steps:
       - name: Choose the commit
         id: commit
@@ -53,43 +61,67 @@ jobs:
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           INPUT_SHA: ${{ inputs.commit_sha }}
           MAIN_SHA: ${{ github.sha }}
-          FORCE: ${{ inputs.force && 'force' || '' }}
+          FORCE: ${{ inputs.force && 'true' || 'false' }}
         run: |
           sha="${RUN_SHA:-${INPUT_SHA:-${MAIN_SHA}}}"
           [[ "${sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "Not a full commit SHA: ${sha}"; exit 1; }
           echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
           echo "force=${FORCE}" >> "${GITHUB_OUTPUT}"
 
-      - name: Configure the server's SSH key
+      - name: Deploy
         env:
-          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          test -n "${DEPLOY_SSH_PRIVATE_KEY}" || { echo "Missing secret DEPLOY_SSH_PRIVATE_KEY"; exit 1; }
-          test -n "${DEPLOY_KNOWN_HOSTS}" || { echo "Missing secret DEPLOY_KNOWN_HOSTS"; exit 1; }
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          printf '%s\n' "${DEPLOY_KNOWN_HOSTS}" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-
-      # The key can only run scripts/ci-deploy.sh on the server (a forced command), which
-      # hands the deploy to the host deployer and prints its log until it finishes.
-      - name: Deploy through the host deployer
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           SHA: ${{ steps.commit.outputs.sha }}
           FORCE: ${{ steps.commit.outputs.force }}
         run: |
-          test -n "${DEPLOY_HOST}" && test -n "${DEPLOY_USER}"
-          ssh -i ~/.ssh/deploy_key \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ServerAliveInterval=30 \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "deploy ${SHA} ${FORCE}"
+          # A fresh token for each request: GitHub's tokens expire within minutes.
+          token() {
+            curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${SITE}" | jq -r .value
+          }
+          call() {  # call METHOD PATH [BODY]: prints the HTTP status; the reply is in reply.json
+            curl -sS -o reply.json -w '%{http_code}' -X "$1" \
+              -H "Authorization: Bearer $(token)" -H 'Content-Type: application/json' \
+              ${3:+--data "$3"} "${SITE}$2" || echo 000
+          }
 
-      - name: Remove the key
-        if: always()
-        run: rm -f ~/.ssh/deploy_key
+          body="$(jq -nc --arg sha "${SHA}" --argjson force "${FORCE}" \
+            '{commit_sha: $sha, force: $force}')"
+          deadline=$(( SECONDS + 3600 ))
+          while true; do
+            code="$(call POST /deploy/github "${body}")"
+            case "${code}" in
+              200) jq -r .detail reply.json; exit 0 ;;  # main moved on; skipped
+              202) run="$(jq -r .workflow_run_id reply.json)"; break ;;
+              409)
+                if jq -e .retry_after_seconds reply.json >/dev/null && (( SECONDS < deadline )); then
+                  echo "$(jq -r .detail reply.json); asking again in a moment"
+                  sleep "$(jq -r .retry_after_seconds reply.json)"
+                  continue
+                fi ;;
+            esac
+            echo "The site refused the deploy (HTTP ${code}):"; cat reply.json; echo
+            exit 1
+          done
+          echo "Deploying ${SHA} as ${run}"
+
+          # The API restarts during its own rollout, so a few failed polls are expected.
+          deadline=$(( SECONDS + 3000 )); last=""
+          while (( SECONDS < deadline )); do
+            sleep 10
+            [[ "$(call GET "/deploy/github/${run}")" == 200 ]] || continue
+            status="$(jq -r .status reply.json)"
+            [[ "${status}" != "${last}" ]] && echo "Status: ${status}" && last="${status}"
+            case "${status}" in
+              completed) jq -r .log_tail reply.json; echo "Deployed."; exit 0 ;;
+              failed|cancelled)
+                jq -r .log_tail reply.json
+                if [[ "$(jq -r .deployer_state reply.json)" == rolled_back ]]; then
+                  echo "::error::The release failed its health checks and was rolled back."
+                else
+                  echo "::error::The deployment failed; the log above says why."
+                fi
+                exit 1 ;;
+            esac
+          done
+          echo "::error::No outcome within 50 minutes; check the console for deployment ${run}."
+          exit 1

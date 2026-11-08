@@ -100,8 +100,8 @@ production"); while it is in "Testing", Google expires the refresh token after 7
 
 ## Deploy
 
-Every merge to `main` deploys itself once CI passes (GitHub Actions hands it to the
-server), and the console can also deploy an approved commit. Either way the
+Every merge to `main` deploys itself once CI passes (GitHub Actions asks the server
+over HTTPS with a token GitHub signs), and the console can also deploy an approved commit. Either way the
 server's host deployer builds tagged images, checks health, and rolls back automatically.
 Setup and operations are covered in [`docs/remote-hosting.md`](docs/remote-hosting.md).
 

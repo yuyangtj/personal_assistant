@@ -3,11 +3,12 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from app.abilities import AbilityRegistry
+from app.api.deploy import GITHUB_DEPLOY_TARGET
 from app.api.routes import router
 from app.api.web import app_signing_fingerprints
 from app.api.work_items import router as work_items_router
 from app.config import Settings
-from app.deployments import DeploymentRegistry, HostDeployerSpool
+from app.deployments import DeploymentRegistry, GitHubDeployVerifier, HostDeployerSpool
 from app.integrations.gemini_tts import GeminiTtsClient
 from app.integrations.github import GitHubClient
 from app.integrations.speech import CachedSpeechSynthesizer
@@ -23,6 +24,20 @@ from app.work.memory import MemoryService
 from app.work.notes import NoteService
 from app.work.spaces import SpaceRegistry
 from app.workflows import WorkflowRegistry, WorkflowService
+
+
+def github_deploy_verifier(settings, deployments, repositories) -> GitHubDeployVerifier | None:
+    """Checks GitHub Actions' deploy tokens, when the site's audience is configured."""
+    if not settings.github_deploy_audience:
+        return None
+    target = deployments.get(GITHUB_DEPLOY_TARGET)
+    repository = repositories.get(target.repository_id)
+    return GitHubDeployVerifier(
+        audience=settings.github_deploy_audience,
+        repository=repository.github_repository,
+        branch=repository.base_branch,
+        environment=target.environment,
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -95,6 +110,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if resolved_settings.github_token
         else None
+    )
+    application.state.github_deploy_verifier = github_deploy_verifier(
+        resolved_settings, deployment_registry, repository_registry
     )
     application.state.approval_token = resolved_settings.approval_token
     application.state.passkeys = PasskeyService(
