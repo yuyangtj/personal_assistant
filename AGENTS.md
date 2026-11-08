@@ -64,7 +64,8 @@ Never put credentials or raw response bodies in errors or logs.
 ## Deploys
 
 The server runs `compose.remote.yaml` through `scripts/redeploy-remote.sh`; see
-`docs/remote-hosting.md`. A new image file or folder must also be copied in the
+`docs/remote-hosting.md`. Every merge to `main` deploys automatically once CI passes,
+so whatever merges must be ready to run on the server. A new image file or folder must also be copied in the
 `Dockerfile` (or `Dockerfile.coding-worker`) that needs it, and removing one must remove
 its `COPY`.
 

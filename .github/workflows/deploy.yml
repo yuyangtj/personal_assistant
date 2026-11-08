@@ -1,21 +1,36 @@
 name: deploy
-run-name: Deploy ${{ inputs.workflow_run_id }}
+run-name: >-
+  Deploy ${{ github.event_name == 'workflow_run'
+  && github.event.workflow_run.head_sha || inputs.commit_sha || github.sha }}
 
+# Every merge to main deploys once CI has passed on it; reviewing and merging the pull
+# request is the approval. "Run workflow" redeploys main by hand (or a given commit, which
+# must still be main's head), and "force" deploys even while a coding run is executing.
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: Exact reviewed main commit to deploy
-        required: true
+        description: Commit to deploy (empty = the head of main); must be main's head
+        required: false
         type: string
+      force:
+        description: Deploy even while a coding run is executing (it is interrupted)
+        required: false
+        type: boolean
+        default: false
       workflow_run_id:
-        description: Assistant deployment workflow run id
-        required: true
+        description: Set by the console's GitHub Actions fallback; leave empty
+        required: false
         type: string
 
 permissions:
   contents: read
 
+# One deployment at a time; a newer merge waiting here replaces an older waiting one.
 concurrency:
   group: personal-assistant-production
   cancel-in-progress: false
@@ -23,45 +38,58 @@ concurrency:
 jobs:
   deploy:
     name: production
+    # Only a CI run for a push to main (a merge), and only when it passed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 120
     steps:
-      - name: Validate immutable inputs
+      - name: Choose the commit
+        id: commit
         env:
-          COMMIT_SHA: ${{ inputs.commit_sha }}
-          WORKFLOW_RUN_ID: ${{ inputs.workflow_run_id }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_SHA: ${{ inputs.commit_sha }}
+          MAIN_SHA: ${{ github.sha }}
+          FORCE: ${{ inputs.force && 'force' || '' }}
         run: |
-          [[ "${COMMIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
-          [[ "${WORKFLOW_RUN_ID}" =~ ^[0-9a-f-]{36}$ ]]
+          sha="${RUN_SHA:-${INPUT_SHA:-${MAIN_SHA}}}"
+          [[ "${sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "Not a full commit SHA: ${sha}"; exit 1; }
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+          echo "force=${FORCE}" >> "${GITHUB_OUTPUT}"
 
-      - name: Configure trusted SSH host
+      - name: Configure the server's SSH key
         env:
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
-          test -n "${DEPLOY_SSH_PRIVATE_KEY}"
-          test -n "${DEPLOY_KNOWN_HOSTS}"
+          test -n "${DEPLOY_SSH_PRIVATE_KEY}" || { echo "Missing secret DEPLOY_SSH_PRIVATE_KEY"; exit 1; }
+          test -n "${DEPLOY_KNOWN_HOSTS}" || { echo "Missing secret DEPLOY_KNOWN_HOSTS"; exit 1; }
           install -d -m 700 ~/.ssh
           printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "${DEPLOY_KNOWN_HOSTS}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Pull and rebuild the registered release
+      # The key can only run scripts/ci-deploy.sh on the server (a forced command), which
+      # hands the deploy to the host deployer and prints its log until it finishes.
+      - name: Deploy through the host deployer
         env:
-          COMMIT_SHA: ${{ inputs.commit_sha }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          SHA: ${{ steps.commit.outputs.sha }}
+          FORCE: ${{ steps.commit.outputs.force }}
         run: |
-          test -n "${DEPLOY_HOST}"
-          test -n "${DEPLOY_USER}"
-          test -n "${DEPLOY_PATH}"
-          printf -v remote_command \
-            'cd %q && ASSISTANT_DEPLOY_EXPECTED_SHA=%q ./scripts/redeploy-remote.sh' \
-            "${DEPLOY_PATH}" "${COMMIT_SHA}"
+          test -n "${DEPLOY_HOST}" && test -n "${DEPLOY_USER}"
           ssh -i ~/.ssh/deploy_key \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "${remote_command}"
+            "deploy ${SHA} ${FORCE}"
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
