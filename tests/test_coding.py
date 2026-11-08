@@ -541,7 +541,7 @@ class _Reviewer:
         self.verdicts = list(verdicts)
         self.references: list[str] = []
 
-    def review(self, reference: str, worktree: Path, validation):
+    def review(self, reference: str, worktree: Path, validation, is_cancelled=None):
         self.references.append(reference)
         return self.verdicts.pop(0)
 
@@ -760,7 +760,7 @@ def test_a_task_cancelled_during_review_stops(tmp_path: Path) -> None:
     cancelled = {"now": False}
 
     class CancellingReviewer(_Reviewer):
-        def review(self, reference, worktree, validation):
+        def review(self, reference, worktree, validation, is_cancelled=None):
             cancelled["now"] = True
             return ReviewVerdict(approved=False, problems=["Fix it"])
 

@@ -103,6 +103,14 @@ The step commits are folded into the run's one commit, and the refs are removed 
 the pull request is open. The reviewer checks against the whole plan. Without a usable
 plan the short spec is used, as before.
 
+**Review.** The same Opus model then reviews the finished change, reading the repository
+rather than only the diff, again with its edit tools off; anything a command it runs
+changes is put back. It checks the plan's acceptance criteria and also whether the change
+will work once deployed when the plan says nothing about it: a setting passed to its
+service in `compose.remote.yaml`, a migration, an outside API's known cases. It shares
+`ASSISTANT_CODING_PLAN_TIMEOUT_SECONDS`. When it gives no usable verdict, the diff-only
+reviewer on the conversation model takes over.
+
 `ASSISTANT_CODING_SPEC_ENABLED`, `ASSISTANT_CODING_REVIEW_ENABLED` and
 `ASSISTANT_CODING_PLANNER_TIMEOUT_SECONDS` control them. The coding worker needs the same
 conversation-model settings as the API, because that model does both jobs.

@@ -29,7 +29,7 @@ from app.coding.base import CodeAgentRunner
 from app.coding.executor import CodingPullRequestExecutor, RepositoryCodingExecutor
 from app.coding.plan import ClaudePlanner
 from app.coding.reconcile import PullRequestReconciler
-from app.coding.review import DiffReviewer
+from app.coding.review import ClaudeReviewer, DiffReviewer
 from app.coding.runners import (
     DEFAULT_KIMI_CODE_MODEL,
     ClaudeCodeRunner,
@@ -120,18 +120,26 @@ def build_coding_executor(
     )
     spec_writer = SpecWriter(planner) if planner and settings.coding_spec_enabled else None
     reviewer = DiffReviewer(planner) if planner and settings.coding_review_enabled else None
-    plan_writer = (
-        ClaudePlanner(
-            ClaudeCodeRunner.subscription(
-                oauth_token=settings.claude_code_oauth_token,
-                executable=settings.claude_code_executable,
-                model=settings.coding_plan_model,
-            ),
-            timeout_seconds=settings.coding_plan_timeout_seconds,
+    strong_model = (
+        ClaudeCodeRunner.subscription(
+            oauth_token=settings.claude_code_oauth_token,
+            executable=settings.claude_code_executable,
+            model=settings.coding_plan_model,
         )
         if settings.coding_plan_model and settings.claude_code_oauth_token
         else None
     )
+    plan_writer = (
+        ClaudePlanner(strong_model, timeout_seconds=settings.coding_plan_timeout_seconds)
+        if strong_model
+        else None
+    )
+    if strong_model and settings.coding_review_enabled:
+        # The planning model also reviews, reading the repository; the diff-only
+        # reviewer steps in when it doesn't answer.
+        reviewer = ClaudeReviewer(
+            strong_model, timeout_seconds=settings.coding_plan_timeout_seconds, fallback=reviewer
+        )
     executors: dict[str, CodingPullRequestExecutor] = {}
     for manifest in registry.list():
         configured_path = os.getenv(manifest.path_env)

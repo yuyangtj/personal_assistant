@@ -43,6 +43,12 @@ Make the plan concrete enough that each step needs no further design:
   functions, classes, settings or prompts to add or change, their names and behaviour,
   and which existing code to reuse or follow as the pattern.
 - Put tests in the step whose code they test, and name the test file.
+- Include the wiring the change needs to work on the server even when the request
+  doesn't mention it (AGENTS.md lists it: a setting in compose.remote.yaml and
+  .env.remote.example, a migration, a Dockerfile COPY, the docs).
+- When the change calls an outside API, list in the step that calls it the API's known
+  pitfalls and how to handle and test each: pagination, items only visible with extra
+  parameters, error codes that mean more than one thing, rate limits, token expiry.
 - Cover only what the request asks for; don't add features.
 
 When done, reply with only a JSON object:

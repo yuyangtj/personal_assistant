@@ -767,7 +767,9 @@ class CodingPullRequestExecutor:
             if is_cancelled():
                 raise ExecutionCancelled("Coding task was cancelled")
             report_milestone(progress, "Reviewing the change against the spec")
-            verdict = self.reviewer.review(reference, worktree, validation)
+            verdict = self.reviewer.review(
+                reference, worktree, validation, is_cancelled=is_cancelled
+            )
             if is_cancelled():  # a review can take a while
                 raise ExecutionCancelled("Coding task was cancelled")
             if verdict is None:
