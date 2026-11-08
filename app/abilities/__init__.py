@@ -36,6 +36,7 @@ class AbilityKind(StrEnum):
 REQUIREMENTS: dict[str, Callable[[Any], bool]] = {
     "github_token": lambda settings: bool(settings.github_token),
     "web_search": lambda settings: settings.web_search_available,
+    "google_drive": lambda settings: settings.google_drive_available,
 }
 
 #: How each band is introduced to the model, in this order.
@@ -57,7 +58,7 @@ class Ability(BaseModel):
     example: str | None = Field(default=None, max_length=120)
     kind: AbilityKind
     band: Band
-    requires: tuple[Literal["github_token", "web_search"], ...] = ()
+    requires: tuple[Literal["github_token", "web_search", "google_drive"], ...] = ()
     order: int = 100
 
     def available(self, settings: Any) -> bool:

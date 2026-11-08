@@ -12,10 +12,10 @@ server.
 ## How it works
 
 - **One assistant.** Every message goes to one chat agent with tools: lists, memories,
-  reminders, routines, notes (save only), shopping, research, reading code, and coding runs.
-  It sees the whole conversation, so "yes please do" means what it just offered. Only
-  "note: …" is saved without a model. Replies may carry suggestion buttons; tapping one
-  just says it.
+  reminders, routines, notes (save only), shopping, research, reading code, Google Drive
+  (read-only), and coding runs. It sees the whole conversation, so "yes please do" means
+  what it just offered. Only "note: …" is saved without a model. Replies may carry
+  suggestion buttons; tapping one just says it.
 - **Coding runs** are started, checked, steered and stopped by the agent's tools.
 - **Coding agents** (Kimi Code, with Claude Code on MiniMax as fallback) work in isolated
   worktrees, two at a time. Their plan and steps stream back live. Each opens a draft PR,
@@ -86,6 +86,17 @@ browser tests (`tests/ui`) start the app on a free port and drive the real conso
 Chromium; they are left out of the plain `pytest` run (set `UI_BROWSER_CHANNEL=chrome` to
 use the Chrome you already have). CI runs everything on every pull request, the browser
 tests as their own `ui` job.
+
+## Google Drive
+
+The assistant can list a Drive folder or read a file's text (a Google Doc or Sheet is
+exported as text) when given a Drive link or id, read-only, as the user's own Google
+account. It needs an OAuth client (Google Cloud Console, Drive API enabled, scope
+`drive.readonly`) and a refresh token for that account; set `GOOGLE_DRIVE_CLIENT_ID`,
+`GOOGLE_DRIVE_CLIENT_SECRET` and `GOOGLE_DRIVE_REFRESH_TOKEN` (see `.env.example`). Without
+them the ability is simply off. A file the credentials can't access comes back as a clear
+message instead of an error. Publish the OAuth app in Google Cloud Console ("In
+production"); while it is in "Testing", Google expires the refresh token after 7 days.
 
 ## Deploy
 

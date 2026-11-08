@@ -17,6 +17,7 @@ from app.assistant.toolbox import Toolbox
 from app.assistant.tools import (
     bookkeeping_tools,
     coding_tools,
+    drive_tools,
     job_tools,
     overview_tools,
     repository_tools,
@@ -55,6 +56,7 @@ from app.repositories.briefs import RepositoryBriefs
 from app.repositories.reader import RepositoryReader
 from app.schedules import Scheduler, ScheduleService
 from app.services import TaskService
+from app.tools.drive import GoogleDriveClient, GoogleDriveReader
 from app.tools.klarna import KlarnaTools, ToolGateway
 from app.tools.mcp import McpGateway, Toolset
 from app.tools.search import build_search
@@ -358,6 +360,19 @@ def shopping_tools(settings: Settings, database: Database) -> tuple[ToolGateway,
     )
 
 
+def build_drive_client(settings: Settings) -> GoogleDriveClient | None:
+    """A Google Drive client from the configured OAuth credentials, or None without them."""
+    if not settings.google_drive_available:
+        return None
+    return GoogleDriveClient(
+        client_id=settings.google_drive_client_id,
+        client_secret=settings.google_drive_client_secret,
+        refresh_token=settings.google_drive_refresh_token,
+        base_url=settings.google_drive_api_base_url,
+        timeout_seconds=settings.google_drive_timeout_seconds,
+    )
+
+
 def build_toolbox(
     settings: Settings,
     database: Database,
@@ -367,6 +382,7 @@ def build_toolbox(
     github: GitHubClient | None,
     *,
     abilities: set[str],
+    drive: GoogleDriveClient | None = None,
 ) -> Toolbox:
     """The chat agent's tools, limited to the abilities this server has."""
     tools = bookkeeping_tools(
@@ -378,6 +394,8 @@ def build_toolbox(
     )
     if github is not None:
         tools += repository_tools(RepositoryReader(repositories, github))
+    if drive is not None:
+        tools += drive_tools(GoogleDriveReader(drive))
     # The shopping tools themselves (Klarna, the stores); not on coding-only workers.
     shopping = (
         [] if settings.worker_coding_only else store_tools(*shopping_tools(settings, database))
@@ -423,6 +441,7 @@ def add_chat_executors(
             repositories,
             github,
             abilities={ability.id for ability in abilities},
+            drive=build_drive_client(settings),
         )
         logger.info("Chat agent tools: %s", ", ".join(conversation_executor.toolbox.names))
     if conversation_executor is not None:

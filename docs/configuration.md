@@ -22,6 +22,7 @@ Newer settings, all optional:
 | `ASSISTANT_CODING_REVIEW_ENABLED` | `true` | The diff is reviewed against the spec before the pull request opens |
 | `ASSISTANT_CODING_PLANNER_TIMEOUT_SECONDS` | `90` | How long the spec writer or reviewer may take; on a failure the task runs without them |
 | `DEEPSEEK_API_KEY` / `TAVILY_API_KEY` / `BRAVE_SEARCH_API_KEY` | unset | Enables the web research agent; the first one set is used, in this order |
+| `GOOGLE_DRIVE_CLIENT_ID` / `GOOGLE_DRIVE_CLIENT_SECRET` / `GOOGLE_DRIVE_REFRESH_TOKEN` | unset | Read-only Google Drive for the chat agent; all three are needed. Publish the OAuth app, or Google expires the refresh token after 7 days |
 | `ASSISTANT_NTFY_TOPIC_URL` | unset | Push notifications through ntfy |
 
 ## Coding agent and GitHub review workflow
