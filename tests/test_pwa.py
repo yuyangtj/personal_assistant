@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 
@@ -61,3 +63,15 @@ def test_the_console_can_stop_and_mute_spoken_replies(client: TestClient) -> Non
 
     assert 'id="stop-speaking"' in page and 'id="mute-voice"' in page
     assert '"stop_speaking"' in script and "assistantMuted" in script
+
+
+def test_the_privacy_policy_is_public(client: TestClient) -> None:
+    response = client.get("/privacy", follow_redirects=False)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "drive.readonly" in response.text
+
+    caddyfile = (Path(__file__).resolve().parents[1] / "deploy" / "Caddyfile").read_text()
+    (private,) = [line for line in caddyfile.splitlines() if "@private not path" in line]
+    assert "/privacy" in private.split()

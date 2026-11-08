@@ -130,6 +130,16 @@ def android_app_links() -> FileResponse:
     return FileResponse(WEB_DIRECTORY / "assetlinks.json", media_type="application/json")
 
 
+@router.get("/privacy", include_in_schema=False)
+def privacy_policy() -> FileResponse:
+    """The privacy policy Google's OAuth consent screen links to; public, like the icons."""
+    return FileResponse(
+        WEB_DIRECTORY / "privacy.html",
+        media_type="text/html",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 @router.get("/", include_in_schema=False)
 def web_console_root(request: Request) -> RedirectResponse:
     # Keep the query: push notifications link to /?task=<id>.
