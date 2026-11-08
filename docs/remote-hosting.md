@@ -424,51 +424,30 @@ volumes.
 
 Every merge to `main` deploys itself once CI has passed on it: reviewing and merging the
 pull request is the approval. `.github/workflows/deploy.yml` runs after the `CI`
-workflow succeeds for a push to `main`, SSHes to the server with a key that can do one
-thing, and waits for the outcome, printing the deploy log. A failed or rolled-back
+workflow succeeds for a push to `main` and asks the site, over HTTPS, to deploy that
+commit. It waits for the outcome and prints the deploy log; a failed or rolled-back
 deploy turns the run red.
 
-The key is pinned to `scripts/ci-deploy.sh` (a forced command), so it can't open a shell
-or run anything else. The script accepts only `deploy <sha> [force]` and:
+GitHub's runners can't reach SSH (the firewall allows only your address), and nothing
+is stored in GitHub. The run's only credential is a short-lived token GitHub signs for
+it (OpenID Connect, `permissions: id-token: write`). `POST /deploy/github` accepts it
+only if it is signed by GitHub, meant for this site (`ASSISTANT_GITHUB_DEPLOY_AUDIENCE`,
+set from the domain in `compose.remote.yaml`), and names this repository, `main`, the
+`deploy.yml` workflow and the `production` environment. Caddy leaves `/deploy/github`
+public for that reason; everything there checks the token first.
 
-1. Skips the commit if `main` has moved past it; the newer commit deploys in its own
-   run (and `redeploy-remote.sh` refuses anything but `main`'s head).
-2. Waits, up to an hour, while a coding run is executing, because a rollout restarts
-   the coding worker. `force` doesn't wait.
-3. Writes a request into the host deployer's spool, the same route as the console, so
-   deploys share one lock, the logs, rollback and status files.
-4. Streams `logs/<run>.log` and exits 0 when deployed, 3 when rolled back, 1 on failure.
+The request then becomes an ordinary deployment workflow run, approved "by
+github-actions run <id>", and goes through the same checks as one from the console:
+
+1. A commit `main` has moved past is skipped; the newer commit deploys in its own run.
+2. While a coding run is executing the site answers 409, and the workflow asks again
+   every 30 seconds for up to an hour; a rollout would restart the coding worker.
+3. The host deployer builds, checks health and rolls back as usual.
+   `GET /deploy/github/<run>` reports the status and the end of the deploy log.
 
 To redeploy by hand, open **Actions → deploy → Run workflow** (empty commit = `main`'s
 head; tick *force* to interrupt a coding run). To pause automatic deploys, disable the
 `deploy` workflow in the Actions tab.
-
-### Setting up the key
-
-On your laptop, make a key used only for this:
-
-```bash
-ssh-keygen -t ed25519 -N '' -C github-actions-deploy -f deploy_key
-```
-
-On the server, as root, add the public key to the deploy user's `authorized_keys` with
-the forced command, on one line:
-
-```
-restrict,command="/srv/personal-assistant/app/scripts/ci-deploy.sh" ssh-ed25519 AAAA... github-actions-deploy
-```
-
-In GitHub, **Settings → Environments → production**, add these secrets:
-
-| Secret | Value |
-| --- | --- |
-| `DEPLOY_SSH_PRIVATE_KEY` | The contents of `deploy_key` |
-| `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan -t ed25519 <server-ip>`, checked against `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server |
-| `DEPLOY_HOST` | The server's IP |
-| `DEPLOY_USER` | The deploy user |
-
-Then delete `deploy_key` from your laptop. To revoke the route, remove the line from
-`authorized_keys`.
 
 ## Command reference
 

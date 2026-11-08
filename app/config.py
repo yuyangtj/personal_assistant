@@ -47,6 +47,9 @@ class Settings:
     #: Unset: the console shows its own drawn avatar instead.
     avatar_assets_dir: Path | None = None
     deploy_spool_directory: Path | None = None
+    #: The site's URL: GitHub Actions' deploy workflow sends a token for this audience to
+    #: /deploy/github (unset: that endpoint is off).
+    github_deploy_audience: str | None = None
     brief_writeback_enabled: bool = False
     ntfy_topic_url: str | None = None
     #: Web search for the research agent: DeepSeek, Tavily or Brave, the first key set wins.

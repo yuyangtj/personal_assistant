@@ -497,6 +497,11 @@ class WorkflowService:
             raise WorkflowRunConflictError("Deployment registry is not configured")
         return self.deployment_registry.get(str(run.workflow_input["deployment_target_id"]))
 
+    def coding_run_in_progress(self) -> bool:
+        """Whether a coding run is executing (a rollout would restart its worker)."""
+        with self.database.session() as session:
+            return self._coding_run_in_progress(session)
+
     @staticmethod
     def _coding_run_in_progress(session) -> bool:
         return (

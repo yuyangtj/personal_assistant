@@ -4,8 +4,9 @@
 	# Health, the app manifest, icons, service worker, Android app-links file and privacy
 	# policy are public: phones fetch assets before signing in, deployment checks the public
 	# health path, and Google's OAuth consent screen links to the privacy policy. They hold
-	# nothing private; everything else needs the console login.
-	@private not path /health /manifest.webmanifest /sw.js /icons/* /.well-known/assetlinks.json /privacy
+	# nothing private. /deploy/github authenticates each request itself with a token GitHub
+	# signs for the deploy workflow. Everything else needs the console login.
+	@private not path /health /manifest.webmanifest /sw.js /icons/* /.well-known/assetlinks.json /privacy /deploy/github /deploy/github/*
 	basic_auth @private {
 		{$ASSISTANT_WEB_USER} {$ASSISTANT_WEB_PASSWORD_HASH}
 	}
